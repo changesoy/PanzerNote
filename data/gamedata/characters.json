@@ -1,0 +1,221 @@
+{
+  "version": "1.0",
+  "characters": [
+    {
+      "id": "char_001",
+      "name": "虎王",
+      "name_en": "Tiger II",
+      "type": "heavy",
+      "nation": "G",
+      "rarity": 5,
+      "build_time_minutes": 300,
+      "threshold": {
+        "total": 1800,
+        "fuel": 500,
+        "steel": 800
+      },
+      "description": "德国重型坦克，火力强大，装甲厚实。",
+      "portrait": "portraits/char_001.png",
+      "portrait_remodel": "portraits/char_001_remodel.png",
+      "voice_intro": "voices/char_001_intro.mp3"
+    },
+    {
+      "id": "char_002",
+      "name": "豹式",
+      "name_en": "Panther",
+      "type": "medium",
+      "nation": "G",
+      "rarity": 4,
+      "build_time_minutes": 180,
+      "threshold": {
+        "total": 1200,
+        "fuel": 400,
+        "steel": 500
+      },
+      "description": "德国中型坦克，机动性与火力兼备。",
+      "portrait": "portraits/char_002.png",
+      "voice_intro": "voices/char_002_intro.mp3"
+    },
+    {
+      "id": "char_003",
+      "name": "四号",
+      "name_en": "Panzer IV",
+      "type": "medium",
+      "nation": "G",
+      "rarity": 3,
+      "build_time_minutes": 90,
+      "threshold": {
+        "total": 600,
+        "fuel": 200,
+        "steel": 250
+      },
+      "description": "德国中型坦克，德军主力战车。",
+      "portrait": "portraits/char_003.png",
+      "voice_intro": "voices/char_003_intro.mp3"
+    },
+    {
+      "id": "char_004",
+      "name": "三号",
+      "name_en": "Panzer III",
+      "type": "medium",
+      "nation": "G",
+      "rarity": 2,
+      "build_time_minutes": 60,
+      "threshold": {
+        "total": 400,
+        "fuel": 150,
+        "steel": 150
+      },
+      "description": "德国中型坦克，早期主力。",
+      "portrait": "portraits/char_004.png",
+      "voice_intro": "voices/char_004_intro.mp3"
+    },
+    {
+      "id": "char_005",
+      "name": "二号",
+      "name_en": "Panzer II",
+      "type": "light",
+      "nation": "G",
+      "rarity": 1,
+      "build_time_minutes": 30,
+      "threshold": {
+        "total": 200,
+        "fuel": 80,
+        "steel": 60
+      },
+      "description": "德国轻型坦克，侦察用途。",
+      "portrait": "portraits/char_005.png",
+      "voice_intro": "voices/char_005_intro.mp3"
+    },
+    {
+      "id": "char_006",
+      "name": "T-34",
+      "name_en": "T-34",
+      "type": "medium",
+      "nation": "S",
+      "rarity": 3,
+      "build_time_minutes": 100,
+      "threshold": {
+        "total": 700,
+        "fuel": 250,
+        "steel": 300
+      },
+      "description": "苏联中型坦克，二战最成功的坦克之一。",
+      "portrait": "portraits/char_006.png",
+      "voice_intro": "voices/char_006_intro.mp3"
+    },
+    {
+      "id": "char_007",
+      "name": "谢尔曼",
+      "name_en": "M4 Sherman",
+      "type": "medium",
+      "nation": "U",
+      "rarity": 3,
+      "build_time_minutes": 90,
+      "threshold": {
+        "total": 650,
+        "fuel": 220,
+        "steel": 280
+      },
+      "description": "美国中型坦克，产量巨大。",
+      "portrait": "portraits/char_007.png",
+      "voice_intro": "voices/char_007_intro.mp3"
+    },
+    {
+      "id": "char_008",
+      "name": "IS-2",
+      "name_en": "IS-2",
+      "type": "heavy",
+      "nation": "S",
+      "rarity": 4,
+      "build_time_minutes": 240,
+      "threshold": {
+        "total": 1500,
+        "fuel": 450,
+        "steel": 700
+      },
+      "description": "苏联重型坦克，斯大林之名。",
+      "portrait": "portraits/char_008.png",
+      "voice_intro": "voices/char_008_intro.mp3"
+    },
+    {
+      "id": "char_009",
+      "name": "鼠式",
+      "name_en": "Maus",
+      "type": "super_heavy",
+      "nation": "G",
+      "rarity": 6,
+      "build_time_minutes": 480,
+      "threshold": {
+        "total": 3000,
+        "fuel": 800,
+        "steel": 1500,
+        "bauxite": 200
+      },
+      "description": "德国超重型坦克，史上最重的量产坦克。",
+      "portrait": "portraits/char_009.png",
+      "voice_intro": "voices/char_009_intro.mp3"
+    },
+    {
+      "id": "char_010",
+      "name": "丘吉尔",
+      "name_en": "Churchill",
+      "type": "heavy",
+      "nation": "E",
+      "rarity": 3,
+      "build_time_minutes": 150,
+      "threshold": {
+        "total": 900,
+        "fuel": 300,
+        "steel": 450
+      },
+      "description": "英国重型坦克，装甲厚实。",
+      "portrait": "portraits/char_010.png",
+      "voice_intro": "voices/char_010_intro.mp3"
+    }
+  ],
+  "types": {
+    "light": {
+      "name": "轻型坦克",
+      "color": "#4CAF50"
+    },
+    "medium": {
+      "name": "中型坦克", 
+      "color": "#2196F3"
+    },
+    "heavy": {
+      "name": "重型坦克",
+      "color": "#FF9800"
+    },
+    "super_heavy": {
+      "name": "超重型坦克",
+      "color": "#9C27B0"
+    },
+    "td": {
+      "name": "坦克歼击车",
+      "color": "#F44336"
+    },
+    "spg": {
+      "name": "自行火炮",
+      "color": "#795548"
+    }
+  },
+  "nations": {
+    "G": "德国",
+    "S": "苏联",
+    "U": "美国",
+    "E": "英国",
+    "J": "日本",
+    "F": "法国",
+    "C": "中国",
+    "I": "意大利"
+  },
+  "rarities": {
+    "1": {"name": "普通", "stars": 1, "color": "#9E9E9E"},
+    "2": {"name": "稀有", "stars": 2, "color": "#4CAF50"},
+    "3": {"name": "精锐", "stars": 3, "color": "#2196F3"},
+    "4": {"name": "史诗", "stars": 4, "color": "#9C27B0"},
+    "5": {"name": "传奇", "stars": 5, "color": "#FF9800"},
+    "6": {"name": "神话", "stars": 6, "color": "#F44336"}
+  }
+}

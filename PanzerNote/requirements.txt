@@ -1,0 +1,5 @@
+# PanzerNote 依赖
+PyQt5>=5.15
+Pygments>=2.15
+markdown>=3.4.0
+Pillow>=9.0.0

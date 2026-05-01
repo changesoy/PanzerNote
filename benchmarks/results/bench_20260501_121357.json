@@ -1,0 +1,68 @@
+{
+  "timestamp": "2026-05-01T12:13:57.308375",
+  "results": [
+    {
+      "name": "file_open",
+      "timestamp": "2026-05-01T12:12:43.813196",
+      "metrics": {
+        "small_avg_ms": 222.48,
+        "small_min_ms": 43.81,
+        "small_max_ms": 576.46,
+        "medium_avg_ms": 752.15,
+        "medium_min_ms": 723.34,
+        "medium_max_ms": 795.78,
+        "large_avg_ms": 8484.21,
+        "large_min_ms": 8015.85,
+        "large_max_ms": 9230.42
+      }
+    },
+    {
+      "name": "滚动FPS",
+      "timestamp": "2026-05-01T12:13:12.643413",
+      "metrics": {
+        "error": "cannot import name 'QPoint' from 'PyQt5.QtGui' (C:\\Users\\chang\\PycharmProjects\\PanzerNote\\.venv\\Lib\\site-packages\\PyQt5\\QtGui.pyd)"
+      }
+    },
+    {
+      "name": "minimap_render",
+      "timestamp": "2026-05-01T12:13:12.643413",
+      "metrics": {
+        "small_avg_ms": 41.37,
+        "small_min_ms": 37.38,
+        "medium_avg_ms": 73.29,
+        "medium_min_ms": 50.19,
+        "large_avg_ms": 55.09,
+        "large_min_ms": 51.23
+      }
+    },
+    {
+      "name": "highlight_code",
+      "timestamp": "2026-05-01T12:13:22.383873",
+      "metrics": {
+        "available": true,
+        "small_avg_ms": 42.34,
+        "medium_avg_ms": 458.03
+      }
+    },
+    {
+      "name": "memory_usage",
+      "timestamp": "2026-05-01T12:13:23.888330",
+      "metrics": {
+        "small_current_mb": 0.06,
+        "small_peak_mb": 0.06,
+        "medium_current_mb": 0.06,
+        "medium_peak_mb": 0.09,
+        "large_current_mb": 0.05,
+        "large_peak_mb": 0.09
+      }
+    },
+    {
+      "name": "startup",
+      "timestamp": "2026-05-01T12:13:54.813608",
+      "metrics": {
+        "cold_start_avg_ms": 826.67,
+        "cold_start_min_ms": 600.66
+      }
+    }
+  ]
+}

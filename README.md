@@ -1,4 +1,4 @@
-# PanzerNote v1.6.1
+# PanzerNote v1.6.2
 
 一款以《战车少女》为主题的笔记工具。通过书写获取资源，建造收集角色，点亮完整图鉴。
 
@@ -12,6 +12,7 @@
 ## 功能特性
 
 ### 记事本功能
+
 - **多标签编辑**：同时打开多个文件，支持标签页拖拽排序，**可拖拽标签到文件树移动文件**
 - **语法高亮**：基于Pygments，支持Python、C/C++、Java、JavaScript、JSON、HTML、CSS、XML等30+语言，PyCharm风格配色
 - **Markdown分屏预览**：打开.md文件自动启用左编辑右预览的分屏模式，实时同步渲染，**支持本地图片引用**（`![](./img.png)` 自动解析）
@@ -42,6 +43,7 @@
 - **记事本设置**：统一的设置对话框，可配置行号、高亮、缩略图、字体、字体大小、括号配对、自动保存间隔等
 
 ### 游戏系统
+
 - **资源获取**：
   - 在线挂机：燃料/弹药/钢材每分钟+5，铝材每3分钟+5
   - 离线挂机：收益为在线的1/3（向大取整），最多24小时
@@ -51,7 +53,9 @@
 - **小秘书**：右下角显示角色立绘和台词气泡，点击互动
 
 ### 小秘书立绘系统
+
 立绘文件放在 `data/assets/portraits/` 目录下：
+
 ```
 portraits/
 ├── secretary.png              ← 默认立绘
@@ -72,42 +76,89 @@ portraits/
 ## 安装与运行
 
 ### 环境要求
+
 - Python 3.8+
 - Windows 10/11
 
 ### 安装依赖
+
 ```bash
-pip install PyQt5 Pygments markdown
-pip install PyQtWebEngine
+pip install -r requirements.txt
+pip install PyQtWebEngine  # 可选，Markdown预览用QWebEngineView（否则退化为QTextBrowser）
 ```
 
 ### 运行
+
 ```bash
 python main.py
 ```
 
 ## 目录结构
+
 ```
 PanzerNote/
 ├── main.py                    # 程序入口
 ├── requirements.txt           # 依赖列表
+├── mypy.ini                   # mypy 类型检查配置
+├── pyproject.toml             # pytest 配置
+├── benchmarks/                # 性能基准测试
+│   ├── test_data_generator.py # 测试数据生成器
+│   ├── benchmark_runner.py    # 基准测试运行器
+│   └── run_baseline.py        # 基线测试入口
+├── tests/                     # 单元测试
+│   ├── test_logger.py
+│   ├── test_exceptions.py
+│   ├── test_event_bus.py
+│   ├── test_timer_manager.py
+│   ├── test_game_engine.py
+│   ├── test_menu_builder.py
+│   ├── test_editor_actions.py
+│   ├── test_auto_pair_handler.py
+│   ├── test_config.py
+│   ├── test_first_run_dialog.py
+│   ├── test_game_sidebar.py
+│   ├── test_highlight_themes.py
+│   ├── test_resource_bar.py
+│   ├── test_secretary_widget.py
+│   ├── test_status_bar.py
+│   └── test_syntax_highlighter.py
 ├── src/                       # 源代码
-│   ├── config.py              # 配置管理
-│   ├── main_window.py         # 主窗口
-│   ├── editor.py              # 文本编辑器（含行操作、大小写转换、格式化等）
-│   ├── editor_tabs.py         # 标签页管理
-│   ├── syntax_highlighter.py  # 语法高亮（Pygments / PyCharm配色）
-│   ├── highlight_themes.py    # 代码高亮主题管理（编辑器+预览统一配色）
-│   ├── markdown_preview.py    # Markdown分屏预览（含代码高亮+复制按钮+本地图片支持）
-│   ├── minimap.py             # 代码缩略图（Minimap）
-│   ├── find_replace.py        # 增强型查找替换栏
-│   ├── editor_settings_dialog.py  # 记事本设置对话框
-│   ├── file_tree.py           # 文件树
-│   ├── resource_bar.py        # 资源栏
-│   ├── game_sidebar.py        # 游戏侧边栏
-│   ├── secretary_widget.py    # 小秘书组件
-│   ├── status_bar.py          # 状态栏
-│   └── first_run_dialog.py    # 首次运行对话框
+│   ├── __init__.py            # 版本号定义
+│   ├── main_window.py         # 主窗口（677行，已拆分）
+│   ├── core/                  # 核心模块
+│   │   ├── config.py          # 配置管理
+│   │   ├── timer_manager.py   # 定时器管理中心
+│   │   ├── event_bus.py       # 事件路由系统
+│   │   └── menu_builder.py    # 菜单构建器
+│   ├── editor/                # 编辑器模块
+│   │   ├── editor.py          # 文本编辑器（546行，已拆分）
+│   │   ├── editor_tabs.py     # 标签页管理
+│   │   ├── editor_actions.py  # 行操作、大小写转换、格式化
+│   │   ├── auto_pair_handler.py # 括号/引号自动配对
+│   │   ├── virtual_scroll.py  # 虚拟滚动管理器
+│   │   ├── async_highlight.py # 异步代码高亮渲染器
+│   │   ├── incremental_renderer.py # Markdown增量渲染引擎
+│   │   ├── syntax_highlighter.py # 语法高亮
+│   │   ├── highlight_themes.py # 代码高亮主题管理
+│   │   ├── markdown_preview.py # Markdown分屏预览
+│   │   ├── minimap.py         # 代码缩略图（块级缓存渲染）
+│   │   ├── find_replace.py    # 增强型查找替换栏
+│   │   ├── editor_settings_dialog.py # 记事本设置对话框
+│   │   ├── file_tree.py       # 文件树
+│   │   └── status_bar.py      # 状态栏
+│   ├── game/                  # 游戏模块
+│   │   ├── game_engine.py     # 挂机收益计算引擎
+│   │   ├── resource_bar.py    # 资源栏
+│   │   ├── game_sidebar.py    # 游戏侧边栏
+│   │   └── secretary_widget.py # 小秘书组件
+│   ├── ui/                    # UI组件
+│   │   └── first_run_dialog.py # 首次运行对话框
+│   └── utils/                 # 工具模块
+│       ├── __init__.py        # 工具模块导出
+│       ├── logger.py          # 结构化日志系统
+│       ├── exceptions.py      # 统一异常处理 @safe_call
+│       ├── feature_flags.py   # Feature Flag 系统
+│       └── lazy_loader.py     # 模块懒加载与启动分析
 ├── data/
 │   ├── assets/portraits/      # 角色立绘
 │   ├── assets/icons/          # 图标
@@ -118,81 +169,116 @@ PanzerNote/
 ## 快捷键
 
 ### 文件操作
-| 快捷键 | 功能 |
-|--------|------|
-| Ctrl+N | 新建文件 |
-| Ctrl+O | 打开文件 |
-| Ctrl+S | 保存 |
-| Ctrl+Shift+S | 另存为 |
-| Ctrl+W | 关闭当前标签 |
+
+| 快捷键       | 功能         |
+| ------------ | ------------ |
+| Ctrl+N       | 新建文件     |
+| Ctrl+O       | 打开文件     |
+| Ctrl+S       | 保存         |
+| Ctrl+Shift+S | 另存为       |
+| Ctrl+W       | 关闭当前标签 |
 
 ### 编辑操作
-| 快捷键 | 功能 |
-|--------|------|
-| Ctrl+Z | 撤销 |
-| Ctrl+Y | 重做 |
-| Ctrl+X / C / V | 剪切 / 复制 / 粘贴 |
-| Ctrl+A | 全选 |
-| Tab / Shift+Tab | 增加 / 减少缩进 |
+
+| 快捷键          | 功能               |
+| --------------- | ------------------ |
+| Ctrl+Z          | 撤销               |
+| Ctrl+Y          | 重做               |
+| Ctrl+X / C / V  | 剪切 / 复制 / 粘贴 |
+| Ctrl+A          | 全选               |
+| Tab / Shift+Tab | 增加 / 减少缩进    |
 
 ### 查找与导航
-| 快捷键 | 功能 |
-|--------|------|
-| Ctrl+F | 查找 |
-| Ctrl+H | 替换 |
-| Ctrl+G | 转到行 |
+
+| 快捷键        | 功能                |
+| ------------- | ------------------- |
+| Ctrl+F        | 查找                |
+| Ctrl+H        | 替换                |
+| Ctrl+G        | 转到行              |
 | F3 / Shift+F3 | 查找下一个 / 上一个 |
 
 ### 行操作
-| 快捷键 | 功能 |
-|--------|------|
+
+| 快捷键       | 功能       |
+| ------------ | ---------- |
 | Ctrl+Shift+K | 删除当前行 |
-| Alt+↑ | 上移当前行 |
-| Alt+↓ | 下移当前行 |
+| Alt+↑        | 上移当前行 |
+| Alt+↓        | 下移当前行 |
 | Ctrl+Shift+D | 复制当前行 |
 
 ### 大小写转换
-| 快捷键 | 功能 |
-|--------|------|
+
+| 快捷键       | 功能                    |
+| ------------ | ----------------------- |
 | Ctrl+Shift+U | 切换大小写（大写↔小写） |
 
 ### 视图操作
-| 快捷键 | 功能 |
-|--------|------|
-| Ctrl+B | 折叠/展开文件树 |
-| Ctrl+M | 显示/隐藏代码缩略图 |
-| Ctrl+Shift+P | 切换Markdown预览 |
-| Ctrl++ / Ctrl+- | 放大 / 缩小 |
-| Ctrl+0 | 重置缩放 |
-| F11 | 全屏 |
+
+| 快捷键          | 功能                |
+| --------------- | ------------------- |
+| Ctrl+B          | 折叠/展开文件树     |
+| Ctrl+M          | 显示/隐藏代码缩略图 |
+| Ctrl+Shift+P    | 切换Markdown预览    |
+| Ctrl++ / Ctrl+- | 放大 / 缩小         |
+| Ctrl+0          | 重置缩放            |
+| F11             | 全屏                |
 
 ## 设置项
 
 可在「设置 → 记事本设置」对话框中配置：
 
-| 设置项 | 说明 | 默认值 |
-|--------|------|--------|
-| 显示行号 | 编辑器左侧显示行号 | 开启 |
-| 高亮当前行 | 当前光标所在行浅黄色背景 | 开启 |
-| 显示缩略图 | 编辑器右侧代码缩略图 | 开启 |
-| 自动开关缩略图 | 勾选后.txt和.md不显示缩略图 | 关闭 |
-| 括号/引号自动配对 | 输入英文/中文括号与引号时自动补全 | 开启 |
-| 字体 | 从本地字体库选择编辑器字体 | Microsoft YaHei |
-| 字体大小 | 编辑器字体大小 | 12pt |
-| 行宽模式 | 不换行 / 限制行宽 | 不换行 |
-| 自动保存间隔 | 自动暂存间隔（秒） | 30秒 |
-| 代码高亮主题 | 需在 `settings.json` 中配置 | `"pycharm_light"` |
+| 设置项            | 说明                              | 默认值            |
+| ----------------- | --------------------------------- | ----------------- |
+| 显示行号          | 编辑器左侧显示行号                | 开启              |
+| 高亮当前行        | 当前光标所在行浅黄色背景          | 开启              |
+| 显示缩略图        | 编辑器右侧代码缩略图              | 开启              |
+| 自动开关缩略图    | 勾选后.txt和.md不显示缩略图       | 关闭              |
+| 括号/引号自动配对 | 输入英文/中文括号与引号时自动补全 | 开启              |
+| 字体              | 从本地字体库选择编辑器字体        | Microsoft YaHei   |
+| 字体大小          | 编辑器字体大小                    | 12pt              |
+| 行宽模式          | 不换行 / 限制行宽                 | 不换行            |
+| 自动保存间隔      | 自动暂存间隔（秒）                | 30秒              |
+| 代码高亮主题      | 需在 `settings.json` 中配置       | `"pycharm_light"` |
 
 新增主题：在 `src/highlight_themes.py` 的 `THEMES` 字典中添加条目即可。
 
 ## 更新日志
 
+### v1.6.2
+
+**阶段一：基础设施与代码质量重构**
+
+- **结构化日志系统**：新建 `utils/logger.py`，统一日志级别（DEBUG/INFO/WARNING/ERROR）、格式（时间戳+模块+级别+消息）、输出位置（控制台 + 滚动文件，单文件最大5MB，保留3个备份）。日志目录自动创建，集成到 `main.py` 启动流程
+- **统一异常处理装饰器 `@safe_call`**：新建 `utils/exceptions.py`，实现 `@safe_call` 装饰器自动捕获异常并记录日志。替换项目中所有 `except Exception: pass` 和 `except: pass` 模式，确保异常不再被静默吞掉。修复了重构过程中发现的 `QMessageBox` 参数错误
+- **main_window.py 模块拆分**（1099行 → 677行）：
+  - `game/game_engine.py`：挂机收益计算引擎（在线/离线奖励、资源上限检查）
+  - `core/timer_manager.py`：定时器管理中心（自动保存、统计更新、挂机奖励定时器统一管理）
+  - `core/event_bus.py`：事件路由系统（信号连接集中管理，解耦各模块间通信）
+  - `core/menu_builder.py`：菜单构建器（菜单栏构建逻辑提取，支持动态菜单项）
+- **editor.py 模块拆分**（1152行 → 546行）：
+  - `editor/editor_actions.py`：行操作（删除/上移/下移/复制行）、大小写转换、JSON/XML格式化
+  - `editor/auto_pair_handler.py`：括号/引号自动配对逻辑（Mixin模式，支持中英文标点）
+- **类型提示与 mypy 集成**：为所有重构模块添加完整类型提示，创建 `mypy.ini` 配置文件，配置 Mixin 模式的类型检查豁免规则
+- **pytest 测试框架搭建**：安装 pytest/pytest-cov/pytest-qt，创建 `pyproject.toml` 配置，编写 187 个单元测试覆盖所有重构模块，核心模块覆盖率达 30.7%
+
+**阶段二：性能优化攻坚**
+
+- **editor.py 虚拟滚动**：新建 `editor/virtual_scroll.py`，实现 `VirtualScrollManager`。仅渲染当前可视区域内容，上下各保留 BUFFER_LINES 行缓冲区。大文件（≥50000行）自动启用延迟语法高亮，仅高亮可视区域及缓冲区内的代码块。滚动时通过 `QTimer.singleShot` 延迟触发高亮更新，避免滚动过程中阻塞渲染
+- **minimap.py 渲染优化**：重构 `_render_content()` 方法，实现块级缓存（BLOCK_SIZE=50行/块）+ 批量渲染。使用 `QPicture` 缓存每个块的渲染结果，仅在内容变更时标记对应缓存块为脏块并重新渲染。将逐字符渲染改为按颜色分段批量绘制，显著减少 `QPainter` 状态切换次数
+- **highlight_code_html() 异步渲染**：新建 `editor/async_highlight.py`，实现 `HighlightWorker`（QThread）和 `AsyncHighlightRenderer`。渲染工作在后台线程执行，主线程通过 `Qt.ConnectionType.QueuedConnection` 信号接收结果。支持最多 2 个并发渲染线程、任务优先级队列、10秒超时自动取消、渲染结果 LRU 缓存（50条）。集成到 `markdown_preview.py`，先渲染占位符再异步替换高亮结果
+- **markdown_preview.py 增量渲染优化**：新建 `editor/incremental_renderer.py`，实现 `IncrementalRenderer` 和 `LRUCache`。基于 MD5 哈希的渲染结果缓存（容量50），相同文本直接返回缓存。行级变更检测，仅当文本实际变更时才重新调用渲染函数。代码块懒加载：异步模式下先显示纯文本占位，高亮完成后替换
+- **应用启动性能优化**：新建 `utils/lazy_loader.py`，实现 `StartupProfiler` 启动性能分析器和 `LazyLoader` 模块懒加载管理器。`main.py` 中延迟导入 MainWindow，各初始化阶段加入性能分析标记。`_restore_state()` 改为延迟打开文件：先打开第一个文件使窗口快速呈现，剩余文件通过 `QTimer.singleShot(0)` 在事件循环空闲时逐个加载
+- **性能基准测试体系**：创建 `benchmarks/` 目录，包含 `test_data_generator.py`（生成小型500行/中型5000行/大型50000行测试文件）和 `run_baseline.py`（自动化基准测试运行器）。测量指标包括：文件打开时间、滚动FPS、缩略图渲染时间、代码高亮时间、内存占用、启动时间
+- **Feature Flag 系统**：新建 `utils/feature_flags.py`，实现 5 个性能优化开关（`virtual_scroll`/`minimap_block_cache`/`async_highlight`/`markdown_incremental`/`lazy_loading`），默认全部关闭使用旧有实现路径。配置持久化到 `feature_flags.json`，支持运行时动态切换
+
 ### v1.6.1
+
 - **修复：括号/引号自动配对崩溃bug**：修复在两字符中间输入括号后删除再输入中文引号时程序崩溃的严重问题（退出码 0xC0000409），将内联函数 `_pick_single_cjk_quote` 提取为类方法以解决作用域冲突
 - **修复：自动配对触发条件过于宽松**：将"任意一侧有括号/引号就自动配对"改为"仅当光标左右恰好是互相匹配的一对符号时才自动配对"，避免在 `）你` 等单侧括号/引号旁误触发配对
 - **新增：智能光标定位**：在单独左括号/引号（如 `(`）后输入对应右括号/引号（如 `)`）时，自动将光标移到符号中间，方便连续输入
 
 ### v1.6
+
 - **新增：括号/引号自动配对：支持英文 () [] {} "" '' 与中文 （）【】「」『』《》〈〉“”‘’；中文输入法（IME）输入中文标点同样生效；支持“已有配对符号之间继续输入并自动补全”的嵌套输入；右括号/右引号可跳过已有同字符；Backspace 支持成对删除；选中文本时输入括号/引号会自动包裹选区；可在记事本设置中开关**
 - **新增：行操作快捷键**：
   - `Ctrl+Shift+K`：删除当前行
@@ -208,6 +294,7 @@ PanzerNote/
 - **新增：JSON/XML格式化**：当打开 JSON 或 XML/HTML 文件时，右键菜单显示「格式化文档」选项，一键美化缩进；JSON格式化后缩进为4空格，XML格式化后缩进为2空格
 
 ### v1.5.5
+
 - **修复：显示行号开关生效**：记事本设置中的「显示行号」开关现在可以正确控制行号显示/隐藏，修改后即时生效
 - **修复：高亮当前行开关生效**：记事本设置中的「高亮当前行」开关现在可以正确控制当前行高亮，修改后即时生效
 - **修复：字体大小设置生效**：记事本设置中修改字体大小后立即应用到所有已打开的编辑器（此前仅「视图→缩放」有效）
@@ -215,6 +302,7 @@ PanzerNote/
 - **文案修改**：「自动缩略图（仅代码文件）」更名为「自动开关缩略图」，含义更清晰
 
 ### v1.5.4
+
 - **增强型查找替换**：支持正则表达式、大小写敏感、全词匹配，实时显示「第 N/M 个匹配」计数
 - **标签页拖拽移动文件**：将标签拖到文件树的文件夹上即可移动文件
 - **Markdown 本地图片支持**：预览中自动解析相对路径图片（如 `![](./img.png)`）
@@ -222,11 +310,13 @@ PanzerNote/
 - **修复缩略图切换卡死 Bug**：`Ctrl+M` 切换缩略图时程序卡死的严重问题已修复
 
 ### v1.5.3
+
 - 文件树最小宽度调整至约100px并保留拖拽完全折叠功能
 - 修复编辑器首次显示时行号区与文本重叠导致左侧文字被遮挡的问题
 - 文件树与编辑区的分割比例现在会自动保存和恢复
 
 ### v1.5.2
+
 - 预览代码高亮：Markdown预览中的代码块自动语法着色（Pygments内联样式），配色与左侧编辑器完全一致
 - 代码块样式升级：浅蓝色背景（`#EDF3FA`）+ 蓝色左边框（`#4A86C8`），仿PyCharm风格
 - 代码块一键复制：代码块左上角📋按钮，点击即复制原始代码到系统剪贴板
@@ -234,12 +324,14 @@ PanzerNote/
 - 修复代码块尾部空行：去除 `fenced_code` 扩展在代码块末尾附加的多余换行
 
 ### v1.5.1
+
 - 代码缩略图（Minimap）：编辑器右侧鸟瞰图，彩色像素块呈现语法高亮，点击/拖拽快速导航
 - 语法高亮配色更新：从VS Code风格切换为PyCharm IntelliJ Light风格（字符串绿色、注释灰色斜体、关键字深蓝加粗）
 - Markdown预览改进：预览面板改为PyCharm风格（深色标题、浅灰代码块），去除`nl2br`/`codehilite`扩展以修正排版问题
 - Markdown编辑器高亮增强：支持跨行代码块状态追踪（代码块内等宽字体+浅灰背景），标题分级显示
 
 ### v1.5
+
 - 语法高亮：基于Pygments，支持30+编程语言
 - Markdown分屏预览：左侧编辑，右侧实时渲染
 - 自动缩进：智能缩进，Tab插入4空格
@@ -247,19 +339,23 @@ PanzerNote/
 - 修复zip打包中文文件名乱码
 
 ### v1.4.1
+
 - 资源平衡调整（前三项均衡，铝材3:1）
 - 立绘架构重构（角色/皮肤/状态）
 - 修复立绘路径从程序目录读取
 
 ### v1.4
+
 - 小秘书定位修复、气泡增大
 - 文件夹展开符号修复
 - 配置路径持久化
 - 编码保持与另存为编码选择
 
 ### v1.2
+
 - 挂机机制（在线/离线资源获取）
 - 编码检测（UTF-8→GBK→UTF-16）
 
 ### v1.0
+
 - 基础记事本功能、游戏框架、小秘书系统

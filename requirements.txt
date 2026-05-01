@@ -1,5 +1,11 @@
-# PanzerNote 依赖
+# PanzerNote 运行依赖
 PyQt5>=5.15
 Pygments>=2.15
 markdown>=3.4.0
 Pillow>=9.0.0
+
+# 开发依赖
+pytest>=9.0
+pytest-cov
+pytest-qt
+mypy>=1.20

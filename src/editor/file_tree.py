@@ -18,6 +18,7 @@ from PyQt5.QtGui import QFont
 
 from ..core.config import Config
 from ..utils.logger import get_logger
+from ..security.input_validator import InputValidator, FilenameValidationError
 
 
 # 自定义 MIME 类型（与 editor_tabs 保持一致）
@@ -323,12 +324,18 @@ class FileTreeWidget(QWidget):
             self, "新建文件", "文件名:", text="新建文件.txt"
         )
         if ok and name:
+            validator = self.config.get_input_validator()
+            try:
+                name = validator.validate_filename_strict(name)
+            except FilenameValidationError as e:
+                QMessageBox.warning(self, "文件名无效", str(e))
+                return
             if not name.endswith(('.txt', '.md')):
                 name += '.txt'
             filepath = os.path.join(parent_dir, name)
             try:
-                with open(filepath, 'w', encoding='utf-8') as f:
-                    f.write("")
+                file_guard = self.config.get_file_guard()
+                file_guard.safe_write(filepath, "", validate_path=False)
                 self.file_open_requested.emit(filepath)
             except Exception as e:
                 get_logger(__name__).error("创建文件失败: %s", e)
@@ -340,6 +347,12 @@ class FileTreeWidget(QWidget):
             self, "新建文件夹", "文件夹名:", text="新建文件夹"
         )
         if ok and name:
+            validator = self.config.get_input_validator()
+            try:
+                name = validator.validate_filename_strict(name)
+            except FilenameValidationError as e:
+                QMessageBox.warning(self, "文件夹名无效", str(e))
+                return
             folder_path = os.path.join(parent_dir, name)
             try:
                 os.makedirs(folder_path, exist_ok=True)
@@ -358,6 +371,12 @@ class FileTreeWidget(QWidget):
             self, "重命名", "新名称:", text=old_name
         )
         if ok and new_name and new_name != old_name:
+            validator = self.config.get_input_validator()
+            try:
+                new_name = validator.validate_filename_strict(new_name)
+            except FilenameValidationError as e:
+                QMessageBox.warning(self, "名称无效", str(e))
+                return
             new_path = os.path.join(os.path.dirname(filepath), new_name)
             try:
                 os.rename(filepath, new_path)

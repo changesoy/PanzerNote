@@ -60,7 +60,14 @@ class VirtualScrollManager(QObject):
         if self._highlighter:
             self._highlighter.setDocument(None)
 
-        editor.setPlainText(content)
+        try:
+            editor.setPlainText(content)
+        except Exception as e:
+            get_logger(__name__).error("虚拟滚动加载失败，回退普通模式", exc_info=True)
+            self._is_large_file = False
+            if self._highlighter:
+                self._highlighter.setDocument(editor.document())
+            return False
 
         if self._highlighter:
             self._highlighter.setDocument(editor.document())

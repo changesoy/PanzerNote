@@ -33,6 +33,9 @@ from .game.secretary_widget import SecretaryWidget
 from .editor.status_bar import StatusBarWidget
 from .editor.find_replace import FindReplaceBar
 from .editor.editor_settings_dialog import EditorSettingsDialog
+from .plugins.plugin_manager import PluginManager
+from .themes.theme_engine import ThemeEngine
+from .themes.theme_preview import ThemePreviewDialog
 from .utils.logger import get_logger
 from .utils.lazy_loader import get_startup_profiler
 from .utils.dpi_helper import scale, scale_size
@@ -57,6 +60,17 @@ class MainWindow(QMainWindow):
         self.shortcut_manager = ShortcutManager(config)
         self._profiler.end_phase()
 
+        self._profiler.begin_phase("主题引擎初始化")
+        self.theme_engine = ThemeEngine(config)
+        self.theme_engine.load_external_themes()
+        self.theme_engine.initialize_active_theme()
+        self._profiler.end_phase()
+
+        self._profiler.begin_phase("插件管理器初始化")
+        self.plugin_manager = PluginManager(config)
+        self.plugin_manager.scan_plugins()
+        self._profiler.end_phase()
+
         self._profiler.begin_phase("UI初始化")
         self._init_ui()
         self._profiler.end_phase()
@@ -76,6 +90,8 @@ class MainWindow(QMainWindow):
         self._profiler.end_phase()
 
         self._connect_signals()
+
+        self._apply_theme()
 
         icon_path = os.path.join(config.get_assets_path(), "icons", "app_icon.png")
         if os.path.exists(icon_path):
@@ -736,7 +752,7 @@ class MainWindow(QMainWindow):
         QMessageBox.about(
             self,
             "关于 PanzerNote",
-            "PanzerNote v1.5.5\n\n"
+            "PanzerNote v1.6.4\n\n"
             "一款以《战车少女》为主题的笔记工具。\n"
             "通过书写获取资源，建造收集角色，点亮完整图鉴。\n\n"
             "让日常记录变成一场温暖的怀旧之旅。"
@@ -772,3 +788,139 @@ class MainWindow(QMainWindow):
     def _on_content_modified(self):
         """内容修改"""
         self._update_stats()
+
+    # === 主题管理 ===
+
+    def _apply_theme(self):
+        stylesheet = self.theme_engine.generate_stylesheet()
+        self.setStyleSheet(stylesheet)
+
+    def _show_theme_dialog(self):
+        dialog = ThemePreviewDialog(self.theme_engine, self)
+        dialog.theme_applied.connect(self._on_theme_applied)
+        dialog.exec_()
+
+    def _on_theme_applied(self, theme_id: str):
+        self._apply_theme()
+        self.secretary.show_message(f"已切换主题: {self.theme_engine.get_active_theme().name}")
+
+    # === 插件管理 ===
+
+    def _show_plugin_manager(self):
+        from PyQt5.QtWidgets import (
+            QDialog, QVBoxLayout, QHBoxLayout, QListWidget,
+            QListWidgetItem, QPushButton, QLabel, QGroupBox,
+        )
+        dialog = QDialog(self)
+        dialog.setWindowTitle("插件管理")
+        dialog.setMinimumSize(500, 400)
+        layout = QVBoxLayout(dialog)
+
+        plugins = self.plugin_manager.get_discovered_plugins()
+
+        list_widget = QListWidget()
+        for info in plugins:
+            name = info.get("name", "未知")
+            version = info.get("version", "?")
+            state = info.get("state", "UNLOADED")
+            desc = info.get("description", "")
+            item_text = f"{name} v{version} [{state}]"
+            if desc:
+                item_text += f" - {desc}"
+            item = QListWidgetItem(item_text)
+            item.setData(Qt.UserRole, name)
+            list_widget.addItem(item)
+
+        if not plugins:
+            list_widget.addItem(QListWidgetItem("未发现插件"))
+
+        layout.addWidget(QLabel(f"已发现 {len(plugins)} 个插件"))
+        layout.addWidget(list_widget)
+
+        btn_layout = QHBoxLayout()
+
+        load_btn = QPushButton("加载")
+        activate_btn = QPushButton("激活")
+        deactivate_btn = QPushButton("停用")
+        unload_btn = QPushButton("卸载")
+        reload_btn = QPushButton("热加载")
+
+        def _get_selected_plugin_id():
+            item = list_widget.currentItem()
+            if item and plugins:
+                return item.data(Qt.UserRole)
+            return None
+
+        def _on_load():
+            pid = _get_selected_plugin_id()
+            if pid:
+                try:
+                    self.plugin_manager.load_plugin(pid)
+                    self.secretary.show_message(f"插件 {pid} 已加载")
+                    dialog.accept()
+                    self._show_plugin_manager()
+                except Exception as e:
+                    QMessageBox.warning(self, "加载失败", str(e))
+
+        def _on_activate():
+            pid = _get_selected_plugin_id()
+            if pid:
+                try:
+                    self.plugin_manager.activate_plugin(pid)
+                    self.secretary.show_message(f"插件 {pid} 已激活")
+                    dialog.accept()
+                    self._show_plugin_manager()
+                except Exception as e:
+                    QMessageBox.warning(self, "激活失败", str(e))
+
+        def _on_deactivate():
+            pid = _get_selected_plugin_id()
+            if pid:
+                try:
+                    self.plugin_manager.deactivate_plugin(pid)
+                    self.secretary.show_message(f"插件 {pid} 已停用")
+                    dialog.accept()
+                    self._show_plugin_manager()
+                except Exception as e:
+                    QMessageBox.warning(self, "停用失败", str(e))
+
+        def _on_unload():
+            pid = _get_selected_plugin_id()
+            if pid:
+                try:
+                    self.plugin_manager.unload_plugin(pid)
+                    self.secretary.show_message(f"插件 {pid} 已卸载")
+                    dialog.accept()
+                    self._show_plugin_manager()
+                except Exception as e:
+                    QMessageBox.warning(self, "卸载失败", str(e))
+
+        def _on_reload():
+            pid = _get_selected_plugin_id()
+            if pid:
+                try:
+                    self.plugin_manager.reload_plugin(pid)
+                    self.secretary.show_message(f"插件 {pid} 已热加载")
+                    dialog.accept()
+                    self._show_plugin_manager()
+                except Exception as e:
+                    QMessageBox.warning(self, "热加载失败", str(e))
+
+        load_btn.clicked.connect(_on_load)
+        activate_btn.clicked.connect(_on_activate)
+        deactivate_btn.clicked.connect(_on_deactivate)
+        unload_btn.clicked.connect(_on_unload)
+        reload_btn.clicked.connect(_on_reload)
+
+        btn_layout.addWidget(load_btn)
+        btn_layout.addWidget(activate_btn)
+        btn_layout.addWidget(deactivate_btn)
+        btn_layout.addWidget(unload_btn)
+        btn_layout.addWidget(reload_btn)
+        layout.addLayout(btn_layout)
+
+        close_btn = QPushButton("关闭")
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn)
+
+        dialog.exec_()

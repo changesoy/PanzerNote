@@ -24,6 +24,8 @@ from PyQt5.QtGui import QFont, QTextCursor, QColor, QTextCharFormat, QDrag
 
 from ..core.config import Config
 from ..utils.logger import get_logger
+from ..security.file_guard import FileSizeExceededError, FileOperationTimeoutError
+from ..security.input_validator import InputValidator
 from .editor import Editor
 from .markdown_preview import MarkdownPreviewWidget
 from .find_replace import FindReplaceBar
@@ -315,31 +317,32 @@ class EditorTabWidget(QTabWidget):
         # 读取文件内容，检测编码
         content = ""
         detected_encoding = "UTF-8"
+        file_guard = self.config.get_file_guard()
         
         try:
-            with open(filepath, 'r', encoding='utf-8') as f:
-                content = f.read()
+            content = file_guard.safe_read(filepath, encoding='utf-8', validate_path=False)
             detected_encoding = "UTF-8"
         except UnicodeDecodeError:
             try:
-                with open(filepath, 'r', encoding='gbk') as f:
-                    content = f.read()
+                content = file_guard.safe_read(filepath, encoding='gbk', validate_path=False)
                 detected_encoding = "GBK"
             except UnicodeDecodeError:
                     try:
-                        with open(filepath, 'r', encoding='utf-16') as f:
-                            content = f.read()
+                        content = file_guard.safe_read(filepath, encoding='utf-16', validate_path=False)
                         detected_encoding = "UTF-16"
                     except (UnicodeDecodeError, OSError):
                         try:
-                            with open(filepath, 'rb') as f:
-                                raw = f.read()
+                            raw = file_guard.safe_read_bytes(filepath, validate_path=False)
                             content = raw.decode('utf-8', errors='ignore')
                             detected_encoding = "UTF-8"
                         except Exception as e:
                             get_logger(__name__).error("无法读取文件: %s, %s", filepath, e)
                             QMessageBox.critical(self, "错误", f"无法读取文件：{filepath}\n{str(e)}")
                             return -1
+        except (FileSizeExceededError, FileOperationTimeoutError) as e:
+            get_logger(__name__).error("文件安全检查失败: %s, %s", filepath, e)
+            QMessageBox.critical(self, "错误", f"无法读取文件：{filepath}\n{str(e)}")
+            return -1
         except Exception as e:
             get_logger(__name__).error("打开文件失败: %s", e)
             QMessageBox.critical(self, "错误", f"打开文件失败：{str(e)}")
@@ -457,8 +460,12 @@ class EditorTabWidget(QTabWidget):
             return False, 0
         
         try:
-            with open(filepath, 'w', encoding=encoding.lower()) as f:
-                f.write(content)
+            file_guard = self.config.get_file_guard()
+            file_guard.safe_write(filepath, content, encoding=encoding.lower(), validate_path=False)
+        except (FileSizeExceededError, FileOperationTimeoutError) as e:
+            get_logger(__name__).error("文件安全检查失败: %s", e)
+            QMessageBox.critical(self, "错误", f"保存文件失败：{str(e)}")
+            return False, 0
         except Exception as e:
             get_logger(__name__).error("保存文件失败: %s", e)
             QMessageBox.critical(self, "错误", f"保存文件失败：{str(e)}")
@@ -537,8 +544,11 @@ class EditorTabWidget(QTabWidget):
                         filename = f"untitled_{tab_id}.txt.autosave"
                     
                     try:
-                        with open(os.path.join(session_dir, filename), 'w', encoding='utf-8') as f:
-                            f.write(content)
+                        file_guard = self.config.get_file_guard()
+                        file_guard.safe_write(
+                            os.path.join(session_dir, filename),
+                            content, validate_path=False
+                        )
                     except Exception:
                         get_logger(__name__).warning("自动保存失败: %s", filename)
     

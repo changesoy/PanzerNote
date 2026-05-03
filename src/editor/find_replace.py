@@ -16,6 +16,8 @@ from PyQt5.QtGui import (
     QColor, QTextCharFormat, QTextCursor, QKeySequence, QTextDocument
 )
 
+from ..security.input_validator import InputValidator
+
 
 # 高亮颜色
 _MATCH_BG = QColor("#FFEE58")       # 所有匹配：淡黄色
@@ -320,6 +322,10 @@ class FindReplaceBar(QWidget):
         """根据选项构建正则表达式，失败返回 None"""
         query = self.search_input.text()
         if not query:
+            return None
+
+        validator = InputValidator()
+        if not validator.validate_search(query):
             return None
 
         flags = 0

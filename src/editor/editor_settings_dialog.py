@@ -11,9 +11,9 @@ v1.5.5 改动：
 """
 
 from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox,
+    QWidget, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox,
     QPushButton, QSpinBox, QComboBox, QGroupBox, QFormLayout,
-    QFontComboBox
+    QFontComboBox, QSlider
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
@@ -92,6 +92,35 @@ class EditorSettingsDialog(QDialog):
         
         layout.addWidget(editor_group)
         
+        # ── 小秘书选项 ──
+        secretary_group = QGroupBox("小秘书")
+        secretary_layout = QFormLayout(secretary_group)
+        
+        self.show_secretary_cb = QCheckBox()
+        secretary_layout.addRow("显示小秘书:", self.show_secretary_cb)
+        
+        size_widget = QWidget()
+        size_layout = QHBoxLayout(size_widget)
+        size_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.secretary_size_slider = QSlider(Qt.Horizontal)
+        self.secretary_size_slider.setRange(3, 20)
+        self.secretary_size_slider.setTickPosition(QSlider.TicksBelow)
+        self.secretary_size_slider.setTickInterval(1)
+        size_layout.addWidget(self.secretary_size_slider)
+        
+        self.secretary_size_label = QLabel("7%")
+        self.secretary_size_label.setMinimumWidth(40)
+        size_layout.addWidget(self.secretary_size_label)
+        
+        self.secretary_size_slider.valueChanged.connect(
+            lambda v: self.secretary_size_label.setText(f"{v}%")
+        )
+        
+        secretary_layout.addRow("尺寸占比:", size_widget)
+        
+        layout.addWidget(secretary_group)
+        
         # ── 按钮 ──
         button_layout = QHBoxLayout()
         button_layout.addStretch()
@@ -141,6 +170,14 @@ class EditorSettingsDialog(QDialog):
         self.autosave_spin.setValue(
             self.config.get_editor_setting("auto_save_interval", 30)
         )
+        
+        self.show_secretary_cb.setChecked(
+            self.config.get_secretary_setting("show_secretary", True)
+        )
+        
+        size_percent = self.config.get_secretary_setting("size_percent", 7)
+        self.secretary_size_slider.setValue(size_percent)
+        self.secretary_size_label.setText(f"{size_percent}%")
     
     def get_settings(self) -> dict:
         """获取用户修改后的设置"""
@@ -154,4 +191,6 @@ class EditorSettingsDialog(QDialog):
             "wrap_mode": self.wrap_mode_combo.currentData(),
             "auto_save_interval": self.autosave_spin.value(),
             "auto_pair_brackets": self.auto_pair_brackets_cb.isChecked(),
+            "show_secretary": self.show_secretary_cb.isChecked(),
+            "secretary_size_percent": self.secretary_size_slider.value(),
         }

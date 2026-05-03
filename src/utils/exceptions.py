@@ -90,19 +90,13 @@ def safe_call(
 
 
 def _show_error_dialog(title: str, exc: BaseException) -> None:
-    """延迟导入 QMessageBox 以避免循环依赖"""
+    """延迟导入 ErrorHandler 以避免循环依赖，使用统一错误提示系统"""
     try:
-        from PyQt5.QtWidgets import QMessageBox, QApplication
-
-        app = QApplication.instance()
-        if app is not None:
-            detail = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
-            msg_box = QMessageBox()
-            msg_box.setIcon(QMessageBox.Critical)
-            msg_box.setWindowTitle("错误")
-            msg_box.setText(title)
-            msg_box.setInformativeText(str(exc))
-            msg_box.setDetailedText(detail)
-            msg_box.exec_()
+        from .error_handler import ErrorHandler, ErrorCategory
+        ErrorHandler.show_from_exception(
+            exception=exc,
+            category=ErrorCategory.GENERAL,
+            title=title,
+        )
     except Exception:
         pass

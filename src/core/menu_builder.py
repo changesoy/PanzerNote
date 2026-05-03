@@ -163,6 +163,9 @@ class MenuBuilder:
         if menu is None:
             return
 
+        self._add_action(menu, "快捷键列表", QKeySequence("Ctrl+/"),
+                         mw._toggle_shortcut_panel)
+        menu.addSeparator()
         self._add_action(menu, "新手攻略", None, mw._show_guide)
         self._add_action(menu, "使用说明", None, mw._show_manual)
         menu.addSeparator()

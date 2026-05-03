@@ -23,6 +23,7 @@ from .core.config import Config
 from .core.timer_manager import TimerManager
 from .core.event_bus import EventBus
 from .core.menu_builder import MenuBuilder
+from .core.shortcut_manager import ShortcutManager
 from .game.game_engine import GameEngine
 from .game.resource_bar import ResourceBar
 from .game.game_sidebar import GameSidebar
@@ -34,6 +35,7 @@ from .editor.find_replace import FindReplaceBar
 from .editor.editor_settings_dialog import EditorSettingsDialog
 from .utils.logger import get_logger
 from .utils.lazy_loader import get_startup_profiler
+from .utils.dpi_helper import scale, scale_size
 
 
 class MainWindow(QMainWindow):
@@ -52,6 +54,7 @@ class MainWindow(QMainWindow):
         self._profiler.begin_phase("定时器/事件总线初始化")
         self.timer_manager = TimerManager(config, self)
         self.event_bus = EventBus(config, self)
+        self.shortcut_manager = ShortcutManager(config)
         self._profiler.end_phase()
 
         self._profiler.begin_phase("UI初始化")
@@ -81,7 +84,7 @@ class MainWindow(QMainWindow):
     def _init_ui(self):
         """初始化UI"""
         self.setWindowTitle("PanzerNote")
-        self.setMinimumSize(800, 600)
+        self.setMinimumSize(scale(800), scale(600))
         
         # 中心部件
         central_widget = QWidget()
@@ -109,7 +112,7 @@ class MainWindow(QMainWindow):
         
         # 游戏图标侧边栏
         self.game_sidebar = GameSidebar()
-        self.game_sidebar.setFixedWidth(50)
+        self.game_sidebar.setFixedWidth(scale(50))
         self.game_sidebar.view_changed.connect(self._on_view_changed)
         content_layout.addWidget(self.game_sidebar)
         
@@ -126,7 +129,7 @@ class MainWindow(QMainWindow):
         self.file_tree = FileTreeWidget(self.config)
         self.file_tree.file_open_requested.connect(self._open_file)
         self.file_tree.file_move_requested.connect(self._on_file_move_from_tree)
-        self.file_tree.setMinimumWidth(100)
+        self.file_tree.setMinimumWidth(scale(100))
         self.splitter.addWidget(self.file_tree)
         
         # 编辑区容器
@@ -169,6 +172,12 @@ class MainWindow(QMainWindow):
         
         # 小秘书（覆盖在编辑区右下角，自动跟随父容器大小变化）
         self.secretary = SecretaryWidget(self.config, self.editor_container)
+
+        # 快捷键提示面板
+        from .ui.shortcut_panel import ShortcutPanel
+        self.shortcut_panel = ShortcutPanel(self.shortcut_manager, self)
+        self.shortcut_panel.set_edit_callback(self._on_shortcut_edited)
+        self.shortcut_panel.hide()
     
     def _init_menubar(self):
         """初始化菜单栏"""
@@ -568,6 +577,20 @@ class MainWindow(QMainWindow):
         self.secretary.setVisible(not self.secretary.isVisible())
         self.config.set_secretary_setting("show_secretary", self.secretary.isVisible())
     
+    def _toggle_shortcut_panel(self):
+        """切换快捷键提示面板"""
+        if self.shortcut_panel.isVisible():
+            self.shortcut_panel.hide()
+        else:
+            self.shortcut_panel.refresh()
+            self.shortcut_panel.show()
+            self.shortcut_panel.raise_()
+
+    def _on_shortcut_edited(self, action_id: str, new_shortcut: str):
+        """快捷键编辑回调"""
+        from .utils.logger import get_logger
+        get_logger(__name__).info("快捷键已更新: %s -> %s", action_id, new_shortcut)
+    
     def _toggle_fullscreen(self):
         """切换全屏"""
         if self.isFullScreen():
@@ -629,9 +652,18 @@ class MainWindow(QMainWindow):
         if dialog.exec_() == QDialog.Accepted:
             settings = dialog.get_settings()
             
-            # 保存设置
-            for key, value in settings.items():
-                self.config.set_editor_setting(key, value)
+            # 保存编辑器设置
+            editor_keys = {
+                "show_line_numbers", "highlight_current_line", "show_minimap",
+                "auto_minimap", "font_family", "font_size", "wrap_mode",
+                "auto_save_interval", "auto_pair_brackets"
+            }
+            for key in editor_keys:
+                self.config.set_editor_setting(key, settings[key])
+            
+            # 保存小秘书设置
+            self.config.set_secretary_setting("show_secretary", settings["show_secretary"])
+            self.config.set_secretary_setting("size_percent", settings["secretary_size_percent"])
             
             self.config.save_settings()
             
@@ -655,6 +687,13 @@ class MainWindow(QMainWindow):
             
             # 自动保存间隔
             self.timer_manager.update_auto_save_interval(settings["auto_save_interval"])
+            
+            # 小秘书设置
+            if settings["show_secretary"]:
+                self.secretary.show()
+                self.secretary.set_size_percent(settings["secretary_size_percent"])
+            else:
+                self.secretary.hide()
             
             self.secretary.show_message("设置已保存并应用")
     

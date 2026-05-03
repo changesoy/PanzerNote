@@ -59,7 +59,8 @@ class Config:
             "user_nickname": "指挥官",
             "secretary_self": "我",
             "enable_voice": False,
-            "show_secretary": True
+            "show_secretary": True,
+            "size_percent": 7
         },
         "view": {
             "theme": "light",
@@ -72,7 +73,8 @@ class Config:
             "x": 100,
             "y": 100,
             "maximized": False
-        }
+        },
+        "shortcuts": {}
     }
     
     DEFAULT_WORKSPACE = {
@@ -366,6 +368,16 @@ class Config:
             self._settings["window"] = {}
         self._settings["window"][key] = value
     
+    # === 通用设置 ===
+
+    def get_setting(self, key: str, default=None):
+        """获取设置项"""
+        return self._settings.get(key, default)
+
+    def set_setting(self, key: str, value):
+        """设置配置项"""
+        self._settings[key] = value
+
     # === 工作区状态 ===
     
     def get_workspace(self) -> Dict:

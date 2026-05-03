@@ -16,6 +16,10 @@ from typing import Optional, Dict, Any, List
 
 from src.utils.logger import get_logger
 from src.utils.exceptions import safe_call
+from src.security.path_validator import PathValidator, PathSecurityError
+from src.security.file_guard import FileGuard, FileSizeExceededError, FileOperationTimeoutError
+from src.security.crypto_manager import CryptoManager, DecryptionError
+from src.security.input_validator import InputValidator, SettingValidationError
 
 
 class Config:
@@ -119,10 +123,27 @@ class Config:
         self._settings: Dict[str, Any] = {}
         self._workspace: Dict[str, Any] = {}
         self._savegame: Dict[str, Any] = {}
+        self._encryption_password: Optional[str] = None
+
+        self._path_validator = PathValidator()
+        self._input_validator = InputValidator()
+
+        self._path_validator.add_allowed_root(self._app_dir)
+
+        self._file_guard = FileGuard(
+            path_validator=self._path_validator,
+            max_file_size=10 * 1024 * 1024,
+            timeout=15,
+        )
         
         # 尝试加载用户数据路径
         self._load_user_data_path()
         
+        if self._base_path:
+            self._path_validator.add_allowed_root(self._base_path)
+
+        self._crypto_manager = CryptoManager(self._get_config_dir())
+
         # 尝试加载配置
         self._load_all()
     
@@ -164,18 +185,18 @@ class Config:
         """加载JSON文件，如果不存在则返回默认值"""
         if os.path.exists(filepath):
             try:
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except (json.JSONDecodeError, IOError) as e:
+                content = self._file_guard.safe_read(filepath, validate_path=False)
+                return json.loads(content)
+            except (json.JSONDecodeError, IOError, FileSizeExceededError,
+                    FileOperationTimeoutError, PathSecurityError) as e:
                 get_logger(__name__).warning("加载配置文件失败: %s, 错误: %s", filepath, e)
                 return default.copy()
         return default.copy()
     
     def _save_json(self, filepath: str, data: Dict):
         """保存JSON文件"""
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        content = json.dumps(data, ensure_ascii=False, indent=2)
+        self._file_guard.safe_write(filepath, content, validate_path=False)
     
     def _load_all(self):
         """加载所有配置文件"""
@@ -205,10 +226,23 @@ class Config:
         )
         
         # 加载游戏存档
-        self._savegame = self._load_json(
-            os.path.join(gamedata_dir, "savegame.json"),
-            self.DEFAULT_SAVEGAME
-        )
+        if self._crypto_manager.is_encrypted():
+            try:
+                if self._encryption_password:
+                    self._savegame = self._crypto_manager.decrypt_savegame(
+                        self._encryption_password
+                    )
+                else:
+                    self._savegame = self.DEFAULT_SAVEGAME.copy()
+                    get_logger(__name__).info("存档已加密，需要密码才能解密")
+            except DecryptionError as e:
+                get_logger(__name__).warning("存档解密失败: %s", e)
+                self._savegame = self.DEFAULT_SAVEGAME.copy()
+        else:
+            self._savegame = self._load_json(
+                os.path.join(gamedata_dir, "savegame.json"),
+                self.DEFAULT_SAVEGAME
+            )
         
         # 合并默认值
         self._settings = self._merge_dict(self.DEFAULT_SETTINGS, self._settings)
@@ -249,7 +283,20 @@ class Config:
         """保存游戏存档"""
         gamedata_dir = self._get_gamedata_dir()
         os.makedirs(gamedata_dir, exist_ok=True)
-        self._save_json(os.path.join(gamedata_dir, "savegame.json"), self._savegame)
+        if self._encryption_password and self._crypto_manager.is_encrypted():
+            try:
+                self._crypto_manager.encrypt_savegame(
+                    self._encryption_password, self._savegame
+                )
+            except Exception as e:
+                get_logger(__name__).warning("存档加密保存失败，回退到明文: %s", e)
+                self._save_json(
+                    os.path.join(gamedata_dir, "savegame.json"), self._savegame
+                )
+        else:
+            self._save_json(
+                os.path.join(gamedata_dir, "savegame.json"), self._savegame
+            )
     
     def get_base_path(self) -> str:
         """获取用户数据存储基础路径"""
@@ -259,6 +306,7 @@ class Config:
         """设置用户数据存储路径"""
         self._settings["base_path"] = path
         self._base_path = path
+        self._path_validator.add_allowed_root(path)
         self._save_user_data_path()
     
     def get_app_dir(self) -> str:
@@ -506,3 +554,86 @@ class Config:
     def get_last_login(self) -> Optional[str]:
         """获取最后登录时间"""
         return self._savegame.get("last_login")
+
+    # === 安全模块接口 ===
+
+    def get_path_validator(self) -> PathValidator:
+        """获取路径验证器"""
+        return self._path_validator
+
+    def get_file_guard(self) -> FileGuard:
+        """获取文件安全守卫"""
+        return self._file_guard
+
+    def get_input_validator(self) -> InputValidator:
+        """获取输入验证器"""
+        return self._input_validator
+
+    def is_savegame_encrypted(self) -> bool:
+        """检查存档是否已加密"""
+        return self._crypto_manager.is_encrypted()
+
+    def set_encryption_password(self, password: str) -> None:
+        """设置加密密码"""
+        self._encryption_password = password
+
+    def has_encryption_password(self) -> bool:
+        """检查是否已设置加密密码"""
+        return self._encryption_password is not None
+
+    def enable_encryption(self, password: str) -> bool:
+        """启用存档加密
+
+        Args:
+            password: 加密密码
+
+        Returns:
+            是否成功启用加密
+        """
+        try:
+            self._crypto_manager.migrate_to_encrypted(password)
+            self._encryption_password = password
+            get_logger(__name__).info("存档加密已启用")
+            return True
+        except Exception as e:
+            get_logger(__name__).error("启用存档加密失败: %s", e)
+            return False
+
+    def disable_encryption(self, password: str) -> bool:
+        """禁用存档加密
+
+        Args:
+            password: 当前加密密码
+
+        Returns:
+            是否成功禁用加密
+        """
+        try:
+            self._crypto_manager.migrate_to_plaintext(password)
+            self._encryption_password = None
+            get_logger(__name__).info("存档加密已禁用")
+            return True
+        except Exception as e:
+            get_logger(__name__).error("禁用存档加密失败: %s", e)
+            return False
+
+    def verify_encryption_password(self, password: str) -> bool:
+        """验证加密密码是否正确"""
+        return self._crypto_manager.verify_password(password)
+
+    def validate_setting_value(
+        self,
+        key: str,
+        value: Any,
+        expected_type: type,
+        min_val=None,
+        max_val=None,
+        allowed_values=None,
+    ) -> Any:
+        """验证设置值"""
+        return self._input_validator.validate_setting(
+            key, value, expected_type,
+            min_val=min_val,
+            max_val=max_val,
+            allowed_values=allowed_values,
+        )

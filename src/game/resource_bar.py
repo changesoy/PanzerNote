@@ -8,7 +8,7 @@ from PyQt5.QtWidgets import (
     QWidget, QHBoxLayout, QLabel, QFrame
 )
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont, QPixmap
+from PyQt5.QtGui import QFont
 
 from ..core.config import Config
 
@@ -32,10 +32,6 @@ class ResourceItem(QWidget):
             background-color: {self._get_placeholder_color()};
             border-radius: 4px;
         """)
-        # TODO: 加载实际图标
-        # if icon_path and os.path.exists(icon_path):
-        #     pixmap = QPixmap(icon_path).scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        #     self.icon_label.setPixmap(pixmap)
         layout.addWidget(self.icon_label)
         
         # 数值

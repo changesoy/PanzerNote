@@ -155,6 +155,9 @@ class MenuBuilder:
         self._add_action(menu, "记事本设置", None, mw._show_editor_settings)
         self._add_action(menu, "游戏设置", None, mw._show_game_settings)
         menu.addSeparator()
+        self._add_action(menu, "主题管理", None, mw._show_theme_dialog)
+        self._add_action(menu, "插件管理", None, mw._show_plugin_manager)
+        menu.addSeparator()
         self._add_action(menu, "保存设置", None, mw._save_settings)
         self._add_action(menu, "恢复默认", None, mw._reset_settings)
 

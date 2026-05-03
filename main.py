@@ -24,6 +24,7 @@ from src.ui.first_run_dialog import FirstRunDialog
 from src.utils.logger import setup_logging, get_logger
 from src.utils.feature_flags import init_flags
 from src.utils.lazy_loader import get_startup_profiler
+from src.utils.dpi_helper import init_dpi
 
 
 def main():
@@ -35,6 +36,8 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("PanzerNote")
     app.setApplicationVersion("1.6.2")
+
+    init_dpi()
 
     font = QFont("Microsoft YaHei", 10)
     app.setFont(font)

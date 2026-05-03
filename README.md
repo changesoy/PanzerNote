@@ -1,4 +1,4 @@
-# PanzerNote v1.6.2
+# PanzerNote v1.6.3
 
 一款以《战车少女》为主题的笔记工具。通过书写获取资源，建造收集角色，点亮完整图鉴。
 
@@ -101,10 +101,14 @@ PanzerNote/
 ├── requirements.txt           # 依赖列表
 ├── mypy.ini                   # mypy 类型检查配置
 ├── pyproject.toml             # pytest 配置
+├── user_data_path.txt         # 持久化用户数据路径
 ├── benchmarks/                # 性能基准测试
+│   ├── __init__.py
 │   ├── test_data_generator.py # 测试数据生成器
 │   ├── benchmark_runner.py    # 基准测试运行器
-│   └── run_baseline.py        # 基线测试入口
+│   ├── run_baseline.py        # 基线测试入口
+│   ├── test_data/             # 生成的测试文件
+│   └── results/               # 测试结果 JSON
 ├── tests/                     # 单元测试
 │   ├── test_logger.py
 │   ├── test_exceptions.py
@@ -121,15 +125,19 @@ PanzerNote/
 │   ├── test_resource_bar.py
 │   ├── test_secretary_widget.py
 │   ├── test_status_bar.py
-│   └── test_syntax_highlighter.py
+│   ├── test_syntax_highlighter.py
+│   ├── test_dpi_helper.py
+│   ├── test_error_handler.py
+│   └── test_shortcut_manager.py
 ├── src/                       # 源代码
 │   ├── __init__.py            # 版本号定义
-│   ├── main_window.py         # 主窗口（677行，已拆分）
+│   ├── main_window.py         # 主窗口（已拆分）
 │   ├── core/                  # 核心模块
 │   │   ├── config.py          # 配置管理
 │   │   ├── timer_manager.py   # 定时器管理中心
 │   │   ├── event_bus.py       # 事件路由系统
-│   │   └── menu_builder.py    # 菜单构建器
+│   │   ├── menu_builder.py    # 菜单构建器
+│   │   └── shortcut_manager.py # 快捷键管理器
 │   ├── editor/                # 编辑器模块
 │   │   ├── editor.py          # 文本编辑器（546行，已拆分）
 │   │   ├── editor_tabs.py     # 标签页管理
@@ -152,11 +160,14 @@ PanzerNote/
 │   │   ├── game_sidebar.py    # 游戏侧边栏
 │   │   └── secretary_widget.py # 小秘书组件
 │   ├── ui/                    # UI组件
-│   │   └── first_run_dialog.py # 首次运行对话框
+│   │   ├── first_run_dialog.py # 首次运行对话框
+│   │   └── shortcut_panel.py  # 快捷键提示面板
 │   └── utils/                 # 工具模块
 │       ├── __init__.py        # 工具模块导出
 │       ├── logger.py          # 结构化日志系统
 │       ├── exceptions.py      # 统一异常处理 @safe_call
+│       ├── error_handler.py   # 统一错误提示系统
+│       ├── dpi_helper.py      # 高DPI缩放适配
 │       ├── feature_flags.py   # Feature Flag 系统
 │       └── lazy_loader.py     # 模块懒加载与启动分析
 ├── data/
@@ -167,6 +178,8 @@ PanzerNote/
 ```
 
 ## 快捷键
+
+> 快捷键支持自定义，可在快捷键提示面板（`Ctrl+/`）中查看和修改。系统会自动检测快捷键冲突。
 
 ### 文件操作
 
@@ -219,6 +232,7 @@ PanzerNote/
 | Ctrl+B          | 折叠/展开文件树     |
 | Ctrl+M          | 显示/隐藏代码缩略图 |
 | Ctrl+Shift+P    | 切换Markdown预览    |
+| Ctrl+/          | 快捷键提示面板      |
 | Ctrl++ / Ctrl+- | 放大 / 缩小         |
 | Ctrl+0          | 重置缩放            |
 | F11             | 全屏                |
@@ -238,11 +252,28 @@ PanzerNote/
 | 字体大小          | 编辑器字体大小                    | 12pt              |
 | 行宽模式          | 不换行 / 限制行宽                 | 不换行            |
 | 自动保存间隔      | 自动暂存间隔（秒）                | 30秒              |
+| 显示小秘书        | 右下角显示角色立绘和台词气泡      | 开启              |
+| 小秘书尺寸占比    | 占窗口面积百分比（3%~20%）        | 7%                |
 | 代码高亮主题      | 需在 `settings.json` 中配置       | `"pycharm_light"` |
 
 新增主题：在 `src/highlight_themes.py` 的 `THEMES` 字典中添加条目即可。
 
 ## 更新日志
+
+### v1.6.3
+
+**Bug 修复**
+
+- **修复窗口无法缩放**：修正 `dpi_helper.py` 中 `init_dpi()` 的双重缩放问题。当 `Qt.AA_EnableHighDpiScaling` 已启用时，Qt 自动处理 DPI 缩放，`scale()` 不应再乘以 `devicePixelRatio`，否则 `setMinimumSize(scale(800), scale(600))` 在 200% 缩放下变为 1600×1200，超出屏幕分辨率导致窗口无法调整大小
+- **修复小秘书组件尺寸过大**：重构 `secretary_widget.py` 尺寸机制，从固定像素值（210×380）改为基于窗口面积的百分比控制。默认占窗口面积 7%，范围 3%~20%，可在「记事本设置 → 小秘书」中通过滑块调节，设置实时生效并持久化保存。小秘书随窗口缩放自动重新计算尺寸，保持 210:380 宽高比
+
+**阶段三：用户体验提升优化与实现**
+
+- **高 DPI 适配**：新建 `utils/dpi_helper.py`，实现基于 `devicePixelRatio` 的动态缩放机制。应用启动时自动启用 `Qt.AA_EnableHighDpiScaling`，所有视觉元素尺寸使用相对单位（`scale()`/`scale_size()`/`scale_font()`/`scale_stylesheet()`），支持 100%~200% 缩放比例下正常显示
+- **小秘书位置跟随重构**：重构 `secretary_widget.py` 位置跟踪逻辑，使用 `eventFilter` 实时监听父容器 `resize`/`move` 事件，采用防抖机制（≤50ms）避免频繁更新，动态位置计算算法确保立绘始终右下对齐且不越界，支持窗口最大化/最小化/任意尺寸调整/多显示器拖动
+- **快捷键系统**：新建 `core/shortcut_manager.py`，实现快捷键注册、冲突检测（系统级 + 应用内部）、自定义修改与持久化。新建 `ui/shortcut_panel.py` 快捷键提示面板（`Ctrl+/` 调出），支持搜索、按功能模块分类展示、双击编辑快捷键。`settings.json` 新增 `shortcuts` 配置段
+- **错误提示系统优化**：新建 `utils/error_handler.py`，实现统一错误处理中间层。8 类错误分类（文件/网络/配置/游戏/编辑器/权限/内存/通用），每类含默认建议操作。敏感信息过滤（路径/堆栈/IP/密码/Token），确保不泄露内部信息。自定义错误处理器注册机制，支持回退到默认对话框
+- **单元测试**：新增 `test_dpi_helper.py`、`test_error_handler.py`、`test_shortcut_manager.py`，阶段三新增模块测试覆盖率达 93%
 
 ### v1.6.2
 

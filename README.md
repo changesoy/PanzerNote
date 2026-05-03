@@ -1,4 +1,4 @@
-# PanzerNote v1.6.3
+# PanzerNote v1.6.4
 
 一款以《战车少女》为主题的笔记工具。通过书写获取资源，建造收集角色，点亮完整图鉴。
 
@@ -73,6 +73,29 @@ portraits/
 
 文件命名示例：`059 虎王-正常.png`、`059 虎王 冲浪行动-大破.png`
 
+### 插件系统
+
+- **插件生命周期**：完整的 load → activate → deactivate → unload 四阶段管理
+- **沙箱隔离**：插件运行在独立线程中，最大执行超时30秒，异常不影响主进程
+- **权限控制**：MVP阶段严格只读访问，8种权限分类（read_settings/read_savegame/access_editor/access_ui等）
+- **热加载**：支持不重启主程序的情况下更新插件
+- **示例插件**：hello_panzer（基础功能）、word_counter（UI扩展）
+
+### 主题系统
+
+- **外部主题加载**：支持JSON/YAML格式的外部主题文件
+- **主题解析引擎**：解析颜色方案、布局配置，自动生成QSS样式表
+- **主题预览**：实时预览对话框，支持主题切换
+- **全局覆盖**：主题切换覆盖所有UI元素（主界面、对话框、菜单、编辑器等）
+
+### 数据存储抽象层
+
+- **IStorage接口**：标准化的CRUD、事务管理和元数据操作方法
+- **JSON存储适配器**：基于JSON文件的存储实现
+- **SQLite存储适配器**：基于SQLite数据库的存储实现
+- **存储工厂**：根据配置创建存储实例
+- **数据迁移**：支持不同存储实现间的数据迁移
+
 ## 安装与运行
 
 ### 环境要求
@@ -87,6 +110,8 @@ pip install -r requirements.txt
 pip install PyQtWebEngine  # 可选，Markdown预览用QWebEngineView（否则退化为QTextBrowser）
 ```
 
+> **安全模块依赖**：`cryptography>=41.0.0` 已包含在 `requirements.txt` 中，用于存档数据加密（PBKDF2 + AES-GCM）。
+
 ### 运行
 
 ```bash
@@ -99,8 +124,7 @@ python main.py
 PanzerNote/
 ├── main.py                    # 程序入口
 ├── requirements.txt           # 依赖列表
-├── mypy.ini                   # mypy 类型检查配置
-├── pyproject.toml             # pytest 配置
+├── pyproject.toml             # 项目配置（pytest/mypy/依赖/元数据）
 ├── user_data_path.txt         # 持久化用户数据路径
 ├── benchmarks/                # 性能基准测试
 │   ├── __init__.py
@@ -110,25 +134,35 @@ PanzerNote/
 │   ├── test_data/             # 生成的测试文件
 │   └── results/               # 测试结果 JSON
 ├── tests/                     # 单元测试
-│   ├── test_logger.py
-│   ├── test_exceptions.py
-│   ├── test_event_bus.py
-│   ├── test_timer_manager.py
-│   ├── test_game_engine.py
-│   ├── test_menu_builder.py
-│   ├── test_editor_actions.py
-│   ├── test_auto_pair_handler.py
-│   ├── test_config.py
-│   ├── test_first_run_dialog.py
-│   ├── test_game_sidebar.py
-│   ├── test_highlight_themes.py
-│   ├── test_resource_bar.py
-│   ├── test_secretary_widget.py
-│   ├── test_status_bar.py
-│   ├── test_syntax_highlighter.py
-│   ├── test_dpi_helper.py
-│   ├── test_error_handler.py
-│   └── test_shortcut_manager.py
+│   ├── test_logger.py              # 结构化日志：初始化/控制台/文件/幂等性
+│   ├── test_exceptions.py          # @safe_call装饰器：默认值/重新抛出/指定捕获
+│   ├── test_event_bus.py           # 事件路由：信号连接/视图切换/文件操作
+│   ├── test_timer_manager.py       # 定时器管理：创建/间隔/停止/回调
+│   ├── test_game_engine.py         # 挂机收益：在线奖励/离线奖励/倍率/上限
+│   ├── test_menu_builder.py        # 菜单构建：六菜单/菜单项/动作绑定
+│   ├── test_editor_actions.py      # 编辑器行操作：删除/复制/上移/下移行
+│   ├── test_auto_pair_handler.py   # 括号配对：英文/中文配对/右括号跳过
+│   ├── test_config.py              # 配置管理：编辑器/游戏/资源/统计
+│   ├── test_first_run_dialog.py    # 首次运行：初始化/路径/目录创建
+│   ├── test_game_sidebar.py        # 游戏侧边栏：按钮/视图状态/信号
+│   ├── test_highlight_themes.py    # 高亮主题：主题列表/格式/CSS/HTML
+│   ├── test_resource_bar.py        # 资源栏：数值/颜色/刷新/统计
+│   ├── test_secretary_widget.py    # 小秘书：气泡/消息/事件台词
+│   ├── test_status_bar.py          # 状态栏：标签/统计/编码/文件类型
+│   ├── test_syntax_highlighter.py  # 语法高亮：Markdown标题/代码/粗体/链接
+│   ├── test_dpi_helper.py          # 高DPI缩放：因子/尺寸/字体/样式表
+│   ├── test_error_handler.py       # 错误提示：路径/IP/密码过滤/分类
+│   ├── test_shortcut_manager.py    # 快捷键：注册/回调/冲突/持久化
+│   ├── test_path_validator.py      # 路径安全：规范化/穿越检测/白名单
+│   ├── test_file_guard.py          # 文件安全：读写/大小限制/超时
+│   ├── test_crypto_manager.py      # 存档加密：加解密/密码/迁移
+│   ├── test_input_validator.py     # 输入验证：文件名/保留名/搜索/设置
+│   ├── test_plugin_system.py       # 插件基础：状态/权限/元数据/沙箱
+│   ├── test_plugin_manager.py      # 插件管理：扫描/加载/热加载/验证
+│   ├── test_theme_system.py        # 主题系统：颜色/布局/QSS生成/预览
+│   ├── test_storage.py             # 存储抽象：JSON/SQLite/CRUD/事务/迁移
+│   ├── test_feature_flags.py       # Feature Flag：已注册flag/未注册flag警告/默认值
+│   └── test_virtual_scroll.py      # 虚拟滚动：大文件加载/异常回退/边界情况
 ├── src/                       # 源代码
 │   ├── __init__.py            # 版本号定义
 │   ├── main_window.py         # 主窗口（已拆分）
@@ -162,6 +196,28 @@ PanzerNote/
 │   ├── ui/                    # UI组件
 │   │   ├── first_run_dialog.py # 首次运行对话框
 │   │   └── shortcut_panel.py  # 快捷键提示面板
+│   ├── security/              # 安全模块
+│   │   ├── __init__.py        # 安全模块导出与异常定义
+│   │   ├── path_validator.py  # 路径安全验证（规范化/白名单/穿越防护）
+│   │   ├── file_guard.py      # 文件操作安全控制（大小限制/超时控制）
+│   │   ├── crypto_manager.py  # 存档加密系统（PBKDF2+AES-GCM/迁移/备份）
+│   │   └── input_validator.py # 输入验证框架（文件名/搜索/设置值）
+│   ├── plugins/               # 插件系统
+│   │   ├── __init__.py        # 插件系统导出
+│   │   ├── plugin_base.py     # 插件基类与元数据定义
+│   │   ├── plugin_sandbox.py  # 插件沙箱（隔离/超时/权限控制）
+│   │   └── plugin_manager.py  # 插件管理器（扫描/加载/热加载）
+│   ├── themes/                # 主题系统
+│   │   ├── __init__.py        # 主题系统导出
+│   │   ├── theme_engine.py    # 主题引擎（加载/解析/样式生成）
+│   │   └── theme_preview.py   # 主题预览对话框
+│   ├── storage/               # 数据存储抽象层
+│   │   ├── __init__.py        # 存储系统导出
+│   │   ├── storage_interface.py # IStorage接口定义
+│   │   ├── json_storage.py    # JSON文件存储适配器
+│   │   ├── sqlite_storage.py  # SQLite数据库存储适配器
+│   │   ├── storage_factory.py # 存储实现工厂
+│   │   └── storage_migrator.py # 数据迁移工具
 │   └── utils/                 # 工具模块
 │       ├── __init__.py        # 工具模块导出
 │       ├── logger.py          # 结构化日志系统
@@ -171,11 +227,65 @@ PanzerNote/
 │       ├── feature_flags.py   # Feature Flag 系统
 │       └── lazy_loader.py     # 模块懒加载与启动分析
 ├── data/
-│   ├── assets/portraits/      # 角色立绘
-│   ├── assets/icons/          # 图标
+│   ├── assets/
+│   │   ├── portraits/          # 角色立绘
+│   │   └── icons/              # 图标
 │   └── gamedata/              # 游戏数据
+├── plugins/                   # 插件目录
+│   ├── hello_panzer/          # 基础功能示例插件
+│   │   ├── plugin.json        # 插件清单
+│   │   └── main.py            # 插件入口
+│   ├── word_counter/          # UI扩展示例插件
+│   │   ├── plugin.json        # 插件清单
+│   │   └── main.py            # 插件入口
+│   └── plugin_api.md          # 插件开发技术文档
 └── notebooks/                 # 用户笔记
 ```
+
+## 单元测试
+
+项目共 29 个测试文件，覆盖核心模块、编辑器、游戏系统、安全模块及可扩展性架构。
+
+### 运行测试
+
+```bash
+pip install pytest pytest-qt pytest-cov
+pytest tests/ -v
+```
+
+### 测试文件说明
+
+| 测试文件                   | 测试目的            | 预期验证的功能点                                                                        |
+| -------------------------- | ------------------- | --------------------------------------------------------------------------------------- |
+| test_logger.py             | 结构化日志系统      | 初始化创建 `src` 前缀 logger；文件日志写入 `panzernote.log`；幂等性不重复添加 handler   |
+| test_exceptions.py         | `@safe_call` 装饰器 | 正常函数返回原值；异常时返回 `default`；`reraise=True` 重新抛出；`catch` 仅捕获指定类型 |
+| test_event_bus.py          | 事件路由系统        | `connect_signals` 连接所有 UI 信号；视图切换正确；文件保存更新状态                      |
+| test_timer_manager.py      | 定时器管理器        | 创建自动保存/统计/挂机三个定时器；动态调整间隔；`stop_all` 停止所有；回调异常不崩溃     |
+| test_game_engine.py        | 挂机收益引擎        | 基础奖励 fuel/ammo/steel 各 5；铝材计数控制；倍率乘算；离线 ≥5 分钟计算；24 小时上限    |
+| test_menu_builder.py       | 菜单构建器          | 生成六大菜单；文件/编辑菜单项完整；动作触发对应方法                                     |
+| test_editor_actions.py     | 编辑器行操作        | 删除行/复制行/上移行/下移行正确执行；边界条件处理                                       |
+| test_auto_pair_handler.py  | 括号自动配对        | 英文/中文括号配对；右括号跳过；设置开关控制                                             |
+| test_config.py             | 配置管理器          | 编辑器/游戏设置持久化；资源 CRUD；打字统计跨日归零                                      |
+| test_first_run_dialog.py   | 首次运行对话框      | 窗口标题/默认路径正确；确认后创建目录结构                                               |
+| test_game_sidebar.py       | 游戏侧边栏          | 按钮初始化；`set_current_view` 高亮；信号发射                                           |
+| test_highlight_themes.py   | 代码高亮主题        | 主题列表/获取/格式构建/预览 CSS/代码高亮 HTML                                           |
+| test_resource_bar.py       | 资源栏组件          | 资源项颜色映射；数值设置/刷新/打字统计                                                  |
+| test_secretary_widget.py   | 小秘书组件          | 气泡显示/隐藏；消息显示；事件台词匹配                                                   |
+| test_status_bar.py         | 状态栏组件          | 默认标签文本；统计/编码/文件类型更新                                                    |
+| test_syntax_highlighter.py | 语法高亮器          | Markdown 标题/代码块/行内代码/粗体/链接/列表/引用                                       |
+| test_dpi_helper.py         | 高 DPI 缩放         | 缩放因子范围；整数/尺寸/字体/样式表缩放；幂等性                                         |
+| test_error_handler.py      | 错误提示系统        | 路径/IP/密码/token 过滤；分类标签/建议映射完整                                          |
+| test_shortcut_manager.py   | 快捷键管理器        | 默认加载/注册/回调/冲突检测/持久化                                                      |
+| test_path_validator.py     | 路径安全验证        | 规范化/目录穿越检测/白名单/路径长度/控制字符                                            |
+| test_file_guard.py         | 文件操作安全        | 安全读写往返一致；大小限制/超时控制                                                     |
+| test_crypto_manager.py     | 存档加密系统        | 加密-解密往返；错误密码/损坏数据异常；中文数据；迁移备份                                |
+| test_input_validator.py    | 输入验证框架        | 文件名验证/保留名拒绝/搜索注入防护/设置值范围                                           |
+| test_plugin_system.py      | 插件基础架构        | 状态/权限枚举；元数据序列化；生命周期；沙箱权限检查                                     |
+| test_plugin_manager.py     | 插件管理器          | 扫描/加载/激活/停用/卸载/热加载/清单验证/版本兼容                                       |
+| test_theme_system.py       | 主题系统            | 颜色方案/布局配置/主题定义/引擎加载/QSS 生成                                            |
+| test_storage.py            | 存储抽象层          | JSON/SQLite 适配器 CRUD；事务回滚；工厂创建；数据迁移                                   |
+| test_feature_flags.py      | Feature Flag 系统   | 已注册 flag 返回正确值；未注册 flag 返回 False 并记录警告；配置文件加载/无效JSON容错    |
+| test_virtual_scroll.py     | 虚拟滚动管理器      | 大文件返回 True 并激活虚拟滚动；`setPlainText` 异常回退普通模式；阈值边界；Unicode 处理 |
 
 ## 快捷键
 
@@ -256,11 +366,47 @@ PanzerNote/
 | 小秘书尺寸占比    | 占窗口面积百分比（3%~20%）        | 7%                |
 | 代码高亮主题      | 需在 `settings.json` 中配置       | `"pycharm_light"` |
 
+### 安全配置
+
+| 参数                        | 位置                 | 说明                               | 默认值 |
+| --------------------------- | -------------------- | ---------------------------------- | ------ |
+| `max_file_size`             | `FileGuard` 构造参数 | 文件大小上限（字节），超过拒绝读取 | 50MB   |
+| `timeout`                   | `FileGuard` 构造参数 | 文件操作超时（秒），超时自动中断   | 30s    |
+| `MAX_PATH_LENGTH`           | `PathValidator`      | 路径长度上限                       | 260    |
+| `MAX_FILENAME_LENGTH`       | `InputValidator`     | 文件名长度上限                     | 255    |
+| `MAX_SEARCH_LENGTH`         | `InputValidator`     | 搜索内容长度上限                   | 10000  |
+| `MAX_SETTING_STRING_LENGTH` | `InputValidator`     | 设置字符串长度上限                 | 1000   |
+| PBKDF2 迭代次数             | `CryptoManager`      | 密钥派生迭代次数                   | 600000 |
+| AES-GCM 密钥长度            | `CryptoManager`      | 加密密钥长度（字节）               | 32     |
+
 新增主题：在 `src/highlight_themes.py` 的 `THEMES` 字典中添加条目即可。
 
 ## 更新日志
 
+### v1.6.4
+
+**阶段五：可扩展性架构及重构实施**
+
+- **插件接口规范**：新建 `plugins/plugin_base.py`，定义完整插件生命周期（load/activate/deactivate/unload）、元数据规范（PluginMeta）、权限枚举（PluginPermission），最低兼容版本默认 1.6.4
+- **插件沙箱隔离**：新建 `plugins/plugin_sandbox.py`，实现插件运行隔离（独立线程执行）、超时控制（默认30秒）、权限检查（MVP阶段严格只读访问），未授权访问抛出 `SandboxViolationError`，超时抛出 `SandboxTimeoutError`
+- **插件管理系统**：新建 `plugins/plugin_manager.py`，实现从 `plugins/` 目录递归扫描插件包、验证清单完整性（plugin.json 必需字段）、插件注册/激活/停用/卸载管理接口、热加载机制（reload_plugin 不重启更新插件）
+- **示例插件**：新建 `plugins/hello_panzer/`（基础功能插件，展示生命周期和只读API）和 `plugins/word_counter/`（UI扩展插件，展示编辑器交互和状态栏集成）
+- **插件API文档**：新建 `plugins/plugin_api.md`，包含完整的插件开发指南、权限系统说明、沙箱隔离规范、PluginAPI接口参考和示例代码
+- **主题系统**：新建 `themes/theme_engine.py`，支持JSON/YAML格式外部主题加载、颜色方案解析、QSS样式表自动生成、主题切换覆盖所有UI元素。新建 `themes/theme_preview.py`，提供主题预览对话框和实时预览功能
+- **数据存储抽象层**：新建 `storage/storage_interface.py`，定义IStorage接口（CRUD/事务/元数据操作标准方法）。新建 `storage/json_storage.py`（JSON文件存储适配器）和 `storage/sqlite_storage.py`（SQLite数据库存储适配器）。新建 `storage/storage_factory.py`（存储实现工厂）和 `storage/storage_migrator.py`（存储间数据迁移工具）
+- **主窗口集成**：修改 `main_window.py`，在启动流程中初始化主题引擎和插件管理器，菜单栏新增主题管理和插件管理入口
+- **单元测试**：新增 `test_plugin_system.py`、`test_plugin_manager.py`、`test_theme_system.py`、`test_storage.py`，覆盖插件生命周期、沙箱隔离、主题加载解析、存储适配器和数据迁移
+
 ### v1.6.3
+
+**阶段四：系统安全性强化与防护机制建设**
+
+- **路径安全验证模块**：新建 `security/path_validator.py`，实现路径规范化（`os.path.realpath`）、安全路径白名单机制、目录穿越攻击防护（`../`/`..\\` 检测）。支持 Windows 大小写不敏感文件系统和 `\\?\` 长路径前缀处理，路径长度限制 260 字符，控制字符检测
+- **文件操作安全控制**：新建 `security/file_guard.py`，实现文件大小限制机制（默认 50MB，可配置）和操作超时控制（默认 30 秒）。使用线程实现超时中断与资源释放，正确处理符号链接和稀疏文件的大小计算，禁止使用 `os.path.getsize` 简单检测
+- **存档数据加密系统**：新建 `security/crypto_manager.py`，基于用户密码使用 PBKDF2（600,000 次迭代）派生密钥，采用 AES-GCM 加密模式保护 `savegame.json`。支持未加密存档向加密格式的无缝迁移，迁移前自动备份，迁移后验证数据一致性。提供密码验证和加密状态检测接口
+- **输入验证统一框架**：新建 `security/input_validator.py`，实现文件名验证（过滤非法字符、Windows 保留名称、路径注入、长度限制 255）、搜索内容验证（XSS/注入模式检测、长度限制 10,000）、设置值验证（类型检查、范围限制、允许值列表）。提供 `sanitize_filename` 清洗接口
+- **安全模块集成**：修改 `config.py`、`editor_tabs.py`、`file_tree.py`、`find_replace.py`，所有文件操作通过 `FileGuard` 安全读写，新建/重命名文件通过 `InputValidator` 验证，搜索内容通过注入检测，存档支持加密/解密
+- **单元测试**：新增 `test_path_validator.py`、`test_file_guard.py`、`test_crypto_manager.py`、`test_input_validator.py`，安全模块测试覆盖率达 93%
 
 **Bug 修复**
 
@@ -289,7 +435,7 @@ PanzerNote/
 - **editor.py 模块拆分**（1152行 → 546行）：
   - `editor/editor_actions.py`：行操作（删除/上移/下移/复制行）、大小写转换、JSON/XML格式化
   - `editor/auto_pair_handler.py`：括号/引号自动配对逻辑（Mixin模式，支持中英文标点）
-- **类型提示与 mypy 集成**：为所有重构模块添加完整类型提示，创建 `mypy.ini` 配置文件，配置 Mixin 模式的类型检查豁免规则
+- **类型提示与 mypy 集成**：为所有重构模块添加完整类型提示，在 `pyproject.toml` 中配置 mypy，配置 Mixin 模式的类型检查豁免规则
 - **pytest 测试框架搭建**：安装 pytest/pytest-cov/pytest-qt，创建 `pyproject.toml` 配置，编写 187 个单元测试覆盖所有重构模块，核心模块覆盖率达 30.7%
 
 **阶段二：性能优化攻坚**

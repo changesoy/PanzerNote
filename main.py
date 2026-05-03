@@ -35,7 +35,7 @@ def main():
 
     app = QApplication(sys.argv)
     app.setApplicationName("PanzerNote")
-    app.setApplicationVersion("1.6.2")
+    app.setApplicationVersion("1.6.4")
 
     init_dpi()
 
@@ -66,7 +66,7 @@ def main():
     log_dir = os.path.join(config.get_base_path(), "data", "logs")
     setup_logging(log_dir=log_dir)
     logger = get_logger(__name__)
-    logger.info("PanzerNote 启动，版本 1.6.2")
+    logger.info("PanzerNote 启动，版本 1.6.4")
     profiler.end_phase()
 
     profiler.begin_phase("主窗口创建")

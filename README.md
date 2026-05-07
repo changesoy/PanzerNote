@@ -1,10 +1,9 @@
-# PanzerNote v1.6.4
+# PanzerNote v1.6.5
 
 一款以《战车少女》为主题的笔记工具。通过书写获取资源，建造收集角色，点亮完整图鉴。
 
 ## 规划中功能（TODO）
 
-- **打字奖励**：在编辑器的 `textChanged` 信号中接入有效击键统计模块，过滤掉粘贴/撤销/重做等非手动输入，仅计入用户实际键入的字符数；累计达到可配置阈值（默认 500 字符）后触发一次资源奖励（燃料/弹药/钢材各 +10，铝材 +3），每日设上限（默认 10,000 字符），奖励数据写入 `savegame.json`，实现记事本功能与游戏资源系统的正式联动。
 - **建造系统**：投入资源建造角色
 - **图鉴收集**：收集所有战车娘
 - **游戏设置界面**：完善游戏相关设置对话框
@@ -47,7 +46,7 @@
 - **资源获取**：
   - 在线挂机：燃料/弹药/钢材每分钟+5，铝材每3分钟+5
   - 离线挂机：收益为在线的1/3（向大取整），最多24小时
-  - 打字奖励（规划中）
+  - 打字奖励：每输入字符累计计数，递减收益算法（≤1000字符1.0倍率，1000-3000字符0.4倍率，>3000字符0.1倍率），每日上限10,000字符
 - **建造系统**：投入资源建造角色（规划中）
 - **图鉴收集**：收集所有战车娘（规划中）
 - **小秘书**：右下角显示角色立绘和台词气泡，点击互动
@@ -76,8 +75,9 @@ portraits/
 ### 插件系统
 
 - **插件生命周期**：完整的 load → activate → deactivate → unload 四阶段管理
-- **沙箱隔离**：插件运行在独立线程中，最大执行超时30秒，异常不影响主进程
-- **权限控制**：MVP阶段严格只读访问，8种权限分类（read_settings/read_savegame/access_editor/access_ui等）
+- **线程包装**：插件运行在独立线程中，最大执行超时30秒，异常不影响主进程（非进程隔离）
+- **权限控制**：12种权限分类，每个API调用前检查权限（read_settings/read_savegame/read_workspace/read_file_tree/access_editor/access_ui/access_network/access_filesystem/open_file/show_message/register_command/get_config）
+- **PluginAPI**：提供open_file、show_message、register_command、get_config等接口
 - **热加载**：支持不重启主程序的情况下更新插件
 - **示例插件**：hello_panzer（基础功能）、word_counter（UI扩展）
 
@@ -86,21 +86,27 @@ portraits/
 - **外部主题加载**：支持JSON/YAML格式的外部主题文件
 - **主题解析引擎**：解析颜色方案、布局配置，自动生成QSS样式表
 - **主题预览**：实时预览对话框，支持主题切换
-- **全局覆盖**：主题切换覆盖所有UI元素（主界面、对话框、菜单、编辑器等）
+- **全局生效**：所有UI组件通过ThemeAwareMixin订阅`theme_changed`信号，主题切换时自动更新样式（已集成11个组件：Editor/MarkdownPreviewWidget/EditorTabWidget/MinimapWidget/FileTreeWidget/FindReplaceBar/StatusBarWidget/SecretaryWidget/ResourceBar/GameSidebar/ShortcutPanel）
 
-### 数据存储抽象层
+### 存档加密
 
-- **IStorage接口**：标准化的CRUD、事务管理和元数据操作方法
-- **JSON存储适配器**：基于JSON文件的存储实现
-- **SQLite存储适配器**：基于SQLite数据库的存储实现
-- **存储工厂**：根据配置创建存储实例
-- **数据迁移**：支持不同存储实现间的数据迁移
+- **加密算法**：PBKDF2密钥派生 + AES-GCM加密模式
+- **密码验证**：支持密码正确性验证
+- **自动迁移**：支持未加密存档向加密格式的无缝迁移，以及加密到明文的反向迁移
+- **安全保存**：加密存档未解锁时跳过保存，防止默认数据覆写真实存档；关闭窗口时提示用户输入密码解锁
+
+### 版本管理
+
+- **集中式版本源**：`src/__init__.py` 中的 `__version__` 为唯一真相源，所有模块通过引用获取版本号
+- **动态版本配置**：`pyproject.toml` 通过 `setuptools.dynamic` 从 `src.__version__` 读取版本，无需硬编码
+- **版本一致性验证**：`scripts/verify_version.py` 工具检查项目中所有版本号引用是否一致
+- **启动时检查**：`main.py` 启动时自动验证版本一致性，不一致时记录警告日志
 
 ## 安装与运行
 
 ### 环境要求
 
-- Python 3.8+
+- Python 3.11+
 - Windows 10/11
 
 ### 安装依赖
@@ -110,7 +116,7 @@ pip install -r requirements.txt
 pip install PyQtWebEngine  # 可选，Markdown预览用QWebEngineView（否则退化为QTextBrowser）
 ```
 
-> **安全模块依赖**：`cryptography>=41.0.0` 已包含在 `requirements.txt` 中，用于存档数据加密（PBKDF2 + AES-GCM）。
+> **安全模块依赖**：`cryptography>=44.0.0` 已包含在 `requirements.txt` 中，用于存档数据加密（PBKDF2 + AES-GCM）。
 
 ### 运行
 
@@ -122,9 +128,9 @@ python main.py
 
 ```
 PanzerNote/
-├── main.py                    # 程序入口
+├── main.py                    # 程序入口（含启动时版本一致性检查）
 ├── requirements.txt           # 依赖列表
-├── pyproject.toml             # 项目配置（pytest/mypy/依赖/元数据）
+├── pyproject.toml             # 项目配置（pytest/mypy/依赖/动态版本引用）
 ├── user_data_path.txt         # 持久化用户数据路径
 ├── benchmarks/                # 性能基准测试
 │   ├── __init__.py
@@ -143,6 +149,7 @@ PanzerNote/
 │   ├── test_editor_actions.py      # 编辑器行操作：删除/复制/上移/下移行
 │   ├── test_auto_pair_handler.py   # 括号配对：英文/中文配对/右括号跳过
 │   ├── test_config.py              # 配置管理：编辑器/游戏/资源/统计
+│   ├── test_savegame_manager.py    # 存档管理器：加载/保存/加密状态/解锁数据恢复/每日签到
 │   ├── test_first_run_dialog.py    # 首次运行：初始化/路径/目录创建
 │   ├── test_game_sidebar.py        # 游戏侧边栏：按钮/视图状态/信号
 │   ├── test_highlight_themes.py    # 高亮主题：主题列表/格式/CSS/HTML
@@ -160,14 +167,15 @@ PanzerNote/
 │   ├── test_plugin_system.py       # 插件基础：状态/权限/元数据/沙箱
 │   ├── test_plugin_manager.py      # 插件管理：扫描/加载/热加载/验证
 │   ├── test_theme_system.py        # 主题系统：颜色/布局/QSS生成/预览
-│   ├── test_storage.py             # 存储抽象：JSON/SQLite/CRUD/事务/迁移
 │   ├── test_feature_flags.py       # Feature Flag：已注册flag/未注册flag警告/默认值
 │   └── test_virtual_scroll.py      # 虚拟滚动：大文件加载/异常回退/边界情况
 ├── src/                       # 源代码
-│   ├── __init__.py            # 版本号定义
+│   ├── __init__.py            # 版本号唯一真相源（__version__/get_version/get_version_tuple）
 │   ├── main_window.py         # 主窗口（已拆分）
 │   ├── core/                  # 核心模块
-│   │   ├── config.py          # 配置管理
+│   │   ├── config.py          # 配置管理（组合SavegameManager + SecurityManager）
+│   │   ├── savegame_manager.py # 存档管理器（加载/保存/加密状态/SavegameSaveResult枚举/每日签到）
+│   │   ├── security_manager.py # 安全管理器（PathValidator/FileGuard/InputValidator集成）
 │   │   ├── timer_manager.py   # 定时器管理中心
 │   │   ├── event_bus.py       # 事件路由系统
 │   │   ├── menu_builder.py    # 菜单构建器
@@ -201,23 +209,18 @@ PanzerNote/
 │   │   ├── path_validator.py  # 路径安全验证（规范化/白名单/穿越防护）
 │   │   ├── file_guard.py      # 文件操作安全控制（大小限制/超时控制）
 │   │   ├── crypto_manager.py  # 存档加密系统（PBKDF2+AES-GCM/迁移/备份）
-│   │   └── input_validator.py # 输入验证框架（文件名/搜索/设置值）
+│   │   ├── input_validator.py # 输入验证框架（文件名/搜索/设置值）
 │   ├── plugins/               # 插件系统
 │   │   ├── __init__.py        # 插件系统导出
-│   │   ├── plugin_base.py     # 插件基类与元数据定义
-│   │   ├── plugin_sandbox.py  # 插件沙箱（隔离/超时/权限控制）
-│   │   └── plugin_manager.py  # 插件管理器（扫描/加载/热加载）
+│   │   ├── plugin_base.py     # 插件基类与元数据定义（min_app_version引用集中版本）
+│   │   ├── plugin_sandbox.py  # 插件包装器（线程隔离/超时/权限控制/PluginAPI含open_file/show_message/register_command/get_config）
+│   │   ├── plugin_manager.py  # 插件管理器（扫描/加载/热加载）
+│   │   └── plugin_manager_dialog.py # 插件管理对话框
 │   ├── themes/                # 主题系统
 │   │   ├── __init__.py        # 主题系统导出
 │   │   ├── theme_engine.py    # 主题引擎（加载/解析/样式生成）
+│   │   ├── theme_aware_mixin.py # 主题感知混入（组件订阅theme_changed信号）
 │   │   └── theme_preview.py   # 主题预览对话框
-│   ├── storage/               # 数据存储抽象层
-│   │   ├── __init__.py        # 存储系统导出
-│   │   ├── storage_interface.py # IStorage接口定义
-│   │   ├── json_storage.py    # JSON文件存储适配器
-│   │   ├── sqlite_storage.py  # SQLite数据库存储适配器
-│   │   ├── storage_factory.py # 存储实现工厂
-│   │   └── storage_migrator.py # 数据迁移工具
 │   └── utils/                 # 工具模块
 │       ├── __init__.py        # 工具模块导出
 │       ├── logger.py          # 结构化日志系统
@@ -225,7 +228,9 @@ PanzerNote/
 │       ├── error_handler.py   # 统一错误提示系统
 │       ├── dpi_helper.py      # 高DPI缩放适配
 │       ├── feature_flags.py   # Feature Flag 系统
-│       └── lazy_loader.py     # 模块懒加载与启动分析
+│       ├── lazy_loader.py     # 启动性能分析（StartupProfiler阶段计时）
+├── scripts/                   # 工具脚本
+│   └── verify_version.py     # 版本一致性验证工具
 ├── data/
 │   ├── assets/
 │   │   ├── portraits/          # 角色立绘
@@ -255,37 +260,37 @@ pytest tests/ -v
 
 ### 测试文件说明
 
-| 测试文件                   | 测试目的            | 预期验证的功能点                                                                        |
-| -------------------------- | ------------------- | --------------------------------------------------------------------------------------- |
-| test_logger.py             | 结构化日志系统      | 初始化创建 `src` 前缀 logger；文件日志写入 `panzernote.log`；幂等性不重复添加 handler   |
-| test_exceptions.py         | `@safe_call` 装饰器 | 正常函数返回原值；异常时返回 `default`；`reraise=True` 重新抛出；`catch` 仅捕获指定类型 |
-| test_event_bus.py          | 事件路由系统        | `connect_signals` 连接所有 UI 信号；视图切换正确；文件保存更新状态                      |
-| test_timer_manager.py      | 定时器管理器        | 创建自动保存/统计/挂机三个定时器；动态调整间隔；`stop_all` 停止所有；回调异常不崩溃     |
-| test_game_engine.py        | 挂机收益引擎        | 基础奖励 fuel/ammo/steel 各 5；铝材计数控制；倍率乘算；离线 ≥5 分钟计算；24 小时上限    |
-| test_menu_builder.py       | 菜单构建器          | 生成六大菜单；文件/编辑菜单项完整；动作触发对应方法                                     |
-| test_editor_actions.py     | 编辑器行操作        | 删除行/复制行/上移行/下移行正确执行；边界条件处理                                       |
-| test_auto_pair_handler.py  | 括号自动配对        | 英文/中文括号配对；右括号跳过；设置开关控制                                             |
-| test_config.py             | 配置管理器          | 编辑器/游戏设置持久化；资源 CRUD；打字统计跨日归零                                      |
-| test_first_run_dialog.py   | 首次运行对话框      | 窗口标题/默认路径正确；确认后创建目录结构                                               |
-| test_game_sidebar.py       | 游戏侧边栏          | 按钮初始化；`set_current_view` 高亮；信号发射                                           |
-| test_highlight_themes.py   | 代码高亮主题        | 主题列表/获取/格式构建/预览 CSS/代码高亮 HTML                                           |
-| test_resource_bar.py       | 资源栏组件          | 资源项颜色映射；数值设置/刷新/打字统计                                                  |
-| test_secretary_widget.py   | 小秘书组件          | 气泡显示/隐藏；消息显示；事件台词匹配                                                   |
-| test_status_bar.py         | 状态栏组件          | 默认标签文本；统计/编码/文件类型更新                                                    |
-| test_syntax_highlighter.py | 语法高亮器          | Markdown 标题/代码块/行内代码/粗体/链接/列表/引用                                       |
-| test_dpi_helper.py         | 高 DPI 缩放         | 缩放因子范围；整数/尺寸/字体/样式表缩放；幂等性                                         |
-| test_error_handler.py      | 错误提示系统        | 路径/IP/密码/token 过滤；分类标签/建议映射完整                                          |
-| test_shortcut_manager.py   | 快捷键管理器        | 默认加载/注册/回调/冲突检测/持久化                                                      |
-| test_path_validator.py     | 路径安全验证        | 规范化/目录穿越检测/白名单/路径长度/控制字符                                            |
-| test_file_guard.py         | 文件操作安全        | 安全读写往返一致；大小限制/超时控制                                                     |
-| test_crypto_manager.py     | 存档加密系统        | 加密-解密往返；错误密码/损坏数据异常；中文数据；迁移备份                                |
-| test_input_validator.py    | 输入验证框架        | 文件名验证/保留名拒绝/搜索注入防护/设置值范围                                           |
-| test_plugin_system.py      | 插件基础架构        | 状态/权限枚举；元数据序列化；生命周期；沙箱权限检查                                     |
-| test_plugin_manager.py     | 插件管理器          | 扫描/加载/激活/停用/卸载/热加载/清单验证/版本兼容                                       |
-| test_theme_system.py       | 主题系统            | 颜色方案/布局配置/主题定义/引擎加载/QSS 生成                                            |
-| test_storage.py            | 存储抽象层          | JSON/SQLite 适配器 CRUD；事务回滚；工厂创建；数据迁移                                   |
-| test_feature_flags.py      | Feature Flag 系统   | 已注册 flag 返回正确值；未注册 flag 返回 False 并记录警告；配置文件加载/无效JSON容错    |
-| test_virtual_scroll.py     | 虚拟滚动管理器      | 大文件返回 True 并激活虚拟滚动；`setPlainText` 异常回退普通模式；阈值边界；Unicode 处理 |
+| 测试文件                   | 测试目的            | 预期验证的功能点                                                                                          |
+| -------------------------- | ------------------- | --------------------------------------------------------------------------------------------------------- |
+| test_logger.py             | 结构化日志系统      | 初始化创建 `src` 前缀 logger；文件日志写入 `panzernote.log`；幂等性不重复添加 handler                     |
+| test_exceptions.py         | `@safe_call` 装饰器 | 正常函数返回原值；异常时返回 `default`；`reraise=True` 重新抛出；`catch` 仅捕获指定类型                   |
+| test_event_bus.py          | 事件路由系统        | `connect_signals` 连接所有 UI 信号；视图切换正确；文件保存更新状态                                        |
+| test_timer_manager.py      | 定时器管理器        | 创建自动保存/统计/挂机三个定时器；动态调整间隔；`stop_all` 停止所有；回调异常不崩溃                       |
+| test_game_engine.py        | 挂机收益引擎        | 基础奖励 fuel/ammo/steel 各 5；铝材计数控制；倍率乘算；离线 ≥5 分钟计算；24 小时上限                      |
+| test_menu_builder.py       | 菜单构建器          | 生成六大菜单；文件/编辑菜单项完整；动作触发对应方法                                                       |
+| test_editor_actions.py     | 编辑器行操作        | 删除行/复制行/上移行/下移行正确执行；边界条件处理                                                         |
+| test_auto_pair_handler.py  | 括号自动配对        | 英文/中文括号配对；右括号跳过；设置开关控制                                                               |
+| test_config.py             | 配置管理器          | 编辑器/游戏设置持久化；资源 CRUD；打字统计跨日归零                                                        |
+| test_savegame_manager.py   | 存档管理器          | 加密/未加密存档加载；SavegameSaveResult枚举；加密未读状态跳过保存；解锁后数据恢复；加密文件备份；每日签到 |
+| test_first_run_dialog.py   | 首次运行对话框      | 窗口标题/默认路径正确；确认后创建目录结构                                                                 |
+| test_game_sidebar.py       | 游戏侧边栏          | 按钮初始化；`set_current_view` 高亮；信号发射                                                             |
+| test_highlight_themes.py   | 代码高亮主题        | 主题列表/获取/格式构建/预览 CSS/代码高亮 HTML                                                             |
+| test_resource_bar.py       | 资源栏组件          | 资源项颜色映射；数值设置/刷新/打字统计                                                                    |
+| test_secretary_widget.py   | 小秘书组件          | 气泡显示/隐藏；消息显示；事件台词匹配                                                                     |
+| test_status_bar.py         | 状态栏组件          | 默认标签文本；统计/编码/文件类型更新                                                                      |
+| test_syntax_highlighter.py | 语法高亮器          | Markdown 标题/代码块/行内代码/粗体/链接/列表/引用                                                         |
+| test_dpi_helper.py         | 高 DPI 缩放         | 缩放因子范围；整数/尺寸/字体/样式表缩放；幂等性                                                           |
+| test_error_handler.py      | 错误提示系统        | 路径/IP/密码/token 过滤；分类标签/建议映射完整                                                            |
+| test_shortcut_manager.py   | 快捷键管理器        | 默认加载/注册/回调/冲突检测/持久化                                                                        |
+| test_path_validator.py     | 路径安全验证        | 规范化/目录穿越检测/白名单/路径长度/控制字符                                                              |
+| test_file_guard.py         | 文件操作安全        | 安全读写往返一致；大小限制/超时控制                                                                       |
+| test_crypto_manager.py     | 存档加密系统        | 加密-解密往返；错误密码/损坏数据异常；中文数据；迁移备份                                                  |
+| test_input_validator.py    | 输入验证框架        | 文件名验证/保留名拒绝/搜索注入防护/设置值范围                                                             |
+| test_plugin_system.py      | 插件基础架构        | 状态/权限枚举；元数据序列化；生命周期；沙箱权限检查                                                       |
+| test_plugin_manager.py     | 插件管理器          | 扫描/加载/激活/停用/卸载/热加载/清单验证/版本兼容                                                         |
+| test_theme_system.py       | 主题系统            | 颜色方案/布局配置/主题定义/引擎加载/QSS 生成                                                              |
+| test_feature_flags.py      | Feature Flag 系统   | 已注册 flag 返回正确值；未注册 flag 返回 False 并记录警告；配置文件加载/无效JSON容错                      |
+| test_virtual_scroll.py     | 虚拟滚动管理器      | 大文件返回 True 并激活虚拟滚动；`setPlainText` 异常回退普通模式；阈值边界；Unicode 处理                   |
 
 ## 快捷键
 
@@ -371,7 +376,7 @@ pytest tests/ -v
 | 参数                        | 位置                 | 说明                               | 默认值 |
 | --------------------------- | -------------------- | ---------------------------------- | ------ |
 | `max_file_size`             | `FileGuard` 构造参数 | 文件大小上限（字节），超过拒绝读取 | 50MB   |
-| `timeout`                   | `FileGuard` 构造参数 | 文件操作超时（秒），超时自动中断   | 30s    |
+| `timeout`                   | `FileGuard` 构造参数 | 文件操作超时（秒），超时自动中断   | 15s    |
 | `MAX_PATH_LENGTH`           | `PathValidator`      | 路径长度上限                       | 260    |
 | `MAX_FILENAME_LENGTH`       | `InputValidator`     | 文件名长度上限                     | 255    |
 | `MAX_SEARCH_LENGTH`         | `InputValidator`     | 搜索内容长度上限                   | 10000  |
@@ -382,6 +387,23 @@ pytest tests/ -v
 新增主题：在 `src/highlight_themes.py` 的 `THEMES` 字典中添加条目即可。
 
 ## 更新日志
+
+### v1.6.5
+
+**架构整改与安全修复**
+
+- **Config 职责拆分**：将 `config.py` 中的存档管理和安全管理逻辑拆分为独立类。新建 `core/savegame_manager.py`（`SavegameManager`），负责存档加载/保存/加密状态/资源CRUD；新建 `core/security_manager.py`（`SecurityManager`），负责路径验证/文件操作安全/输入验证的集成管理。`Config` 类通过组合方式委托调用，保持对外接口兼容
+- **数据存储抽象层移除**：删除 `src/storage/` 目录（`storage_interface.py`/`json_storage.py`/`sqlite_storage.py`/`storage_factory.py`/`storage_migrator.py`），因全项目无业务调用方。`test_storage.py` 已一并移除
+- **LazyLoader 移除**：`LazyLoader` 类（register/get/add_deferred_init/run_deferred_inits）全项目无调用方，已移除。仅保留 `StartupProfiler` 启动性能分析器，阶段管理集中到 `main.py`
+- **PluginManagerDialog 提取**：从 `plugin_manager.py` 中提取 `PluginManagerDialog` 为独立模块 `plugin_manager_dialog.py`，降低单文件复杂度
+- **主题系统全局生效**：新建 `themes/theme_aware_mixin.py`（`ThemeAwareMixin`），所有 UI 组件通过继承此 Mixin 订阅 `theme_changed` 信号，主题切换时自动更新样式。编辑器和 Markdown 预览中的硬编码颜色已改为主题系统变量
+- **加密存档保存逻辑修复**（SEC-003）：`SavegameManager.save()` 新增 `SavegameSaveResult` 枚举返回值（`SUCCESS`/`SKIPPED_ENCRYPTED_UNREAD`/`ENCRYPTION_FAILED`），加密但未解锁的存档返回 `SKIPPED_ENCRYPTED_UNREAD` 而非静默跳过。MainWindow 在关闭时检查此状态并弹出密码输入对话框，供用户解锁存档后保存
+- **加密存档解锁数据恢复**：修复 `set_encryption_password()` 在从加密未读状态解锁时，未重新加载原始加密数据导致内存数据为默认值的安全隐患。解锁时现在自动调用 `decrypt_savegame()` 加载原始数据，密码错误则恢复加密未读状态
+- **加密存档加载安全备份**：`load()` 在进入加密未读状态（无密码或解密失败）时，自动备份加密文件（`.encrypted.bak`），作为数据恢复安全网
+- **SavegameManager 重复初始化修复**：`Config.__init__()` 中创建 `SavegameManager` 实例后，`_load_all()` 不再重复创建新实例，仅调用 `load()` 加载数据，避免状态不一致
+- **版本号统一引用**：所有版本号引用统一使用 `from src import __version__`，消除硬编码字符串
+- **集中式版本管理**：`src/__init__.py` 新增 `get_version()` 和 `get_version_tuple()` 工具函数，作为版本号唯一真相源。`pyproject.toml` 改用 `dynamic = ["version"]` + `setuptools.dynamic` 从 `src.__version__` 动态读取版本。`plugin_base.py` 的 `min_app_version` 默认值改为引用 `_app_version`，插件示例文件同步更新。新建 `scripts/verify_version.py` 版本一致性验证工具，`main.py` 启动时自动检查版本一致性
+- **每日签到**：`SavegameManager` 新增 `check_daily_checkin()` 方法，每日首次启动自动发放签到奖励（燃料/弹药/钢材/铝材各+100），通过小秘书提示
 
 ### v1.6.4
 
@@ -395,7 +417,7 @@ pytest tests/ -v
 - **主题系统**：新建 `themes/theme_engine.py`，支持JSON/YAML格式外部主题加载、颜色方案解析、QSS样式表自动生成、主题切换覆盖所有UI元素。新建 `themes/theme_preview.py`，提供主题预览对话框和实时预览功能
 - **数据存储抽象层**：新建 `storage/storage_interface.py`，定义IStorage接口（CRUD/事务/元数据操作标准方法）。新建 `storage/json_storage.py`（JSON文件存储适配器）和 `storage/sqlite_storage.py`（SQLite数据库存储适配器）。新建 `storage/storage_factory.py`（存储实现工厂）和 `storage/storage_migrator.py`（存储间数据迁移工具）
 - **主窗口集成**：修改 `main_window.py`，在启动流程中初始化主题引擎和插件管理器，菜单栏新增主题管理和插件管理入口
-- **单元测试**：新增 `test_plugin_system.py`、`test_plugin_manager.py`、`test_theme_system.py`、`test_storage.py`，覆盖插件生命周期、沙箱隔离、主题加载解析、存储适配器和数据迁移
+- **单元测试**：新增 `test_plugin_system.py`、`test_plugin_manager.py`、`test_theme_system.py`，覆盖插件生命周期、沙箱隔离、主题加载解析
 
 ### v1.6.3
 
@@ -417,7 +439,7 @@ pytest tests/ -v
 
 - **高 DPI 适配**：新建 `utils/dpi_helper.py`，实现基于 `devicePixelRatio` 的动态缩放机制。应用启动时自动启用 `Qt.AA_EnableHighDpiScaling`，所有视觉元素尺寸使用相对单位（`scale()`/`scale_size()`/`scale_font()`/`scale_stylesheet()`），支持 100%~200% 缩放比例下正常显示
 - **小秘书位置跟随重构**：重构 `secretary_widget.py` 位置跟踪逻辑，使用 `eventFilter` 实时监听父容器 `resize`/`move` 事件，采用防抖机制（≤50ms）避免频繁更新，动态位置计算算法确保立绘始终右下对齐且不越界，支持窗口最大化/最小化/任意尺寸调整/多显示器拖动
-- **快捷键系统**：新建 `core/shortcut_manager.py`，实现快捷键注册、冲突检测（系统级 + 应用内部）、自定义修改与持久化。新建 `ui/shortcut_panel.py` 快捷键提示面板（`Ctrl+/` 调出），支持搜索、按功能模块分类展示、双击编辑快捷键。`settings.json` 新增 `shortcuts` 配置段
+- **快捷键系统**：新建 `core/shortcut_manager.py`，实现快捷键注册、冲突检测（系统级 + 应用内部）、自定义修改与持久化。`MenuBuilder` 已接入 `ShortcutManager`，所有菜单项通过 `manager.register()` 注册，用户在快捷键面板自定义的快捷键能真正生效。新建 `ui/shortcut_panel.py` 快捷键提示面板（`Ctrl+/` 调出），支持搜索、按功能模块分类展示、双击编辑快捷键。`settings.json` 新增 `shortcuts` 配置段
 - **错误提示系统优化**：新建 `utils/error_handler.py`，实现统一错误处理中间层。8 类错误分类（文件/网络/配置/游戏/编辑器/权限/内存/通用），每类含默认建议操作。敏感信息过滤（路径/堆栈/IP/密码/Token），确保不泄露内部信息。自定义错误处理器注册机制，支持回退到默认对话框
 - **单元测试**：新增 `test_dpi_helper.py`、`test_error_handler.py`、`test_shortcut_manager.py`，阶段三新增模块测试覆盖率达 93%
 
@@ -444,7 +466,7 @@ pytest tests/ -v
 - **minimap.py 渲染优化**：重构 `_render_content()` 方法，实现块级缓存（BLOCK_SIZE=50行/块）+ 批量渲染。使用 `QPicture` 缓存每个块的渲染结果，仅在内容变更时标记对应缓存块为脏块并重新渲染。将逐字符渲染改为按颜色分段批量绘制，显著减少 `QPainter` 状态切换次数
 - **highlight_code_html() 异步渲染**：新建 `editor/async_highlight.py`，实现 `HighlightWorker`（QThread）和 `AsyncHighlightRenderer`。渲染工作在后台线程执行，主线程通过 `Qt.ConnectionType.QueuedConnection` 信号接收结果。支持最多 2 个并发渲染线程、任务优先级队列、10秒超时自动取消、渲染结果 LRU 缓存（50条）。集成到 `markdown_preview.py`，先渲染占位符再异步替换高亮结果
 - **markdown_preview.py 增量渲染优化**：新建 `editor/incremental_renderer.py`，实现 `IncrementalRenderer` 和 `LRUCache`。基于 MD5 哈希的渲染结果缓存（容量50），相同文本直接返回缓存。行级变更检测，仅当文本实际变更时才重新调用渲染函数。代码块懒加载：异步模式下先显示纯文本占位，高亮完成后替换
-- **应用启动性能优化**：新建 `utils/lazy_loader.py`，实现 `StartupProfiler` 启动性能分析器和 `LazyLoader` 模块懒加载管理器。`main.py` 中延迟导入 MainWindow，各初始化阶段加入性能分析标记。`_restore_state()` 改为延迟打开文件：先打开第一个文件使窗口快速呈现，剩余文件通过 `QTimer.singleShot(0)` 在事件循环空闲时逐个加载
+- **应用启动性能优化**：新建 `utils/lazy_loader.py`，实现 `StartupProfiler` 启动性能分析器。`main.py` 中延迟导入 MainWindow，各初始化阶段加入性能分析标记。`_restore_state()` 改为延迟打开文件：先打开第一个文件使窗口快速呈现，剩余文件通过 `QTimer.singleShot(0)` 在事件循环空闲时逐个加载（原 `LazyLoader` 类已移除，因无业务调用方）
 - **性能基准测试体系**：创建 `benchmarks/` 目录，包含 `test_data_generator.py`（生成小型500行/中型5000行/大型50000行测试文件）和 `run_baseline.py`（自动化基准测试运行器）。测量指标包括：文件打开时间、滚动FPS、缩略图渲染时间、代码高亮时间、内存占用、启动时间
 - **Feature Flag 系统**：新建 `utils/feature_flags.py`，实现 5 个性能优化开关（`virtual_scroll`/`minimap_block_cache`/`async_highlight`/`markdown_incremental`/`lazy_loading`），默认全部关闭使用旧有实现路径。配置持久化到 `feature_flags.json`，支持运行时动态切换
 

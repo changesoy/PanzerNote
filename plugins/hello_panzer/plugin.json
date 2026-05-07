@@ -1,0 +1,10 @@
+{
+  "name": "hello_panzer",
+  "version": "1.0.0",
+  "description": "基础功能示例插件 - 在日志中输出问候信息，展示插件生命周期和只读API使用",
+  "author": "PanzerNote Team",
+  "entry": "main.py",
+  "min_app_version": "1.6.4",
+  "permissions": ["read_settings", "read_savegame"],
+  "tags": ["demo", "basic"]
+}

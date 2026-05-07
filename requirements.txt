@@ -4,6 +4,7 @@ Pygments>=2.18
 markdown>=3.7
 Pillow>=10.0.0
 cryptography>=44.0.0
+send2trash>=1.8.0
 
 # 开发依赖
 pytest>=9.0.3

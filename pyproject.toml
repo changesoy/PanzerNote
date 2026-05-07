@@ -1,10 +1,10 @@
 [build-system]
 requires = ["setuptools>=68.0", "wheel"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "PanzerNote"
-version = "1.6.4"
+dynamic = ["version"]
 description = "战车少女主题记事本"
 authors = [
     {name = "Changes"},
@@ -27,6 +27,7 @@ dependencies = [
     "markdown>=3.7",
     "Pillow>=10.0.0",
     "cryptography>=44.0.0",
+    "send2trash>=1.8.0",
 ]
 
 [project.optional-dependencies]
@@ -77,3 +78,6 @@ disable_error_code = ["attr-defined", "arg-type", "return-value"]
 module = "src.editor.auto_pair_handler"
 disallow_untyped_defs = true
 disable_error_code = ["attr-defined", "arg-type", "misc"]
+
+[tool.setuptools.dynamic]
+version = {attr = "src.__version__"}

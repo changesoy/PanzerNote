@@ -1,0 +1,12 @@
+PanzerNote Crash Log
+Time: 2026-05-07 00:10:22
+Version: unknown
+Python: 3.11.9 (tags/v3.11.9:de54cf5, Apr  2 2024, 10:12:12) [MSC v.1938 64 bit (AMD64)]
+OS: win32
+
+============================================================
+
+Traceback (most recent call last):
+  File "C:\Users\chang\PycharmProjects\PanzerNote\main.py", line 44, in <module>
+    from PyQt5.QtWidgets import QApplication
+ModuleNotFoundError: No module named 'PyQt5'

@@ -407,7 +407,7 @@ class MainWindow(QMainWindow):
         ))
 
     def _check_daily_checkin(self):
-        if self.config._savegame_manager.check_daily_checkin():
+        if self.config.savegame_manager.check_daily_checkin():
             QTimer.singleShot(3000, lambda: self.secretary.show_message(
                 "每日签到成功！\n燃料+100 弹药+100\n钢材+100 铝材+100",
                 5000
@@ -431,13 +431,25 @@ class MainWindow(QMainWindow):
                     return
         event.ignore()
 
+    _SUPPORTED_DROP_EXTS = frozenset({
+        '.txt', '.md', '.py', '.c', '.cpp', '.h', '.java', '.js',
+        '.json', '.html', '.css', '.xml', '.yaml', '.yml', '.toml',
+        '.ini', '.log', '.sql', '.sh', '.go', '.rs', '',
+    })
+
     def dropEvent(self, event):
         if event.mimeData().hasUrls():
             for url in event.mimeData().urls():
                 if url.isLocalFile():
                     filepath = url.toLocalFile()
-                    if os.path.isfile(filepath):
-                        self._open_file(filepath)
+                    ext = os.path.splitext(filepath)[1].lower()
+                    if not os.path.isfile(filepath):
+                        continue
+                    if ext not in self._SUPPORTED_DROP_EXTS:
+                        QMessageBox.warning(self, "不支持的文件类型",
+                                            f"PanzerNote 不支持打开 {ext or '无扩展名'} 类型的文件。")
+                        continue
+                    self._open_file(filepath)
             event.acceptProposedAction()
         else:
             event.ignore()
@@ -561,12 +573,12 @@ class MainWindow(QMainWindow):
         if is_md:
             try:
                 from markdown_it import MarkdownIt
-                md = MarkdownIt()
+                md = MarkdownIt("commonmark", {"html": False})
                 html_content = md.render(content)
             except ImportError:
                 try:
                     import markdown
-                    html_content = markdown.markdown(content)
+                    html_content = markdown.markdown(content, extensions=["markdown.extensions.tables"])
                 except ImportError:
                     html_content = f"<pre>{html_module.escape(content)}</pre>"
         else:
@@ -606,12 +618,12 @@ class MainWindow(QMainWindow):
         if is_md:
             try:
                 from markdown_it import MarkdownIt
-                md = MarkdownIt()
+                md = MarkdownIt("commonmark", {"html": False})
                 html_content = md.render(content)
             except ImportError:
                 try:
                     import markdown
-                    html_content = markdown.markdown(content)
+                    html_content = markdown.markdown(content, extensions=["markdown.extensions.tables"])
                 except ImportError:
                     html_content = f"<pre>{content}</pre>"
         else:
@@ -818,13 +830,10 @@ class MainWindow(QMainWindow):
         split_tabs.cursor_position_changed.connect(self._update_stats)
         self.editor_splitter.addWidget(split_tabs)
         self._split_tabs.append(split_tabs)
-        current_info = self.editor_tabs.get_current_file_info()
-        if current_info and current_info.get("filepath"):
-            split_tabs.open_file(current_info["filepath"])
-        else:
-            split_tabs.new_file()
+        split_tabs.new_file()
         total = self.editor_splitter.width()
         self.editor_splitter.setSizes([total // 2, total // 2])
+        self.secretary.show_message("已启用分屏。注意：分屏中编辑的是独立文件，与主面板不同步。")
 
     def _close_split(self):
         """关闭分屏"""
@@ -1161,6 +1170,8 @@ class MainWindow(QMainWindow):
     def _apply_theme(self):
         stylesheet = self.theme_engine.generate_stylesheet()
         self.setStyleSheet(stylesheet)
+        colors = self.theme_engine.get_active_theme().colors
+        self._game_placeholder.setStyleSheet(f"color: {colors.text_disabled}; font-size: 18px;")
 
     def _show_theme_dialog(self):
         dialog = ThemePreviewDialog(self.theme_engine, self)

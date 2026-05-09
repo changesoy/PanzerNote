@@ -109,6 +109,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self._file_type = "纯文本"
         self._wrap_mode = "no_wrap"
         self._programmatic_modify = False
+        self._is_pasting = False
 
         self._init_ui()
         self._init_minimap_attrs()
@@ -507,16 +508,12 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
                 cursor = self.textCursor()
                 if not cursor.hasSelection():
                     pos = cursor.position()
-                    text = self.toPlainText()
-                    # 检查光标前后是否是成对的括号/引号
-                    if pos > 0 and pos < len(text):
-                        char_before = text[pos - 1]
-                        char_after = text[pos]
-                        if char_before in self.AUTO_PAIR_CHARS and self.AUTO_PAIR_CHARS[char_before] == char_after:
-                            # 同时删除前后两个字符
-                            cursor.deleteChar()  # 删除后面的
-                            cursor.deletePreviousChar()  # 删除前面的
-                            return
+                    char_before = self._doc_char_at(pos - 1)
+                    char_after = self._doc_char_at(pos)
+                    if char_before in self.AUTO_PAIR_CHARS and self.AUTO_PAIR_CHARS[char_before] == char_after:
+                        cursor.deleteChar()
+                        cursor.deletePreviousChar()
+                        return
             # 不满足条件时，交给默认处理
             super().keyPressEvent(event)
             return
@@ -564,6 +561,13 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
 
         super().inputMethodEvent(event)
         return None
+
+    def insertFromMimeData(self, source):
+        self._is_pasting = True
+        try:
+            super().insertFromMimeData(source)
+        finally:
+            self._is_pasting = False
 
     def _handle_enter(self):
         """处理回车键 - 自动缩进"""

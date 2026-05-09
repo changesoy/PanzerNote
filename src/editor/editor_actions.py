@@ -332,14 +332,6 @@ class EditorActionsMixin:
     # ═══════════════════ CJK 引号辅助 ═══════════════════
 
     def _pick_single_cjk_quote(self, ch: str, pos: int) -> str:
-        """根据未闭合引号栈，自动判定应插入左引号还是右引号
-
-        Args:
-            ch: 用户输入的引号字符（左或右均可）
-            pos: 当前光标位置
-        Returns:
-            应实际插入的引号字符
-        """
         pairs = [
             ("\u201c", "\u201d"),
             ("\u2018", "\u2019"),
@@ -360,9 +352,12 @@ class EditorActionsMixin:
         if open_ch is None:
             return ch
 
-        text = self.toPlainText()
         scan_start = max(0, pos - 20000)
-        prefix = text[scan_start:pos]
+        scan_cursor = QTextCursor(self.document())
+        scan_cursor.setPosition(scan_start)
+        scan_cursor.setPosition(pos, QTextCursor.KeepAnchor)
+        prefix = scan_cursor.selectedText()
+
         stack: list[str] = []
         for c in prefix:
             if c in opens:

@@ -8,10 +8,9 @@
   - 全量缓存：内容变更时重建整个 minimap 缓存（QPixmap）
   - 块级渲染缓存（feature flag "minimap_block_cache"）：
     将文档按 BLOCK_SIZE 行分块，每块缓存为 QPicture。
-    注意：当前实现为全量重建，不做脏块增量更新。
-    原因：QTextDocument 的 contentsChanged 信号不提供行级变更范围，
-    精确增量更新的复杂度远高于收益。若未来需要，可接入
-    QSyntaxHighlighter 的 reformatBlock 信号实现行级脏标记。
+    v1.6.6 改进：监听 QTextDocument.contentsChange 信号，
+    精确标记受影响的缓存块为脏块，仅重新渲染脏块。
+    行数变化时后续块也标记为脏，确保缓存索引一致。
 """
 
 from PyQt5.QtWidgets import QWidget
@@ -20,6 +19,7 @@ from PyQt5.QtGui import QPainter, QColor, QPixmap, QPicture
 
 from ..utils.feature_flags import is_enabled
 from ..themes.theme_aware_mixin import ThemeAwareMixin
+from ..utils.logger import get_logger
 
 
 BLOCK_SIZE = 50
@@ -53,6 +53,7 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
         self._cache_valid = False
 
         self._block_cache: dict = {}
+        self._block_dirty: set = set()
         self._use_block_cache = is_enabled("minimap_block_cache")
 
         self._update_timer = QTimer(self)
@@ -60,7 +61,7 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
         self._update_timer.setInterval(150)
         self._update_timer.timeout.connect(self._invalidate_and_repaint)
 
-        editor.document().contentsChanged.connect(self._on_content_changed)
+        editor.document().contentsChange.connect(self._on_contents_change)
         editor.verticalScrollBar().valueChanged.connect(self.update)
         editor.blockCountChanged.connect(self._on_content_changed)
 
@@ -80,11 +81,45 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
         self.update()
 
     def _on_content_changed(self):
+        if self._use_block_cache:
+            self._block_dirty.clear()
+            self._block_cache.clear()
+        self._update_timer.start()
+
+    def _on_contents_change(self, from_pos: int, chars_removed: int, chars_added: int):
+        if not self._use_block_cache:
+            self._cache_valid = False
+            self._update_timer.start()
+            return
+
+        doc = self._editor.document()
+        start_block = doc.findBlock(from_pos)
+        end_pos = from_pos + max(chars_added, chars_removed)
+        end_block = doc.findBlock(end_pos)
+
+        start_line = start_block.blockNumber()
+        end_line = end_block.blockNumber()
+
+        start_cache = start_line // BLOCK_SIZE
+        end_cache = end_line // BLOCK_SIZE
+        for cache_idx in range(start_cache, end_cache + 1):
+            self._block_dirty.add(cache_idx)
+
+        if chars_added != chars_removed:
+            total_blocks = doc.blockCount()
+            num_cache_blocks = (total_blocks + BLOCK_SIZE - 1) // BLOCK_SIZE
+            for cache_idx in range(end_cache + 1, num_cache_blocks):
+                self._block_dirty.add(cache_idx)
+
         self._update_timer.start()
 
     def _invalidate_and_repaint(self):
         self._cache_valid = False
-        if self._use_block_cache:
+        if not self._use_block_cache:
+            pass
+        elif self._block_dirty:
+            pass
+        else:
             self._block_cache.clear()
         self.update()
 
@@ -172,7 +207,7 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
             start_line = cache_idx * BLOCK_SIZE
             end_line = min(start_line + BLOCK_SIZE, total_blocks)
 
-            if cache_idx in self._block_cache:
+            if cache_idx in self._block_cache and cache_idx not in self._block_dirty:
                 picture = self._block_cache[cache_idx]
                 y_offset = start_line * line_h + self.TOP_MARGIN
                 painter.drawPicture(0, y_offset, picture)
@@ -191,6 +226,7 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
 
                 pic_painter.end()
                 self._block_cache[cache_idx] = picture
+                self._block_dirty.discard(cache_idx)
 
                 y_offset = start_line * line_h + self.TOP_MARGIN
                 painter.drawPicture(0, y_offset, picture)
@@ -220,7 +256,7 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
                         try:
                             fmt_ranges = layout.additionalFormats()
                         except AttributeError:
-                            pass
+                            get_logger(__name__).debug("QTextBlockFormat 无 formats/additionalFormats 属性")
 
                 segments = self._build_color_segments(text, fmt_ranges, default_color)
                 x = float(left)
@@ -254,7 +290,7 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
                 try:
                     fmt_ranges = layout.additionalFormats()
                 except AttributeError:
-                    pass
+                    get_logger(__name__).debug("QTextBlockFormat 无 formats/additionalFormats 属性")
 
         segments = self._build_color_segments(text, fmt_ranges, default_color)
         rect_h = max(1.0, line_h - 0.5)

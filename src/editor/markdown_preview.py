@@ -222,7 +222,9 @@ li input[type="checkbox"] {{
 </style>
 </head>
 <body>
+<div id="content">
 {content}
+</div>
 </body>
 </html>"""
 
@@ -394,7 +396,7 @@ class PreviewBrowser(QTextBrowser):
                 if 0 <= idx < len(self._code_blocks):
                     QApplication.clipboard().setText(self._code_blocks[idx])
             except (ValueError, IndexError):
-                pass
+                get_logger(__name__).debug("代码块复制链接解析失败: %s", url_str)
         else:
             QDesktopServices.openUrl(url)
 
@@ -420,6 +422,8 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self._async_renderer = None
         self._pending_async_task = None
         self._incremental_renderer = None
+        self._md_parser = self._create_md_parser()
+        self._html_template_loaded = False
 
         if is_enabled("async_highlight"):
             from .async_highlight import AsyncHighlightRenderer
@@ -440,7 +444,13 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
 
         v1.5.4 新增
         """
+        if path != self._base_path:
+            self._html_template_loaded = False
         self._base_path = path
+
+    def _on_load_finished(self, ok):
+        if ok:
+            self._html_template_loaded = True
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
@@ -472,23 +482,27 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
 
         self._preview_visible = True
 
+        if HAS_WEBENGINE:
+            self.preview.loadFinished.connect(self._on_load_finished)
+
         if self._theme_engine:
             self._init_theme(self._theme_engine)
 
     def _apply_theme_colors(self, colors):
-        self._copy_btn.setStyleSheet(
-            f"QPushButton {{"
-            f"  background: {colors.card};"
-            f"  border: 1px solid {colors.border};"
-            f"  border-radius: 3px;"
-            f"  font-size: 12px;"
-            f"  padding: 0;"
-            f"}}"
-            f"QPushButton:hover {{"
-            f"  background: {colors.surface};"
-            f"  border-color: {colors.text_disabled};"
-            f"}}"
-        )
+        if isinstance(self.preview, PreviewBrowser):
+            self.preview._copy_btn.setStyleSheet(
+                f"QPushButton {{"
+                f"  background: {colors.card};"
+                f"  border: 1px solid {colors.border};"
+                f"  border-radius: 3px;"
+                f"  font-size: 12px;"
+                f"  padding: 0;"
+                f"}}"
+                f"QPushButton:hover {{"
+                f"  background: {colors.surface};"
+                f"  border-color: {colors.text_disabled};"
+                f"}}"
+            )
 
     def _connect_signals(self):
         self.editor.textChanged.connect(self._on_text_changed)
@@ -516,32 +530,40 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
 
         html_content = self._resolve_local_images(html_content)
 
-        full_html = PREVIEW_HTML_TEMPLATE.format(content=html_content)
-
         if isinstance(self.preview, PreviewBrowser):
             self.preview.set_code_blocks(self._code_blocks)
 
-        if HAS_WEBENGINE:
-            if self._base_path:
-                base_url = QUrl.fromLocalFile(self._base_path + '/')
-                self.preview.setHtml(full_html, base_url)
+        if HAS_WEBENGINE and self._html_template_loaded:
+            import json
+            js = f"document.getElementById('content').innerHTML = {json.dumps(html_content)};"
+            self.preview.page().runJavaScript(js)
+        else:
+            full_html = PREVIEW_HTML_TEMPLATE.format(content=html_content)
+            if HAS_WEBENGINE:
+                if self._base_path:
+                    base_url = QUrl.fromLocalFile(self._base_path + '/')
+                    self.preview.setHtml(full_html, base_url)
+                else:
+                    self.preview.setHtml(full_html)
             else:
                 self.preview.setHtml(full_html)
-        else:
-            self.preview.setHtml(full_html)
+
+    def _create_md_parser(self):
+        if not HAS_MARKDOWN_IT:
+            return None
+        md = _MarkdownIt("commonmark", {"html": False})
+        md.enable(["table", "strikethrough"])
+        try:
+            from mdit_py_plugins.deflist import deflist_plugin
+            deflist_plugin(md)
+        except ImportError:
+            get_logger(__name__).debug("mdit_py_plugins 未安装，定义列表语法不可用")
+        return md
 
     def _render_markdown(self, text: str) -> str:
-        # 优先使用 markdown-it-py（CommonMark 兼容，列表可打断段落）
-        if HAS_MARKDOWN_IT:
+        if self._md_parser is not None:
             try:
-                md = _MarkdownIt("commonmark", {"html": False})
-                md.enable(["table", "strikethrough"])
-                try:
-                    from mdit_py_plugins.deflist import deflist_plugin
-                    deflist_plugin(md)
-                except ImportError:
-                    pass
-                return md.render(text)
+                return self._md_parser.render(text)
             except Exception:
                 get_logger(__name__).debug("markdown-it 渲染失败，回退到 python-markdown")
 

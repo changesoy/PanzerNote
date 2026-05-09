@@ -17,6 +17,7 @@ from PyQt5.QtGui import (
 )
 
 from ..themes.theme_aware_mixin import ThemeAwareMixin
+from ..utils.logger import get_logger
 
 
 
@@ -213,7 +214,7 @@ class FindReplaceBar(ThemeAwareMixin, QWidget):
             try:
                 replacement = pattern.sub(replacement, original, count=1)
             except re.error:
-                pass
+                get_logger(__name__).debug("正则替换失败: %s", pattern)
 
         cursor = self._editor.textCursor()
         cursor.setPosition(start)
@@ -371,6 +372,7 @@ class FindReplaceBar(ThemeAwareMixin, QWidget):
             QCheckBox {{ font-size: 12px; margin-left: 4px; color: {colors.text_primary}; }}
             QLabel {{ font-size: 12px; color: {colors.text_primary}; }}
         """)
+        self._update_match_label()
 
     def _update_match_label(self):
         """更新匹配计数标签"""

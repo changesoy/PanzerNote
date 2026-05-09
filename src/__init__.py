@@ -12,7 +12,7 @@ PanzerNote - 战车少女主题记事本
 3. 手动同步 README.md / 项目说明.md / plugins/plugin_api.md 中的版本号
 """
 
-__version__ = "1.6.5"
+__version__ = "1.6.6"
 __author__ = "Changes"
 
 

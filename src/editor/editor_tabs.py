@@ -267,7 +267,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 num = int(title[3:-4])
                 self._used_untitled_numbers.discard(num)
             except ValueError:
-                pass
+                get_logger(__name__).debug("未命名标签页编号解析失败: %s", title)
     
     def _generate_tab_id(self) -> int:
         tab_id = self._next_tab_id
@@ -459,33 +459,19 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         return success, chars
     
     def _save_file(self, widget, filepath: str, encoding: str = "UTF-8") -> Tuple[bool, int]:
-        """保存文件"""
-        # 获取文本内容
+        """保存文件（异步写入磁盘，UI 不冻结）"""
         if isinstance(widget, MarkdownPreviewWidget):
             content = widget.editor.toPlainText()
         elif isinstance(widget, Editor):
             content = widget.toPlainText()
         else:
             return False, 0
-        
-        try:
-            file_guard = self.config.get_file_guard()
-            file_guard.safe_write(filepath, content, encoding=encoding.lower(), validate_path=False)
-        except (FileSizeExceededError, FileOperationTimeoutError) as e:
-            get_logger(__name__).error("文件安全检查失败: %s", e)
-            ErrorHandler.show_from_exception(e, ErrorCategory.FILE, "保存文件失败")
-            return False, 0
-        except Exception as e:
-            get_logger(__name__).error("保存文件失败: %s", e)
-            ErrorHandler.show_from_exception(e, ErrorCategory.FILE, "保存文件失败")
-            return False, 0
-        
+
         tab_id = getattr(widget, 'tab_id', None)
         info = self._tab_info.get(tab_id, {})
         last_chars = info.get("last_saved_chars", 0)
         new_chars = max(0, len(content) - last_chars)
-        
-        info["filepath"] = filepath
+
         info["is_modified"] = False
         info["encoding"] = encoding
         info["last_saved_content"] = content
@@ -495,12 +481,35 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         editor = self._get_editor_from_widget(widget)
         if editor:
             editor.document().setModified(False)
-        
+
         index = self.indexOf(widget)
         title = self.tabText(index)
         if title.endswith(" *"):
             self.setTabText(index, title[:-2])
-        
+
+        from PyQt5.QtCore import QThreadPool
+        from .save_task import SaveTask
+
+        task = SaveTask(self.config.get_file_guard(), filepath, content, encoding.lower())
+
+        def _on_save_done(success, fp, exc):
+            if not success:
+                get_logger(__name__).error("保存文件失败: %s", exc)
+                ErrorHandler.show_from_exception(exc, ErrorCategory.FILE, "保存文件失败")
+                if tab_id is not None:
+                    t_info = self._tab_info.get(tab_id, {})
+                    t_info["is_modified"] = True
+                    ed = self._get_editor_from_widget(widget)
+                    if ed:
+                        ed.document().setModified(True)
+                    idx = self.indexOf(widget)
+                    t = self.tabText(idx)
+                    if not t.endswith(" *"):
+                        self.setTabText(idx, t + " *")
+
+        task.signals.finished.connect(_on_save_done)
+        QThreadPool.globalInstance().start(task)
+
         return True, new_chars
     
     def save_all(self) -> int:
@@ -531,14 +540,17 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         return total_chars
     
     def save_all_to_temp(self):
-        """保存所有文件到暂存目录"""
+        """保存所有文件到暂存目录（异步写入）"""
+        from PyQt5.QtCore import QThreadPool
+        from .save_task import SaveTask
+
         temp_dir = self.config.get_temp_path()
         os.makedirs(temp_dir, exist_ok=True)
-        
+
         session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         session_dir = os.path.join(temp_dir, f"session_{session_id}")
         os.makedirs(session_dir, exist_ok=True)
-        
+
         for i in range(self.count()):
             widget = self.widget(i)
             tab_id = getattr(widget, 'tab_id', None)
@@ -551,21 +563,18 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                         content = widget.toPlainText()
                     else:
                         continue
-                    
+
                     filepath = info.get("filepath")
                     if filepath:
                         filename = os.path.basename(filepath) + ".autosave"
                     else:
                         filename = f"untitled_{tab_id}.txt.autosave"
-                    
-                    try:
-                        file_guard = self.config.get_file_guard()
-                        file_guard.safe_write(
-                            os.path.join(session_dir, filename),
-                            content, validate_path=False
-                        )
-                    except Exception:
-                        get_logger(__name__).warning("自动保存失败: %s", filename)
+
+                    save_path = os.path.join(session_dir, filename)
+                    task = SaveTask(
+                        self.config.get_file_guard(), save_path, content, "utf-8"
+                    )
+                    QThreadPool.globalInstance().start(task)
     
     def clear_temp_files(self):
         """清理暂存文件"""
@@ -828,7 +837,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     def _on_cursor_position_changed(self):
         self.cursor_position_changed.emit()
 
-    _PASTE_THRESHOLD = 15
+    _PASTE_THRESHOLD = 50
 
     def _on_text_changed(self):
         editor = self.sender()
@@ -842,7 +851,10 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         delta = current_len - last_len
         info["last_text_length"] = current_len
 
-        if delta > 0 and not getattr(editor, 'is_programmatic_modify', False):
+        is_pasting = getattr(editor, '_is_pasting', False)
+        is_programmatic = getattr(editor, 'is_programmatic_modify', False)
+
+        if delta > 0 and not is_pasting and not is_programmatic:
             if delta <= self._PASTE_THRESHOLD:
                 self.chars_typed.emit(delta)
 

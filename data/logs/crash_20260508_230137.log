@@ -1,0 +1,20 @@
+PanzerNote Crash Log
+Time: 2026-05-08 23:01:37
+Version: unknown
+Python: 3.11.9 (tags/v3.11.9:de54cf5, Apr  2 2024, 10:12:12) [MSC v.1938 64 bit (AMD64)]
+OS: win32
+
+============================================================
+
+Traceback (most recent call last):
+  File "c:\Users\chang\PycharmProjects\PanzerNote\main.py", line 161, in <module>
+    main()
+  File "c:\Users\chang\PycharmProjects\PanzerNote\main.py", line 147, in main
+    from src.main_window import MainWindow
+  File "c:\Users\chang\PycharmProjects\PanzerNote\src\main_window.py", line 35, in <module>
+    from .editor.editor_tabs import EditorTabWidget
+  File "c:\Users\chang\PycharmProjects\PanzerNote\src\editor\editor_tabs.py", line 34, in <module>
+    from .find_replace import FindReplaceBar
+  File "c:\Users\chang\PycharmProjects\PanzerNote\src\editor\find_replace.py", line 20, in <module>
+    from ..utils.logging_config import get_logger
+ModuleNotFoundError: No module named 'src.utils.logging_config'

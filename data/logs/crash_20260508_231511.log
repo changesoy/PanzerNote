@@ -1,0 +1,30 @@
+PanzerNote Crash Log
+Time: 2026-05-08 23:15:11
+Version: unknown
+Python: 3.11.9 (tags/v3.11.9:de54cf5, Apr  2 2024, 10:12:12) [MSC v.1938 64 bit (AMD64)]
+OS: win32
+
+============================================================
+
+Traceback (most recent call last):
+  File "c:\Users\chang\PycharmProjects\PanzerNote\main.py", line 161, in <module>
+    main()
+  File "c:\Users\chang\PycharmProjects\PanzerNote\main.py", line 148, in main
+    window = MainWindow(config)
+             ^^^^^^^^^^^^^^^^^^
+  File "c:\Users\chang\PycharmProjects\PanzerNote\src\main_window.py", line 71, in __init__
+    self._restore_state()
+  File "c:\Users\chang\PycharmProjects\PanzerNote\src\main_window.py", line 233, in _restore_state
+    self._open_file(filepath)
+  File "c:\Users\chang\PycharmProjects\PanzerNote\src\main_window.py", line 535, in _open_file
+    self.editor_tabs.open_file(filepath)
+  File "c:\Users\chang\PycharmProjects\PanzerNote\src\editor\editor_tabs.py", line 368, in open_file
+    widget = Editor(self.config, theme_engine=self._theme_engine)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\chang\PycharmProjects\PanzerNote\src\editor\editor.py", line 117, in __init__
+    self._init_minimap()
+  File "c:\Users\chang\PycharmProjects\PanzerNote\src\editor\editor.py", line 395, in _init_minimap
+    from .minimap import MinimapWidget
+  File "c:\Users\chang\PycharmProjects\PanzerNote\src\editor\minimap.py", line 22, in <module>
+    from ..utils.logging_config import get_logger
+ModuleNotFoundError: No module named 'src.utils.logging_config'

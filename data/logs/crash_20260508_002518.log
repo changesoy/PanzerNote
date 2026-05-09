@@ -1,0 +1,24 @@
+PanzerNote Crash Log
+Time: 2026-05-08 00:25:18
+Version: unknown
+Python: 3.11.9 (tags/v3.11.9:de54cf5, Apr  2 2024, 10:12:12) [MSC v.1938 64 bit (AMD64)]
+OS: win32
+
+============================================================
+
+Traceback (most recent call last):
+  File "c:\Users\chang\PycharmProjects\PanzerNote\src\main_window.py", line 523, in _open_file
+    self.editor_tabs.open_file(filepath)
+  File "c:\Users\chang\PycharmProjects\PanzerNote\src\editor\editor_tabs.py", line 362, in open_file
+    widget = MarkdownPreviewWidget(self.config, theme_engine=self._theme_engine)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\chang\PycharmProjects\PanzerNote\src\editor\markdown_preview.py", line 435, in __init__
+    self._init_ui()
+  File "c:\Users\chang\PycharmProjects\PanzerNote\src\editor\markdown_preview.py", line 476, in _init_ui
+    self._init_theme(self._theme_engine)
+  File "c:\Users\chang\PycharmProjects\PanzerNote\src\themes\theme_aware_mixin.py", line 22, in _init_theme
+    self._apply_theme_colors(theme_engine.get_active_theme().colors)
+  File "c:\Users\chang\PycharmProjects\PanzerNote\src\editor\markdown_preview.py", line 479, in _apply_theme_colors
+    self._copy_btn.setStyleSheet(
+    ^^^^^^^^^^^^^^
+AttributeError: 'MarkdownPreviewWidget' object has no attribute '_copy_btn'

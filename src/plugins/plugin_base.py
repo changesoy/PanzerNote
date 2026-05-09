@@ -12,6 +12,7 @@ from enum import Enum, auto
 from typing import Any, Dict, List, Optional
 
 from .. import __version__ as _app_version
+from ..utils.logger import get_logger
 
 
 class PluginState(Enum):
@@ -67,7 +68,7 @@ class PluginMeta:
             try:
                 perms.append(PluginPermission(p))
             except ValueError:
-                pass
+                get_logger(__name__).debug("忽略无效插件权限: %s", p)
         return cls(
             name=data["name"],
             version=data["version"],

@@ -230,7 +230,7 @@ class PluginManager:
                     if m.get("name") == plugin_id:
                         return entry
                 except Exception:
-                    pass
+                    self._logger.debug("加载清单失败: %s", manifest_path)
         raise PluginLoadError(f"找不到插件目录: {plugin_id}")
 
     def _import_plugin(self, plugin_path: str, entry_module: str) -> Type[PluginBase]:

@@ -151,7 +151,7 @@ class Config:
                 if path and os.path.exists(path):
                     self._base_path = path.strip()
             except Exception:
-                pass
+                get_logger(__name__).debug("读取 user_data_path.txt 失败")
 
     @safe_call()
     def _save_user_data_path(self):

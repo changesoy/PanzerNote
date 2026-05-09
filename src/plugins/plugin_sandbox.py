@@ -34,7 +34,6 @@ class SandboxTimeoutError(Exception):
 
 
 class PluginAPI:
-    MVP_READ_ONLY = True
     MAX_EXECUTION_TIMEOUT = 30
 
     def __init__(
@@ -47,6 +46,7 @@ class PluginAPI:
     ):
         self._config = config
         self._permissions = set(permissions)
+        self._mvp_read_only = True
         self._logger = get_logger(__name__)
         self._open_file_callback = open_file_callback
         self._show_message_callback = show_message_callback
@@ -58,7 +58,7 @@ class PluginAPI:
             raise SandboxViolationError(
                 f"插件缺少权限: {perm.value}"
             )
-        if self.MVP_READ_ONLY and perm in (
+        if self._mvp_read_only and perm in (
             PluginPermission.ACCESS_FILESYSTEM,
             PluginPermission.ACCESS_NETWORK,
         ):
@@ -150,9 +150,8 @@ class PluginAPI:
         if self._register_command_callback is None:
             self._logger.warning("register_command 回调未注册")
             return
-        if command_id in self._registered_commands:
+        if self._registered_commands.setdefault(command_id, handler) is not handler:
             raise ValueError(f"命令已注册: {command_id}")
-        self._registered_commands[command_id] = handler
         self._register_command_callback(command_id, handler)
 
     def get_config(self) -> Any:

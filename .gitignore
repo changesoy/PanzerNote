@@ -58,6 +58,7 @@ $RECYCLE.BIN/
 !.env.example
 
 # --- 测试与覆盖率 ---
+tests/
 .pytest_cache/
 .coverage
 .coverage.*

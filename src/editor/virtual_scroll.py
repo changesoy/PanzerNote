@@ -8,9 +8,9 @@
 2. 滚动触发：滚动时动态更新高亮区域
 """
 
-from PyQt5.QtCore import QObject, QTimer, Qt
-from PyQt5.QtGui import QTextCursor, QTextBlock
-from PyQt5.QtWidgets import QPlainTextEdit
+from PyQt6.QtCore import QObject, QTimer, Qt
+from PyQt6.QtGui import QTextCursor, QTextBlock
+from PyQt6.QtWidgets import QPlainTextEdit
 
 from ..utils.logger import get_logger
 from ..utils.feature_flags import is_enabled

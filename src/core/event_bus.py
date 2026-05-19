@@ -7,7 +7,7 @@
 
 from typing import Any, Optional
 
-from PyQt5.QtCore import QObject
+from PyQt6.QtCore import QObject
 
 from ..core.config import Config
 from ..utils.logger import get_logger

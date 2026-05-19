@@ -11,7 +11,7 @@
 新增主题只需在 THEMES 字典中增加一个条目即可。
 """
 
-from PyQt5.QtGui import QTextCharFormat, QColor, QFont
+from PyQt6.QtGui import QTextCharFormat, QColor, QFont
 
 from ..utils.logger import get_logger
 
@@ -180,7 +180,7 @@ def build_format(style: dict) -> QTextCharFormat:
     if "color" in style:
         fmt.setForeground(QColor(style["color"]))
     if style.get("bold"):
-        fmt.setFontWeight(QFont.Bold)
+        fmt.setFontWeight(QFont.Weight.Bold)
     if style.get("italic"):
         fmt.setFontItalic(True)
     if style.get("underline"):

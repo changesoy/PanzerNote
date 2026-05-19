@@ -15,8 +15,8 @@ v1.6.6 性能改造：
 
 from typing import Any
 
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QKeyEvent, QTextCursor
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QKeyEvent, QTextCursor
 
 from ..utils.logger import get_logger
 
@@ -87,7 +87,7 @@ class AutoPairHandlerMixin:
             return False
 
         if self._doc_char_at(pos) == char:
-            cursor.movePosition(cursor.Right)
+            cursor.movePosition(QTextCursor.MoveOperation.Right)
             self.setTextCursor(cursor)
             return True
 
@@ -95,7 +95,7 @@ class AutoPairHandlerMixin:
             expected_open = self._auto_pair_close_to_open[char]
             if self._doc_char_at(pos - 1) == expected_open:
                 cursor.insertText(char)
-                cursor.movePosition(cursor.Left)
+                cursor.movePosition(QTextCursor.MoveOperation.Left)
                 self.setTextCursor(cursor)
                 return True
 
@@ -135,7 +135,7 @@ class AutoPairHandlerMixin:
             return False
 
         cursor.insertText(char + closing)
-        cursor.movePosition(cursor.Left)
+        cursor.movePosition(QTextCursor.MoveOperation.Left)
         self.setTextCursor(cursor)
         return True
 
@@ -177,7 +177,7 @@ class AutoPairHandlerMixin:
                 get_logger(__name__).debug("IME setCommitString 失败: %s", _e)
             super(self.__class__, self).inputMethodEvent(event)
             cursor = self.textCursor()
-            cursor.movePosition(cursor.Right)
+            cursor.movePosition(QTextCursor.MoveOperation.Right)
             self.setTextCursor(cursor)
             return True
 
@@ -185,7 +185,7 @@ class AutoPairHandlerMixin:
             expected_open = self._auto_pair_close_to_open[char]
             if self._doc_char_at(pos - 1) == expected_open:
                 cursor.insertText(char)
-                cursor.movePosition(cursor.Left)
+                cursor.movePosition(QTextCursor.MoveOperation.Left)
                 self.setTextCursor(cursor)
                 return True
 
@@ -223,7 +223,7 @@ class AutoPairHandlerMixin:
                     self._wrap_selection(cursor, open_char, char)
                 else:
                     cursor.insertText(open_char + char)
-                    cursor.movePosition(cursor.Left)
+                    cursor.movePosition(QTextCursor.MoveOperation.Left)
                 self.setTextCursor(cursor)
                 return True
 
@@ -281,7 +281,7 @@ class AutoPairHandlerMixin:
         super(self.__class__, self).inputMethodEvent(event)
         cursor = self.textCursor()
         cursor.insertText(char + closing)
-        cursor.movePosition(cursor.Left)
+        cursor.movePosition(QTextCursor.MoveOperation.Left)
         self.setTextCursor(cursor)
         return True
 

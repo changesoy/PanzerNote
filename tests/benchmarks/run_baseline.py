@@ -25,8 +25,8 @@ def save_results():
         json.dump(results, f, indent=2, ensure_ascii=False)
 
 try:
-    from PyQt5.QtWidgets import QApplication
-    from PyQt5.QtCore import Qt
+    from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtCore import Qt
     app = QApplication.instance() or QApplication([])
 
     from src.core.config import Config

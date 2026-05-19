@@ -10,8 +10,8 @@ import json
 import xml.dom.minidom as minidom
 from typing import Optional
 
-from PyQt5.QtGui import QTextCursor
-from PyQt5.QtWidgets import QMessageBox
+from PyQt6.QtGui import QTextCursor
+from PyQt6.QtWidgets import QMessageBox
 
 from ..utils.logger import get_logger
 
@@ -38,18 +38,18 @@ class EditorActionsMixin:
         cursor.beginEditBlock()
 
         with self.programmatic_modify():
-            cursor.movePosition(cursor.StartOfBlock)
+            cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
 
             if cursor.block().next().isValid():
-                cursor.movePosition(cursor.EndOfBlock, cursor.KeepAnchor)
-                cursor.movePosition(cursor.NextCharacter, cursor.KeepAnchor)
+                cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock, cursor.KeepAnchor)
+                cursor.movePosition(QTextCursor.MoveOperation.NextCharacter, cursor.KeepAnchor)
             elif cursor.block().blockNumber() > 0:
                 anchor = cursor.position()
-                cursor.movePosition(cursor.PreviousCharacter)
+                cursor.movePosition(QTextCursor.MoveOperation.PreviousCharacter)
                 cursor.setPosition(anchor, cursor.KeepAnchor)
-                cursor.movePosition(cursor.EndOfBlock, cursor.KeepAnchor)
+                cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock, cursor.KeepAnchor)
             else:
-                cursor.movePosition(cursor.EndOfBlock, cursor.KeepAnchor)
+                cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock, cursor.KeepAnchor)
 
             cursor.removeSelectedText()
         cursor.endEditBlock()
@@ -60,11 +60,11 @@ class EditorActionsMixin:
         cursor.beginEditBlock()
 
         with self.programmatic_modify():
-            cursor.movePosition(cursor.StartOfBlock)
-            cursor.movePosition(cursor.EndOfBlock, cursor.KeepAnchor)
+            cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
+            cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock, cursor.KeepAnchor)
             line_text = cursor.selectedText()
 
-            cursor.movePosition(cursor.EndOfBlock)
+            cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
             cursor.insertText('\n' + line_text)
 
         cursor.endEditBlock()
@@ -248,7 +248,7 @@ class EditorActionsMixin:
                     self.setPlainText(formatted)
             except json.JSONDecodeError as e:
                 get_logger(__name__).warning("JSON格式化失败: %s", e)
-                QMessageBox.warning(
+                QMessageBox.Icon.Warning(
                     self, "格式化失败",
                     f"JSON格式错误:\n{str(e)}"
                 )
@@ -274,7 +274,7 @@ class EditorActionsMixin:
 
             except Exception as e:
                 get_logger(__name__).warning("XML/HTML格式化失败: %s", e)
-                QMessageBox.warning(
+                QMessageBox.Icon.Warning(
                     self, "格式化失败",
                     f"XML/HTML格式错误:\n{str(e)}"
                 )
@@ -288,10 +288,10 @@ class EditorActionsMixin:
                 with self.programmatic_modify():
                     self.setPlainText(formatted)
             except ImportError:
-                QMessageBox.warning(self, "格式化失败", "YAML格式化需要安装 pyyaml 库\n请运行: pip install pyyaml")
+                QMessageBox.Icon.Warning(self, "格式化失败", "YAML格式化需要安装 pyyaml 库\n请运行: pip install pyyaml")
             except Exception as e:
                 get_logger(__name__).warning("YAML格式化失败: %s", e)
-                QMessageBox.warning(self, "格式化失败", f"YAML格式错误:\n{str(e)}")
+                QMessageBox.Icon.Warning(self, "格式化失败", f"YAML格式错误:\n{str(e)}")
 
         elif self._file_type == 'TOML':
             try:
@@ -302,10 +302,10 @@ class EditorActionsMixin:
                 with self.programmatic_modify():
                     self.setPlainText(formatted)
             except ImportError:
-                QMessageBox.warning(self, "格式化失败", "TOML格式化需要安装 tomli 和 tomli_w 库\n请运行: pip install tomli tomli_w")
+                QMessageBox.Icon.Warning(self, "格式化失败", "TOML格式化需要安装 tomli 和 tomli_w 库\n请运行: pip install tomli tomli_w")
             except Exception as e:
                 get_logger(__name__).warning("TOML格式化失败: %s", e)
-                QMessageBox.warning(self, "格式化失败", f"TOML格式错误:\n{str(e)}")
+                QMessageBox.Icon.Warning(self, "格式化失败", f"TOML格式错误:\n{str(e)}")
 
         elif self._file_type == 'CSS':
             try:
@@ -316,10 +316,10 @@ class EditorActionsMixin:
                 with self.programmatic_modify():
                     self.setPlainText(formatted)
             except ImportError:
-                QMessageBox.warning(self, "格式化失败", "CSS格式化需要安装 cssbeautifier 库\n请运行: pip install cssbeautifier")
+                QMessageBox.Icon.Warning(self, "格式化失败", "CSS格式化需要安装 cssbeautifier 库\n请运行: pip install cssbeautifier")
             except Exception as e:
                 get_logger(__name__).warning("CSS格式化失败: %s", e)
-                QMessageBox.warning(self, "格式化失败", f"CSS格式错误:\n{str(e)}")
+                QMessageBox.Icon.Warning(self, "格式化失败", f"CSS格式错误:\n{str(e)}")
 
         else:
             from ..utils.error_handler import ErrorHandler, ErrorCategory
@@ -355,7 +355,7 @@ class EditorActionsMixin:
         scan_start = max(0, pos - 20000)
         scan_cursor = QTextCursor(self.document())
         scan_cursor.setPosition(scan_start)
-        scan_cursor.setPosition(pos, QTextCursor.KeepAnchor)
+        scan_cursor.setPosition(pos, QTextCursor.MoveMode.KeepAnchor)
         prefix = scan_cursor.selectedText()
 
         stack: list[str] = []

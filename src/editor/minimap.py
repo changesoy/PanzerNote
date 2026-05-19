@@ -13,9 +13,9 @@
     行数变化时后续块也标记为脏，确保缓存索引一致。
 """
 
-from PyQt5.QtWidgets import QWidget
-from PyQt5.QtCore import Qt, QTimer, QRectF
-from PyQt5.QtGui import QPainter, QColor, QPixmap, QPicture
+from PyQt6.QtWidgets import QWidget
+from PyQt6.QtCore import Qt, QTimer, QRectF
+from PyQt6.QtGui import QPainter, QColor, QPixmap, QPicture
 
 from ..utils.feature_flags import is_enabled
 from ..themes.theme_aware_mixin import ThemeAwareMixin
@@ -46,7 +46,7 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
         self._viewport_border_color = QColor(100, 140, 200, 70)
 
         self.setFixedWidth(self.MINIMAP_WIDTH)
-        self.setCursor(Qt.ArrowCursor)
+        self.setCursor(Qt.CursorShape.ArrowCursor)
         self.setMouseTracking(True)
 
         self._cache_pixmap: QPixmap = None
@@ -157,7 +157,7 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing, False)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
 
         painter.fillRect(self.rect(), QColor(self._bg_color))
         painter.setPen(QColor(self._border_color))
@@ -187,7 +187,7 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
         self._cache_pixmap.fill(QColor(self._bg_color))
 
         painter = QPainter(self._cache_pixmap)
-        painter.setRenderHint(QPainter.Antialiasing, False)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
 
         if self._use_block_cache:
             self._render_with_block_cache(painter)
@@ -214,7 +214,7 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
             else:
                 picture = QPicture()
                 pic_painter = QPainter(picture)
-                pic_painter.setRenderHint(QPainter.Antialiasing, False)
+                pic_painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
                 y = self.TOP_MARGIN
 
                 for line_num in range(start_line, end_line):
@@ -346,15 +346,15 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
         return segments
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            if event.modifiers() & Qt.ControlModifier:
+        if event.button() == Qt.MouseButton.LeftButton:
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
                 self._preview_at_y(event.pos().y())
             else:
                 self._dragging = True
                 self._scroll_to_y(event.pos().y())
 
     def mouseDoubleClickEvent(self, event):
-        if event.button() == Qt.LeftButton:
+        if event.button() == Qt.MouseButton.LeftButton:
             self._jump_to_y(event.pos().y())
 
     def mouseMoveEvent(self, event):
@@ -362,7 +362,7 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
             self._scroll_to_y(event.pos().y())
 
     def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton:
+        if event.button() == Qt.MouseButton.LeftButton:
             self._dragging = False
 
     def _scroll_to_y(self, y: int):

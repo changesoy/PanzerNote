@@ -11,15 +11,15 @@ v1.5.4 改动：
 
 import os
 import html as html_module
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QSplitter, QMenuBar, QMenu, QAction, QStatusBar,
+    QSplitter, QMenuBar, QMenu, QStatusBar,
     QLabel, QMessageBox, QFileDialog, QTabWidget,
     QToolButton, QFrame, QSizePolicy, QApplication, QDialog,
     QLineEdit
 )
-from PyQt5.QtCore import Qt, QTimer, QEvent, pyqtSignal
-from PyQt5.QtGui import QIcon, QCloseEvent
+from PyQt6.QtCore import Qt, QTimer, QEvent, pyqtSignal
+from PyQt6.QtGui import QIcon, QCloseEvent, QAction
 from typing import List
 
 from . import __version__
@@ -47,7 +47,7 @@ from .utils.dpi_helper import scale, scale_size
 
 class MainWindow(QMainWindow):
     """主窗口"""
-    
+
     def __init__(self, config: Config, parent=None):
         super().__init__(parent)
         self.config = config
@@ -75,58 +75,58 @@ class MainWindow(QMainWindow):
         icon_path = os.path.join(config.get_assets_path(), "icons", "app_icon.png")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
-    
+
     def _init_ui(self):
         """初始化UI"""
         self.setWindowTitle("PanzerNote")
         self.setMinimumSize(scale(800), scale(600))
-        
+
         # 中心部件
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        
+
         # 主布局
         main_layout = QVBoxLayout(central_widget)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
-        
+
         # 资源栏
         self.resource_bar = ResourceBar(self.config, theme_engine=self.theme_engine)
         main_layout.addWidget(self.resource_bar)
-        
+
         # 分隔线
         line1 = QFrame()
-        line1.setFrameShape(QFrame.HLine)
-        line1.setFrameShadow(QFrame.Sunken)
+        line1.setFrameShape(QFrame.Shape.HLine)
+        line1.setFrameShadow(QFrame.Shadow.Sunken)
         main_layout.addWidget(line1)
-        
+
         # 内容区域
         content_layout = QHBoxLayout()
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
-        
+
         # 游戏图标侧边栏
         self.game_sidebar = GameSidebar(theme_engine=self.theme_engine)
         self.game_sidebar.setFixedWidth(scale(50))
         self.game_sidebar.view_changed.connect(self._on_view_changed)
         content_layout.addWidget(self.game_sidebar)
-        
+
         # 分隔线
         line2 = QFrame()
-        line2.setFrameShape(QFrame.VLine)
-        line2.setFrameShadow(QFrame.Sunken)
+        line2.setFrameShape(QFrame.Shape.VLine)
+        line2.setFrameShadow(QFrame.Shadow.Sunken)
         content_layout.addWidget(line2)
-        
+
         # 分割器
-        self.splitter = QSplitter(Qt.Horizontal)
-        
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+
         # 文件树
         self.file_tree = FileTreeWidget(self.config, theme_engine=self.theme_engine)
         self.file_tree.file_open_requested.connect(self._open_file)
         self.file_tree.file_move_requested.connect(self._on_file_move_from_tree)
         self.file_tree.setMinimumWidth(scale(100))
         self.splitter.addWidget(self.file_tree)
-        
+
         # 编辑区容器
         self.editor_container = QWidget()
         editor_layout = QVBoxLayout(self.editor_container)
@@ -137,11 +137,11 @@ class MainWindow(QMainWindow):
         self.find_replace_bar = FindReplaceBar(theme_engine=self.theme_engine)
         self.find_replace_bar.hide()
         editor_layout.addWidget(self.find_replace_bar)
-        
+
         # 编辑器分屏容器
-        self.editor_splitter = QSplitter(Qt.Horizontal)
+        self.editor_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.editor_splitter.setChildrenCollapsible(False)
-        
+
         # 编辑器标签页
         self.editor_tabs = EditorTabWidget(self.config, theme_engine=self.theme_engine)
         self.editor_tabs.set_find_bar(self.find_replace_bar)
@@ -151,36 +151,36 @@ class MainWindow(QMainWindow):
         self.editor_tabs.chars_typed.connect(self._on_chars_typed)
         self.editor_tabs.cursor_position_changed.connect(self._update_stats)
         self.editor_splitter.addWidget(self.editor_tabs)
-        
+
         self._split_tabs: List[EditorTabWidget] = []
-        
+
         editor_layout.addWidget(self.editor_splitter)
-        
+
         self.splitter.addWidget(self.editor_container)
-        
+
         # 设置分割器初始大小
         sidebar_width = self.config.get_view_setting("sidebar_width", 200)
         editor_width = self.config.get_view_setting("editor_area_width", 800)
         self.splitter.setSizes([sidebar_width, editor_width])
-        
+
         content_layout.addWidget(self.splitter)
-        
+
         # 内容容器
         content_widget = QWidget()
         content_widget.setLayout(content_layout)
         main_layout.addWidget(content_widget, 1)
-        
+
         # 游戏界面容器
         self.game_view_container = QWidget()
         self.game_view_container.hide()
         _game_layout = QVBoxLayout(self.game_view_container)
         _game_layout.setContentsMargins(0, 0, 0, 0)
         self._game_placeholder = QLabel("该功能尚在开发中")
-        self._game_placeholder.setAlignment(Qt.AlignCenter)
+        self._game_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._game_placeholder.setStyleSheet(f"color: {self.theme_engine.get_active_theme().colors.text_disabled}; font-size: 18px;")
         _game_layout.addWidget(self._game_placeholder)
         main_layout.addWidget(self.game_view_container)
-        
+
         # 小秘书（覆盖在编辑区右下角，自动跟随父容器大小变化）
         self.secretary = SecretaryWidget(self.config, theme_engine=self.theme_engine, parent=self.editor_container)
 
@@ -189,17 +189,17 @@ class MainWindow(QMainWindow):
         self.shortcut_panel = ShortcutPanel(self.shortcut_manager, theme_engine=self.theme_engine, parent=self)
         self.shortcut_panel.set_edit_callback(self._on_shortcut_edited)
         self.shortcut_panel.hide()
-    
+
     def _init_menubar(self):
         """初始化菜单栏"""
         builder = MenuBuilder(self.config, self.shortcut_manager)
         builder.build(self.menuBar(), self)
-    
+
     def _init_statusbar(self):
         """初始化状态栏"""
         self.status_bar_widget = StatusBarWidget(theme_engine=self.theme_engine)
         self.setStatusBar(self.status_bar_widget)
-    
+
     def _init_timers(self):
         """初始化定时器"""
         self.timer_manager.setup(
@@ -207,7 +207,7 @@ class MainWindow(QMainWindow):
             on_update_stats=self._update_stats,
             on_idle_reward=self._on_idle_reward,
         )
-    
+
     def _restore_state(self):
         """恢复窗口状态"""
         width = self.config.get_window_setting("width", 1200)
@@ -242,7 +242,7 @@ class MainWindow(QMainWindow):
             self.editor_tabs.new_file()
 
         if remaining:
-            from PyQt5.QtCore import QTimer
+            from PyQt6.QtCore import QTimer
             self._pending_files = remaining
             QTimer.singleShot(0, self._open_next_pending_file)
         else:
@@ -287,13 +287,13 @@ class MainWindow(QMainWindow):
                         cursor.setPosition(min(cursor_pos, len(editor.toPlainText())))
                         editor.setTextCursor(cursor)
                     if scroll_pos is not None:
-                        from PyQt5.QtCore import QTimer
+                        from PyQt6.QtCore import QTimer
                         QTimer.singleShot(0, lambda v=scroll_pos: editor.verticalScrollBar().setValue(v))
 
         if self._pending_files:
-            from PyQt5.QtCore import QTimer
+            from PyQt6.QtCore import QTimer
             QTimer.singleShot(0, self._open_next_pending_file)
-    
+
     def _restore_cursor_for_current_tab(self, file_info: dict):
         cursor_pos = file_info.get("cursor_position")
         scroll_pos = file_info.get("scroll_position")
@@ -318,7 +318,7 @@ class MainWindow(QMainWindow):
     def _connect_signals(self):
         """连接信号"""
         self.event_bus.connect_signals(self)
-    
+
     def _save_state(self):
         """保存窗口状态"""
         if not self.isMaximized():
@@ -327,42 +327,42 @@ class MainWindow(QMainWindow):
             self.config.set_window_setting("x", self.x())
             self.config.set_window_setting("y", self.y())
         self.config.set_window_setting("maximized", self.isMaximized())
-        
+
         open_files = self.editor_tabs.get_open_files_info()
         self.config.set_open_files(open_files)
-        
+
         self.config.set_active_tab_index(self.editor_tabs.currentIndex())
         self.config.set_current_view(self._current_view)
-        
+
         sizes = self.splitter.sizes()
         if len(sizes) >= 2:
             self.config.set_view_setting("sidebar_width", sizes[0])
             self.config.set_view_setting("editor_area_width", sizes[1])
-        
+
         self.config.update_last_login()
-        
+
         self.config.save_settings()
         self.config.save_workspace()
         self.config._save_user_data_path()
-        
+
         from .core.savegame_manager import SavegameSaveResult
         result = self.config.save_savegame()
         if result == SavegameSaveResult.SKIPPED_ENCRYPTED_UNREAD:
             self._prompt_encrypted_savegame_save()
-    
+
     def _prompt_encrypted_savegame_save(self):
         from .core.savegame_manager import SavegameSaveResult
         msg_box = QMessageBox(self)
         msg_box.setWindowTitle("存档已加密")
-        msg_box.setIcon(QMessageBox.Warning)
+        msg_box.setIcon(QMessageBox.Icon.Warning)
         msg_box.setText("游戏存档已加密但未解锁，本次游戏进度无法保存。")
         msg_box.setInformativeText("请输入密码解锁存档，或放弃本次进度。")
-        unlock_btn = msg_box.addButton("输入密码解锁", QMessageBox.AcceptRole)
-        discard_btn = msg_box.addButton("放弃进度", QMessageBox.DestructiveRole)
-        msg_box.exec_()
+        unlock_btn = msg_box.addButton("输入密码解锁", QMessageBox.ButtonRole.AcceptRole)
+        discard_btn = msg_box.addButton("放弃进度", QMessageBox.ButtonRole.DestructiveRole)
+        msg_box.exec()
 
         if msg_box.clickedButton() == unlock_btn:
-            from PyQt5.QtWidgets import QInputDialog
+            from PyQt6.QtWidgets import QInputDialog
             password, ok = QInputDialog.getText(
                 self, "解锁存档", "请输入存档加密密码：",
                 QLineEdit.Password, ""
@@ -372,23 +372,23 @@ class MainWindow(QMainWindow):
                     self.config.set_encryption_password(password)
                     result = self.config.save_savegame()
                     if result == SavegameSaveResult.SUCCESS:
-                        QMessageBox.information(self, "成功", "存档已保存。")
+                        QMessageBox.Icon.Information(self, "成功", "存档已保存。")
                     else:
-                        QMessageBox.warning(self, "保存失败", "存档保存时发生错误。")
+                        QMessageBox.Icon.Warning(self, "保存失败", "存档保存时发生错误。")
                 else:
-                    QMessageBox.warning(self, "密码错误", "密码不正确，存档未保存。")
+                    QMessageBox.Icon.Warning(self, "密码错误", "密码不正确，存档未保存。")
 
     def _save_to_temp(self):
         """保存到暂存文件"""
         self.editor_tabs.save_all_to_temp()
-    
+
     # === 挂机机制 ===
-    
+
     def _on_idle_reward(self):
         """在线挂机奖励（每分钟触发）"""
         self.game_engine.apply_idle_reward()
         self.resource_bar.refresh()
-    
+
     def _calculate_offline_rewards(self):
         """计算离线挂机收益"""
         reward = self.game_engine.apply_offline_reward()
@@ -413,12 +413,12 @@ class MainWindow(QMainWindow):
                 5000
             ))
             self.resource_bar.refresh()
-    
+
     # === 事件处理 ===
-    
+
     def changeEvent(self, event: QEvent):
         """窗口状态变化事件"""
-        if event.type() == QEvent.WindowStateChange:
+        if event.type() == QEvent.Type.WindowStateChange:
             if self.isMinimized():
                 self._save_to_temp()
         super().changeEvent(event)
@@ -446,7 +446,7 @@ class MainWindow(QMainWindow):
                     if not os.path.isfile(filepath):
                         continue
                     if ext not in self._SUPPORTED_DROP_EXTS:
-                        QMessageBox.warning(self, "不支持的文件类型",
+                        QMessageBox.Icon.Warning(self, "不支持的文件类型",
                                             f"PanzerNote 不支持打开 {ext or '无扩展名'} 类型的文件。")
                         continue
                     self._open_file(filepath)
@@ -457,54 +457,54 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent):
         """关闭窗口事件"""
         self._save_to_temp()
-        
+
         unsaved_files = self.editor_tabs.get_unsaved_files()
-        
+
         if unsaved_files:
             file_list = "\n".join([f"• {f}" for f in unsaved_files[:5]])
             if len(unsaved_files) > 5:
                 file_list += f"\n...等{len(unsaved_files)}个文件"
-            
+
             msg_box = QMessageBox(self)
             msg_box.setWindowTitle("确认退出")
             msg_box.setText(f"有{len(unsaved_files)}个文件未保存：\n\n{file_list}\n\n是否保存并退出？")
-            msg_box.setIcon(QMessageBox.Question)
-            
-            save_btn = msg_box.addButton("保存", QMessageBox.AcceptRole)
-            discard_btn = msg_box.addButton("不保存", QMessageBox.DestructiveRole)
-            cancel_btn = msg_box.addButton("取消", QMessageBox.RejectRole)
-            
-            msg_box.exec_()
-            
+            msg_box.setIcon(QMessageBox.Icon.Question)
+
+            save_btn = msg_box.addButton("保存", QMessageBox.ButtonRole.AcceptRole)
+            discard_btn = msg_box.addButton("不保存", QMessageBox.ButtonRole.DestructiveRole)
+            cancel_btn = msg_box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+
+            msg_box.exec()
+
             clicked = msg_box.clickedButton()
             if clicked == save_btn:
                 self.editor_tabs.save_all()
             elif clicked == cancel_btn:
                 event.ignore()
                 return
-        
+
         self._save_state()
         self.editor_tabs.clear_temp_files()
-        
+
         event.accept()
-    
+
     def keyPressEvent(self, event):
         """键盘事件"""
-        if event.key() == Qt.Key_Escape and self._current_view != "editor":
+        if event.key() == Qt.Key.Key_Escape and self._current_view != "editor":
             self._switch_view("editor")
             return
         super().keyPressEvent(event)
-    
+
     # === 文件操作 ===
-    
+
     def _new_file(self):
         """新建文件"""
         self.editor_tabs.new_file()
-    
+
     def _new_folder(self):
         """新建文件夹"""
         self.file_tree.create_new_folder()
-    
+
     def _open_file_dialog(self):
         """打开文件对话框"""
         filepath, _ = QFileDialog.getOpenFileName(
@@ -522,30 +522,30 @@ class MainWindow(QMainWindow):
         )
         if filepath:
             self._open_file(filepath)
-    
+
     def _open_file(self, filepath: str):
         """打开文件"""
         notebooks_path = os.path.normpath(self.config.get_notebooks_path())
         filepath_norm = os.path.normpath(filepath)
-        
+
         if not filepath_norm.startswith(notebooks_path):
             self.config.add_external_file(filepath)
             self.file_tree.refresh_external_files()
-        
+
         self.editor_tabs.open_file(filepath)
         self.config.add_recent_file(filepath)
         self._update_recent_menu()
-    
+
     def _save_current(self):
         """保存当前文件"""
         saved, char_count = self.editor_tabs.save_current()
         if saved and char_count > 0:
             self._on_file_saved(char_count)
-    
+
     def _save_as(self):
         """另存为"""
         self.editor_tabs.save_current_as()
-    
+
     def _save_all(self):
         """保存所有文件"""
         total_chars = self.editor_tabs.save_all()
@@ -555,7 +555,7 @@ class MainWindow(QMainWindow):
     def _export_pdf(self):
         from .editor.markdown_preview import HAS_WEBENGINE
         if not HAS_WEBENGINE:
-            QMessageBox.warning(self, "导出失败", "导出PDF需要QtWebEngine组件")
+            QMessageBox.Icon.Warning(self, "导出失败", "导出PDF需要QtWebEngine组件")
             return
         editor = self.editor_tabs.current_editor()
         if not editor:
@@ -565,7 +565,7 @@ class MainWindow(QMainWindow):
         )
         if not filepath:
             return
-        from PyQt5.QtWebEngineWidgets import QWebEngineView
+        from PyQt6.QtWebEngineWidgets import QWebEngineView
         from .editor.markdown_preview import MarkdownPreviewWidget
         widget = self.editor_tabs.currentWidget()
         content = editor.toPlainText()
@@ -588,7 +588,7 @@ class MainWindow(QMainWindow):
         pre{{white-space:pre-wrap;}}</style></head><body>{html_content}</body></html>"""
         web_view = QWebEngineView(self)
         web_view.setHtml(full_html)
-        from PyQt5.QtCore import QTimer
+        from PyQt6.QtCore import QTimer
         def do_print(ok):
             web_view.page().printToPdf(lambda pdf_data: self._on_pdf_generated(pdf_data, filepath))
             QTimer.singleShot(3000, web_view.deleteLater)
@@ -600,7 +600,7 @@ class MainWindow(QMainWindow):
                 f.write(pdf_data)
             self.secretary.show_message(f"已导出PDF: {os.path.basename(filepath)}")
         else:
-            QMessageBox.warning(self, "导出失败", "PDF生成失败")
+            QMessageBox.Icon.Warning(self, "导出失败", "PDF生成失败")
 
     def _export_html(self):
         editor = self.editor_tabs.current_editor()
@@ -637,12 +637,12 @@ class MainWindow(QMainWindow):
                 f.write(full_html)
             self.secretary.show_message(f"已导出HTML: {os.path.basename(filepath)}")
         except Exception as e:
-            QMessageBox.warning(self, "导出失败", str(e))
-    
+            QMessageBox.Icon.Warning(self, "导出失败", str(e))
+
     def _close_current_tab(self):
         """关闭当前标签"""
         self.editor_tabs.close_current_tab()
-    
+
     def _close_all_tabs(self):
         """关闭所有标签"""
         self.editor_tabs.close_all_tabs()
@@ -650,68 +650,68 @@ class MainWindow(QMainWindow):
     def _reopen_closed_tab(self):
         """重新打开最近关闭的标签"""
         self.editor_tabs.reopen_closed_tab()
-    
+
     def _release_memory(self):
         """释放占用内存"""
         self.editor_tabs.release_memory()
         import gc
         gc.collect()
         self.secretary.show_message("已释放内存占用")
-    
+
     def _update_recent_menu(self):
         """更新最近打开菜单"""
         self.recent_menu.clear()
         recent_files = self.config.get_recent_files()
-        
+
         valid_files = [f for f in recent_files if os.path.exists(f)]
         if valid_files != recent_files:
             self.config._workspace["recent_files"] = valid_files
             recent_files = valid_files
-        
+
         if not recent_files:
             action = QAction("(空)", self)
             action.setEnabled(False)
             self.recent_menu.addAction(action)
             return
-        
+
         for filepath in recent_files[:10]:
             filename = os.path.basename(filepath)
             action = QAction(filename, self)
             action.setToolTip(filepath)
             action.triggered.connect(lambda checked, f=filepath: self._open_file(f))
             self.recent_menu.addAction(action)
-    
+
     # === 编辑操作 ===
-    
+
     def _undo(self):
         """撤销"""
         if not self.editor_tabs.undo():
             self.secretary.show_message("当前没有可撤销的操作")
-    
+
     def _redo(self):
         """重做"""
         self.editor_tabs.redo()
-    
+
     def _cut(self):
         """剪切"""
         self.editor_tabs.cut()
-    
+
     def _copy(self):
         """复制"""
         self.editor_tabs.copy()
-    
+
     def _paste(self):
         """粘贴"""
         self.editor_tabs.paste()
-    
+
     def _select_all(self):
         """全选"""
         self.editor_tabs.select_all()
-    
+
     def _find(self):
         """查找"""
         self.editor_tabs.show_find_dialog()
-    
+
     def _replace(self):
         """替换"""
         self.editor_tabs.show_replace_dialog()
@@ -763,7 +763,7 @@ class MainWindow(QMainWindow):
             editor.prev_bookmark()
 
     # === 视图操作 ===
-    
+
     def _on_view_changed(self, view: str):
         """游戏侧边栏视图切换"""
         if view == "back":
@@ -773,12 +773,12 @@ class MainWindow(QMainWindow):
                 self._undo()
         else:
             self._switch_view(view)
-    
+
     def _switch_view(self, view: str):
         """切换视图"""
         if view == self._current_view:
             return
-        
+
         if view == "editor":
             self.file_tree.show()
             self.splitter.show()
@@ -789,18 +789,18 @@ class MainWindow(QMainWindow):
             self.splitter.hide()
             self.game_view_container.show()
             self.game_sidebar.set_current_view(view)
-        
+
         self._current_view = view
-    
+
     def _set_wrap_mode(self, mode: str):
         """设置行宽模式"""
         self.config.set_editor_setting("wrap_mode", mode)
         self.editor_tabs.set_wrap_mode_all(mode)
-        
+
         # 更新菜单选中状态
         self._wrap_no_wrap_action.setChecked(mode == "no_wrap")
         self._wrap_limit_action.setChecked(mode == "limit_width")
-    
+
     def _toggle_md_preview(self):
         """切换Markdown预览"""
         self.editor_tabs.toggle_md_preview()
@@ -811,11 +811,11 @@ class MainWindow(QMainWindow):
 
     def _split_editor_horizontal(self):
         """水平分屏"""
-        self._split_editor(Qt.Horizontal)
+        self._split_editor(Qt.Orientation.Horizontal)
 
     def _split_editor_vertical(self):
         """垂直分屏"""
-        self._split_editor(Qt.Vertical)
+        self._split_editor(Qt.Orientation.Vertical)
 
     def _split_editor(self, orientation):
         if self._split_tabs:
@@ -842,31 +842,31 @@ class MainWindow(QMainWindow):
         split_tabs = self._split_tabs.pop()
         unsaved = split_tabs.get_unsaved_files()
         if unsaved:
-            reply = QMessageBox.question(
+            reply = QMessageBox.Icon.Question(
                 self, "关闭分屏",
                 "分屏中有未保存的文件，是否关闭？",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No
             )
-            if reply == QMessageBox.No:
+            if reply == QMessageBox.StandardButton.No:
                 self._split_tabs.append(split_tabs)
                 return
         split_tabs.save_all_to_temp()
         split_tabs.close_all_tabs()
         split_tabs.setParent(None)
         split_tabs.deleteLater()
-    
+
     def _toggle_file_tree(self):
         """切换文件树显示/隐藏"""
         if self.file_tree.isVisible():
             self.file_tree.hide()
         else:
             self.file_tree.show()
-    
+
     def _toggle_secretary(self):
         """切换小秘书显示/隐藏"""
         self.secretary.setVisible(not self.secretary.isVisible())
         self.config.set_secretary_setting("show_secretary", self.secretary.isVisible())
-    
+
     def _toggle_shortcut_panel(self):
         """切换快捷键提示面板"""
         if self.shortcut_panel.isVisible():
@@ -880,48 +880,48 @@ class MainWindow(QMainWindow):
         """快捷键编辑回调"""
         from .utils.logger import get_logger
         get_logger(__name__).info("快捷键已更新: %s -> %s", action_id, new_shortcut)
-    
+
     def _toggle_fullscreen(self):
         """切换全屏"""
         if self.isFullScreen():
             self.showNormal()
         else:
             self.showFullScreen()
-    
+
     def _zoom_in(self):
         """放大"""
         self.editor_tabs.zoom_in()
-    
+
     def _zoom_out(self):
         """缩小"""
         self.editor_tabs.zoom_out()
-    
+
     def _zoom_reset(self):
         """重置缩放"""
         self.editor_tabs.zoom_reset()
-    
+
     # === 游戏功能 ===
-    
+
     def _import_characters(self):
         """导入角色数据"""
-        QMessageBox.information(self, "提示", "该功能尚在开发中")
+        QMessageBox.Icon.Information(self, "提示", "该功能尚在开发中")
 
     def _import_document(self):
         """导入外部文档"""
-        QMessageBox.information(self, "提示", "该功能尚在开发中")
+        QMessageBox.Icon.Information(self, "提示", "该功能尚在开发中")
 
     def _show_typing_stats(self):
         """显示打字统计"""
-        QMessageBox.information(self, "提示", "该功能尚在开发中")
+        QMessageBox.Icon.Information(self, "提示", "该功能尚在开发中")
 
     def _show_construction_stats(self):
         """显示建造记录"""
-        QMessageBox.information(self, "提示", "该功能尚在开发中")
+        QMessageBox.Icon.Information(self, "提示", "该功能尚在开发中")
 
     def _show_collection_stats(self):
         """显示图鉴完成度"""
-        QMessageBox.information(self, "提示", "该功能尚在开发中")
-    
+        QMessageBox.Icon.Information(self, "提示", "该功能尚在开发中")
+
     def _on_file_saved(self, char_count: int):
         """文件保存后的处理"""
         self.resource_bar.refresh()
@@ -940,60 +940,60 @@ class MainWindow(QMainWindow):
             self.secretary.show_message(
                 f"已将 {os.path.basename(src_filepath)} 移动到 {os.path.basename(dest_folder)}/"
             )
-    
+
     # === 设置 ===
-    
+
     def _show_editor_settings(self):
         """显示记事本设置"""
         dialog = EditorSettingsDialog(self.config, self)
-        if dialog.exec_() == QDialog.Accepted:
+        if dialog.exec() == QDialog.DialogCode.Accepted:
             settings = dialog.get_settings()
             editor = settings["editor"]
             secretary = settings["secretary"]
-            
+
             # 保存编辑器设置
             for key, value in editor.items():
                 self.config.set_editor_setting(key, value)
-            
+
             # 保存小秘书设置
             for key, value in secretary.items():
                 self.config.set_secretary_setting(key, value)
-            
+
             self.config.save_settings()
-            
+
             # 应用设置
             # 显示行号
             self.editor_tabs.set_line_numbers_all(editor["show_line_numbers"])
-            
+
             # 高亮当前行
             self.editor_tabs.set_highlight_current_line_all(editor["highlight_current_line"])
-            
+
             # 字体和字体大小
             self.editor_tabs.set_font_all(editor["font_family"], editor["font_size"])
-            
+
             # 行宽模式
             self.editor_tabs.set_wrap_mode_all(editor["wrap_mode"])
             self._wrap_no_wrap_action.setChecked(editor["wrap_mode"] == "no_wrap")
             self._wrap_limit_action.setChecked(editor["wrap_mode"] == "limit_width")
-            
+
             # 自动缩略图
             self.editor_tabs.apply_auto_minimap_all()
-            
+
             # 自动保存间隔
             self.timer_manager.update_auto_save_interval(editor["auto_save_interval"])
-            
+
             # 小秘书设置
             if secretary["show_secretary"]:
                 self.secretary.show()
                 self.secretary.set_size_percent(secretary["size_percent"])
             else:
                 self.secretary.hide()
-            
+
             self.secretary.show_message("设置已保存并应用")
-    
+
     def _show_game_settings(self):
         """显示游戏设置"""
-        QMessageBox.information(self, "提示", "该功能尚在开发中")
+        QMessageBox.Icon.Information(self, "提示", "该功能尚在开发中")
 
     def _export_settings(self):
         filepath, _ = QFileDialog.getSaveFileName(
@@ -1012,7 +1012,7 @@ class MainWindow(QMainWindow):
                 json_module.dump(export_data, f, ensure_ascii=False, indent=2)
             self.secretary.show_message(f"设置已导出到 {os.path.basename(filepath)}")
         except Exception as e:
-            QMessageBox.warning(self, "导出失败", str(e))
+            QMessageBox.Icon.Warning(self, "导出失败", str(e))
 
     def _import_settings(self):
         filepath, _ = QFileDialog.getOpenFileName(
@@ -1025,14 +1025,14 @@ class MainWindow(QMainWindow):
             with open(filepath, 'r', encoding='utf-8') as f:
                 import_data = json_module.load(f)
             if "settings" not in import_data:
-                QMessageBox.warning(self, "导入失败", "无效的设置文件格式")
+                QMessageBox.Icon.Warning(self, "导入失败", "无效的设置文件格式")
                 return
-            reply = QMessageBox.question(
+            reply = QMessageBox.Icon.Question(
                 self, "确认导入",
                 "导入设置将覆盖当前所有设置，是否继续？",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No
             )
-            if reply == QMessageBox.No:
+            if reply == QMessageBox.StandardButton.No:
                 return
             self.config._settings.update(import_data["settings"])
             if "workspace" in import_data:
@@ -1041,8 +1041,8 @@ class MainWindow(QMainWindow):
             self._apply_editor_settings()
             self.secretary.show_message("设置已导入，部分设置将在重启后生效")
         except Exception as e:
-            QMessageBox.warning(self, "导入失败", str(e))
-    
+            QMessageBox.Icon.Warning(self, "导入失败", str(e))
+
     def _save_settings(self):
         """保存设置"""
         self.config.save_settings()
@@ -1067,34 +1067,34 @@ class MainWindow(QMainWindow):
             self.secretary.set_size_percent(self.config.get_secretary_setting("size_percent", 7))
         else:
             self.secretary.hide()
-    
+
     def _reset_settings(self):
         """恢复默认设置"""
         msg_box = QMessageBox(self)
         msg_box.setWindowTitle("确认")
         msg_box.setText("确定要恢复所有设置为默认值吗？")
-        msg_box.setIcon(QMessageBox.Question)
-        
-        yes_btn = msg_box.addButton("确定", QMessageBox.AcceptRole)
-        no_btn = msg_box.addButton("取消", QMessageBox.RejectRole)
-        
-        msg_box.exec_()
-        
+        msg_box.setIcon(QMessageBox.Icon.Question)
+
+        yes_btn = msg_box.addButton("确定", QMessageBox.ButtonRole.AcceptRole)
+        no_btn = msg_box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+
+        msg_box.exec()
+
         if msg_box.clickedButton() == yes_btn:
             self.config.reset_to_defaults()
             self._apply_editor_settings()
             self.secretary.show_message("设置已恢复为默认值")
-    
+
     # === 帮助 ===
-    
+
     def _show_guide(self):
         """显示新手攻略"""
-        QMessageBox.information(self, "提示", "该功能尚在开发中")
+        QMessageBox.Icon.Information(self, "提示", "该功能尚在开发中")
 
     def _show_manual(self):
         """显示使用说明"""
-        QMessageBox.information(self, "提示", "该功能尚在开发中")
-    
+        QMessageBox.Icon.Information(self, "提示", "该功能尚在开发中")
+
     def _show_about(self):
         """显示关于对话框"""
         QMessageBox.about(
@@ -1105,14 +1105,14 @@ class MainWindow(QMainWindow):
             "通过书写获取资源，建造收集角色，点亮完整图鉴。\n\n"
             "让日常记录变成一场温暖的怀旧之旅。"
         )
-    
+
     # === 自动保存和统计 ===
-    
+
     def _auto_save(self):
         """自动保存"""
         if self.editor_tabs.has_modified_files():
             self._save_to_temp()
-    
+
     def _update_stats(self):
         editor = self.editor_tabs.current_editor()
         if editor:
@@ -1122,19 +1122,19 @@ class MainWindow(QMainWindow):
             col = editor.get_current_column()
             file_type = editor.get_file_type()
             encoding = self.editor_tabs.get_current_encoding()
-            
+
             self.status_bar_widget.update_stats(
                 char_count, line, col, encoding, file_type, word_count
             )
-        
+
         today_chars = self.config.get_today_chars_typed()
         total_docs = self.config.get_total_documents()
         self.resource_bar.update_typing_stats(today_chars, total_docs)
-    
+
     def _on_tab_changed(self, index: int):
         """标签页切换"""
         self._update_stats()
-    
+
     def _on_content_modified(self):
         """内容修改"""
         self._update_stats()
@@ -1176,7 +1176,7 @@ class MainWindow(QMainWindow):
     def _show_theme_dialog(self):
         dialog = ThemePreviewDialog(self.theme_engine, self)
         dialog.theme_applied.connect(self._on_theme_applied)
-        dialog.exec_()
+        dialog.exec()
 
     def _on_theme_applied(self, theme_id: str):
         self._apply_theme()
@@ -1207,4 +1207,4 @@ class MainWindow(QMainWindow):
     def _show_plugin_manager(self):
         from .plugins.plugin_manager_dialog import PluginManagerDialog
         dialog = PluginManagerDialog(self.plugin_manager, self.secretary, parent=self)
-        dialog.exec_()
+        dialog.exec()

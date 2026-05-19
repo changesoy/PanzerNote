@@ -5,13 +5,13 @@
 提供实时预览、主题切换和自定义调整功能。
 """
 
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
     QPushButton, QLabel, QSplitter, QWidget, QScrollArea,
     QGroupBox, QFormLayout, QCheckBox, QDialogButtonBox,
 )
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QFont, QColor, QPalette
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QFont, QColor, QPalette
 
 from .theme_engine import ThemeEngine, ThemeDefinition, ThemeColorScheme
 
@@ -29,7 +29,7 @@ class ThemePreviewWidget(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
 
-        splitter = QSplitter(Qt.Horizontal)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
         layout.addWidget(splitter)
 
         left_panel = QWidget()
@@ -72,7 +72,7 @@ class ThemePreviewWidget(QWidget):
         themes = self._engine.get_all_themes()
         for theme_id, theme in themes.items():
             item = QListWidgetItem(theme.name)
-            item.setData(Qt.UserRole, theme_id)
+            item.setData(Qt.ItemDataRole.UserRole, theme_id)
             if theme.is_dark:
                 item.setText(f"{theme.name} (深色)")
             self._theme_list.addItem(item)
@@ -80,14 +80,14 @@ class ThemePreviewWidget(QWidget):
         active = self._engine.get_active_theme()
         for i in range(self._theme_list.count()):
             item = self._theme_list.item(i)
-            if item.data(Qt.UserRole) == active.id:
+            if item.data(Qt.ItemDataRole.UserRole) == active.id:
                 self._theme_list.setCurrentItem(item)
                 break
 
     def _on_theme_selected(self, current: QListWidgetItem, previous: QListWidgetItem):
         if current is None:
             return
-        theme_id = current.data(Qt.UserRole)
+        theme_id = current.data(Qt.ItemDataRole.UserRole)
         theme = self._engine.get_theme(theme_id)
         if theme:
             self._current_theme_id = theme_id

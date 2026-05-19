@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from unittest.mock import MagicMock, patch
 
-from PyQt5.QtCore import QTimer
+from PyQt6.QtCore import QTimer
 
 from src.core.timer_manager import TimerManager
 

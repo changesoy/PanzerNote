@@ -21,14 +21,14 @@ import json
 import xml.dom.minidom as minidom
 from contextlib import contextmanager
 from typing import Generator, Set
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QPlainTextEdit, QWidget, QTextEdit, QVBoxLayout,
-    QMenu, QAction, QMessageBox
+    QMenu, QMessageBox
 )
-from PyQt5.QtCore import Qt, QRect, QSize
-from PyQt5.QtGui import (
+from PyQt6.QtCore import Qt, QRect, QSize
+from PyQt6.QtGui import (
     QFont, QColor, QPainter, QTextFormat, QTextCharFormat,
-    QSyntaxHighlighter, QTextDocument, QKeyEvent
+    QSyntaxHighlighter, QTextDocument, QKeyEvent, QAction
 )
 
 from ..core.config import Config
@@ -163,7 +163,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             self._highlight_current_line()
 
         # 禁用默认右键菜单，使用自定义的
-        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
 
     def _apply_theme_colors(self, colors):
@@ -257,7 +257,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             format_action.triggered.connect(self.format_document)
             menu.addAction(format_action)
 
-        menu.exec_(self.mapToGlobal(position))
+        menu.exec(self.mapToGlobal(position))
 
     # ═══════════════════ 行号 ═══════════════════
 
@@ -359,7 +359,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
                     0, top,
                     self.line_number_area.width() - 5,
                     self.fontMetrics().height(),
-                    Qt.AlignRight, number
+                    Qt.AlignmentFlag.AlignRight, number
                 )
 
             block = block.next()
@@ -376,7 +376,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             line_color_name = self._theme_engine.get_active_theme().colors.editor_current_line if self._theme_engine else "#FFFDE7"
             line_color = QColor(line_color_name)
             selection.format.setBackground(line_color)
-            selection.format.setProperty(QTextFormat.FullWidthSelection, True)
+            selection.format.setProperty(QTextFormat.Property.FullWidthSelection, True)
             selection.cursor = self.textCursor()
             selection.cursor.clearSelection()
             extra_selections.append(selection)
@@ -463,9 +463,9 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         """设置行宽模式"""
         self._wrap_mode = mode
         if mode == "limit_width":
-            self.setLineWrapMode(QPlainTextEdit.WidgetWidth)
+            self.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
         else:
-            self.setLineWrapMode(QPlainTextEdit.NoWrap)
+            self.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
 
     def get_wrap_mode(self) -> str:
         return self._wrap_mode
@@ -478,32 +478,32 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         key = event.key()
 
         # Ctrl+Shift+K: 删除当前行
-        if modifiers == (Qt.ControlModifier | Qt.ShiftModifier) and key == Qt.Key_K:
+        if modifiers == (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier) and key == Qt.Key.Key_K:
             self.delete_current_line()
             return
 
         # Ctrl+Shift+D: 复制当前行
-        if modifiers == (Qt.ControlModifier | Qt.ShiftModifier) and key == Qt.Key_D:
+        if modifiers == (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier) and key == Qt.Key.Key_D:
             self.duplicate_line()
             return
 
         # Alt+Up: 上移当前行
-        if modifiers == Qt.AltModifier and key == Qt.Key_Up:
+        if modifiers == Qt.KeyboardModifier.AltModifier and key == Qt.Key.Key_Up:
             self.move_line_up()
             return
 
         # Alt+Down: 下移当前行
-        if modifiers == Qt.AltModifier and key == Qt.Key_Down:
+        if modifiers == Qt.KeyboardModifier.AltModifier and key == Qt.Key.Key_Down:
             self.move_line_down()
             return
 
         # Ctrl+Shift+U: 切换大小写
-        if modifiers == (Qt.ControlModifier | Qt.ShiftModifier) and key == Qt.Key_U:
+        if modifiers == (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier) and key == Qt.Key.Key_U:
             self.toggle_case()
             return
 
         # Backspace: 删除成对的括号/引号
-        if key == Qt.Key_Backspace and not modifiers:
+        if key == Qt.Key.Key_Backspace and not modifiers:
             if self.config.get_editor_setting("auto_pair_brackets", True):
                 cursor = self.textCursor()
                 if not cursor.hasSelection():
@@ -519,12 +519,12 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             return
 
         # 回车键: 自动缩进
-        if key in (Qt.Key_Return, Qt.Key_Enter):
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             self._handle_enter()
             return
 
         # Tab键: 插入4个空格（而非真Tab）
-        if key == Qt.Key_Tab and not modifiers:
+        if key == Qt.Key.Key_Tab and not modifiers:
             cursor = self.textCursor()
             if cursor.hasSelection():
                 self._indent_selection(cursor, indent=True)
@@ -533,7 +533,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             return
 
         # Shift+Tab: 减少缩进
-        if key == Qt.Key_Backtab:
+        if key == Qt.Key.Key_Backtab:
             cursor = self.textCursor()
             self._indent_selection(cursor, indent=False)
             return
@@ -605,8 +605,8 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
 
         if text.strip() == '':
             if text.startswith("    "):
-                cursor.movePosition(cursor.StartOfBlock, cursor.MoveAnchor)
-                cursor.movePosition(cursor.EndOfBlock, cursor.KeepAnchor)
+                cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock, QTextCursor.MoveMode.MoveAnchor)
+                cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock, cursor.KeepAnchor)
                 new_text = text[4:] + '}'
                 cursor.insertText(new_text)
                 self.setTextCursor(cursor)
@@ -621,8 +621,8 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             block = cursor.block()
             text = block.text()
 
-            cursor.movePosition(cursor.StartOfBlock, cursor.MoveAnchor)
-            cursor.movePosition(cursor.EndOfBlock, cursor.KeepAnchor)
+            cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock, QTextCursor.MoveMode.MoveAnchor)
+            cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock, cursor.KeepAnchor)
 
             if indent:
                 cursor.insertText("    " + text)
@@ -652,10 +652,10 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             else:
                 text = block.text()
                 if text.startswith("    "):
-                    cursor.movePosition(cursor.Right, cursor.KeepAnchor, 4)
+                    cursor.movePosition(QTextCursor.MoveOperation.Right, cursor.KeepAnchor, 4)
                     cursor.removeSelectedText()
                 elif text.startswith("\t"):
-                    cursor.movePosition(cursor.Right, cursor.KeepAnchor, 1)
+                    cursor.movePosition(QTextCursor.MoveOperation.Right, cursor.KeepAnchor, 1)
                     cursor.removeSelectedText()
 
         cursor.endEditBlock()

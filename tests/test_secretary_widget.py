@@ -2,9 +2,9 @@
 import os
 import json
 import pytest
-from PyQt5.QtWidgets import QApplication, QWidget
-from PyQt5.QtCore import Qt, QTimer, QEvent
-from PyQt5.QtGui import QResizeEvent
+from PyQt6.QtWidgets import QApplication, QWidget
+from PyQt6.QtCore import Qt, QTimer, QEvent
+from PyQt6.QtGui import QResizeEvent
 
 from src.core.config import Config
 from src.game.secretary_widget import SpeechBubble, SecretaryWidget
@@ -337,7 +337,7 @@ class TestSecretaryPositionTracking:
         widget = SecretaryWidget(config, parent=parent)
         qtbot.addWidget(widget)
         widget._position_dirty = False
-        from PyQt5.QtCore import QSize
+        from PyQt6.QtCore import QSize
         resize_event = QResizeEvent(QSize(800, 400), QSize(1200, 900))
         widget.eventFilter(parent, resize_event)
         assert widget._position_dirty is True

@@ -8,7 +8,7 @@ import json
 import os
 from datetime import datetime
 from enum import Enum, auto
-from typing import Dict, Optional, Any
+from typing import Any, Dict, Optional
 
 from ..utils.logger import get_logger
 from ..utils.exceptions import safe_call

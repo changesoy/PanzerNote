@@ -4,8 +4,8 @@
 显示光标位置、字符数、编码、文件类型
 """
 
-from PyQt5.QtWidgets import QStatusBar, QLabel, QFrame, QHBoxLayout, QWidget
-from PyQt5.QtCore import Qt
+from PyQt6.QtWidgets import QStatusBar, QLabel, QFrame, QHBoxLayout, QWidget
+from PyQt6.QtCore import Qt
 
 from ..themes.theme_aware_mixin import ThemeAwareMixin
 
@@ -30,7 +30,7 @@ class StatusBarWidget(ThemeAwareMixin, QStatusBar):
         left_layout.addWidget(self.position_label)
 
         sep1 = QFrame()
-        sep1.setFrameShape(QFrame.VLine)
+        sep1.setFrameShape(QFrame.Shape.VLine)
         left_layout.addWidget(sep1)
         self._sep1 = sep1
 
@@ -39,7 +39,7 @@ class StatusBarWidget(ThemeAwareMixin, QStatusBar):
         left_layout.addWidget(self.char_count_label)
 
         sep1b = QFrame()
-        sep1b.setFrameShape(QFrame.VLine)
+        sep1b.setFrameShape(QFrame.Shape.VLine)
         left_layout.addWidget(sep1b)
         self._sep1b = sep1b
 
@@ -53,17 +53,17 @@ class StatusBarWidget(ThemeAwareMixin, QStatusBar):
 
         self.encoding_label = QLabel("UTF-8")
         self.encoding_label.setMinimumWidth(60)
-        self.encoding_label.setAlignment(Qt.AlignCenter)
+        self.encoding_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.addPermanentWidget(self.encoding_label)
 
         sep2 = QFrame()
-        sep2.setFrameShape(QFrame.VLine)
+        sep2.setFrameShape(QFrame.Shape.VLine)
         self.addPermanentWidget(sep2)
         self._sep2 = sep2
 
         self.file_type_label = QLabel("纯文本")
         self.file_type_label.setMinimumWidth(70)
-        self.file_type_label.setAlignment(Qt.AlignCenter)
+        self.file_type_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.addPermanentWidget(self.file_type_label)
 
     def _apply_theme_colors(self, colors):

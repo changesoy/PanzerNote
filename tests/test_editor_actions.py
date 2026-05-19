@@ -2,8 +2,8 @@
 import sys
 
 import pytest
-from PyQt5.QtWidgets import QApplication, QPlainTextEdit
-from PyQt5.QtGui import QTextCursor
+from PyQt6.QtWidgets import QApplication, QPlainTextEdit
+from PyQt6.QtGui import QTextCursor
 
 from src.editor.editor_actions import EditorActionsMixin
 
@@ -30,8 +30,8 @@ class TestDeleteCurrentLine:
     def test_delete_single_line(self, app):
         app.setPlainText("line1\nline2\nline3")
         cursor = app.textCursor()
-        cursor.movePosition(cursor.Start)
-        cursor.movePosition(cursor.Down)
+        cursor.movePosition(QTextCursor.MoveOperation.Start)
+        cursor.movePosition(QTextCursor.MoveOperation.Down)
         app.setTextCursor(cursor)
 
         app.delete_current_line()
@@ -40,8 +40,8 @@ class TestDeleteCurrentLine:
     def test_delete_last_line(self, app):
         app.setPlainText("line1\nline2\nline3")
         cursor = app.textCursor()
-        cursor.movePosition(cursor.Start)
-        cursor.movePosition(cursor.Down, cursor.MoveAnchor, 2)
+        cursor.movePosition(QTextCursor.MoveOperation.Start)
+        cursor.movePosition(QTextCursor.MoveOperation.Down, QTextCursor.MoveMode.MoveAnchor, 2)
         app.setTextCursor(cursor)
         assert cursor.blockNumber() == 2
 
@@ -60,8 +60,8 @@ class TestDuplicateLine:
     def test_duplicate_line(self, app):
         app.setPlainText("line1\nline2\nline3")
         cursor = app.textCursor()
-        cursor.movePosition(cursor.Start)
-        cursor.movePosition(cursor.Down)
+        cursor.movePosition(QTextCursor.MoveOperation.Start)
+        cursor.movePosition(QTextCursor.MoveOperation.Down)
         app.setTextCursor(cursor)
 
         app.duplicate_line()
@@ -72,8 +72,8 @@ class TestMoveLineUp:
     def test_move_line_up(self, app):
         app.setPlainText("line1\nline2\nline3")
         cursor = app.textCursor()
-        cursor.movePosition(cursor.Start)
-        cursor.movePosition(cursor.Down)
+        cursor.movePosition(QTextCursor.MoveOperation.Start)
+        cursor.movePosition(QTextCursor.MoveOperation.Down)
         app.setTextCursor(cursor)
 
         app.move_line_up()
@@ -82,7 +82,7 @@ class TestMoveLineUp:
     def test_cannot_move_first_line_up(self, app):
         app.setPlainText("line1\nline2")
         cursor = app.textCursor()
-        cursor.movePosition(cursor.Start)
+        cursor.movePosition(QTextCursor.MoveOperation.Start)
         app.setTextCursor(cursor)
 
         app.move_line_up()
@@ -93,7 +93,7 @@ class TestMoveLineDown:
     def test_move_line_down(self, app):
         app.setPlainText("line1\nline2\nline3")
         cursor = app.textCursor()
-        cursor.movePosition(cursor.Start)
+        cursor.movePosition(QTextCursor.MoveOperation.Start)
         app.setTextCursor(cursor)
 
         app.move_line_down()
@@ -102,8 +102,8 @@ class TestMoveLineDown:
     def test_cannot_move_last_line_down(self, app):
         app.setPlainText("line1\nline2")
         cursor = app.textCursor()
-        cursor.movePosition(cursor.Start)
-        cursor.movePosition(cursor.Down)
+        cursor.movePosition(QTextCursor.MoveOperation.Start)
+        cursor.movePosition(QTextCursor.MoveOperation.Down)
         app.setTextCursor(cursor)
 
         app.move_line_down()
@@ -114,7 +114,7 @@ class TestCaseConversion:
     def test_to_uppercase(self, app):
         app.setPlainText("hello world")
         cursor = app.textCursor()
-        cursor.select(QTextCursor.Document)
+        cursor.select(QTextCursor.SelectionType.Document)
         app.setTextCursor(cursor)
 
         app.to_uppercase()
@@ -123,7 +123,7 @@ class TestCaseConversion:
     def test_to_lowercase(self, app):
         app.setPlainText("HELLO WORLD")
         cursor = app.textCursor()
-        cursor.select(QTextCursor.Document)
+        cursor.select(QTextCursor.SelectionType.Document)
         app.setTextCursor(cursor)
 
         app.to_lowercase()
@@ -132,7 +132,7 @@ class TestCaseConversion:
     def test_to_titlecase(self, app):
         app.setPlainText("hello world")
         cursor = app.textCursor()
-        cursor.select(QTextCursor.Document)
+        cursor.select(QTextCursor.SelectionType.Document)
         app.setTextCursor(cursor)
 
         app.to_titlecase()
@@ -141,7 +141,7 @@ class TestCaseConversion:
     def test_toggle_case_upper_to_lower(self, app):
         app.setPlainText("HELLO")
         cursor = app.textCursor()
-        cursor.select(QTextCursor.Document)
+        cursor.select(QTextCursor.SelectionType.Document)
         app.setTextCursor(cursor)
 
         app.toggle_case()
@@ -150,7 +150,7 @@ class TestCaseConversion:
     def test_toggle_case_lower_to_upper(self, app):
         app.setPlainText("hello")
         cursor = app.textCursor()
-        cursor.select(QTextCursor.Document)
+        cursor.select(QTextCursor.SelectionType.Document)
         app.setTextCursor(cursor)
 
         app.toggle_case()

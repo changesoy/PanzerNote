@@ -7,11 +7,11 @@ v1.6.4 改动：
   - 主题感知：订阅 theme_changed 信号
 """
 
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QToolButton, QFrame
 )
-from PyQt5.QtCore import Qt, pyqtSignal, QSize
-from PyQt5.QtGui import QIcon, QPixmap, QPainter, QColor, QFont
+from PyQt6.QtCore import Qt, pyqtSignal, QSize
+from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont
 
 from ..themes.theme_aware_mixin import ThemeAwareMixin
 
@@ -27,23 +27,23 @@ class GameIconButton(QToolButton):
 
         self.setFixedSize(50, 50)
         self.setToolTip(tooltip)
-        self.setCursor(Qt.PointingHandCursor)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         self._create_placeholder_icon()
 
     def _create_placeholder_icon(self):
         pixmap = QPixmap(32, 32)
-        pixmap.fill(Qt.transparent)
+        pixmap.fill(Qt.GlobalColor.transparent)
 
         painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         painter.setBrush(QColor(self.color))
-        painter.setPen(Qt.NoPen)
+        painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(2, 2, 28, 28, 6, 6)
 
         painter.setPen(QColor("white"))
-        painter.setFont(QFont("Arial", 12, QFont.Bold))
+        painter.setFont(QFont("Arial", 12, QFont.Weight.Bold))
 
         char_map = {
             "back": "←",
@@ -52,7 +52,7 @@ class GameIconButton(QToolButton):
             "collection": "鉴"
         }
         char = char_map.get(self.icon_name, "?")
-        painter.drawText(pixmap.rect(), Qt.AlignCenter, char)
+        painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, char)
 
         painter.end()
 
@@ -98,41 +98,41 @@ class GameSidebar(ThemeAwareMixin, QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 5, 0, 5)
         layout.setSpacing(5)
-        layout.setAlignment(Qt.AlignTop)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         self.back_btn = GameIconButton("back", "返回 (Ctrl+Z / Esc)", "#78909C")
         self.back_btn.clicked.connect(lambda: self.view_changed.emit("back"))
-        layout.addWidget(self.back_btn, 0, Qt.AlignHCenter)
+        layout.addWidget(self.back_btn, 0, Qt.AlignmentFlag.AlignHCenter)
 
         line1 = QFrame()
-        line1.setFrameShape(QFrame.HLine)
-        line1.setFrameShadow(QFrame.Sunken)
+        line1.setFrameShape(QFrame.Shape.HLine)
+        line1.setFrameShadow(QFrame.Shadow.Sunken)
         line1.setFixedWidth(40)
-        layout.addWidget(line1, 0, Qt.AlignHCenter)
+        layout.addWidget(line1, 0, Qt.AlignmentFlag.AlignHCenter)
 
         self.construction_btn = GameIconButton("construction", "建造 (Ctrl+2)", "#4CAF50")
         self.construction_btn.clicked.connect(lambda: self._on_btn_clicked("construction"))
-        layout.addWidget(self.construction_btn, 0, Qt.AlignHCenter)
+        layout.addWidget(self.construction_btn, 0, Qt.AlignmentFlag.AlignHCenter)
 
         line2 = QFrame()
-        line2.setFrameShape(QFrame.HLine)
-        line2.setFrameShadow(QFrame.Sunken)
+        line2.setFrameShape(QFrame.Shape.HLine)
+        line2.setFrameShadow(QFrame.Shadow.Sunken)
         line2.setFixedWidth(40)
-        layout.addWidget(line2, 0, Qt.AlignHCenter)
+        layout.addWidget(line2, 0, Qt.AlignmentFlag.AlignHCenter)
 
         self.garage_btn = GameIconButton("garage", "车库 (Ctrl+3)", "#FF9800")
         self.garage_btn.clicked.connect(lambda: self._on_btn_clicked("garage"))
-        layout.addWidget(self.garage_btn, 0, Qt.AlignHCenter)
+        layout.addWidget(self.garage_btn, 0, Qt.AlignmentFlag.AlignHCenter)
 
         line3 = QFrame()
-        line3.setFrameShape(QFrame.HLine)
-        line3.setFrameShadow(QFrame.Sunken)
+        line3.setFrameShape(QFrame.Shape.HLine)
+        line3.setFrameShadow(QFrame.Shadow.Sunken)
         line3.setFixedWidth(40)
-        layout.addWidget(line3, 0, Qt.AlignHCenter)
+        layout.addWidget(line3, 0, Qt.AlignmentFlag.AlignHCenter)
 
         self.collection_btn = GameIconButton("collection", "图鉴 (Ctrl+4)", "#9C27B0")
         self.collection_btn.clicked.connect(lambda: self._on_btn_clicked("collection"))
-        layout.addWidget(self.collection_btn, 0, Qt.AlignHCenter)
+        layout.addWidget(self.collection_btn, 0, Qt.AlignmentFlag.AlignHCenter)
 
         layout.addStretch()
 

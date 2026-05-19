@@ -8,9 +8,9 @@ Markdown 渲染缓存
 2. LRU淘汰：缓存满时淘汰最久未使用的条目
 """
 
-from typing import Optional, Callable
-from collections import OrderedDict
 import hashlib
+from collections import OrderedDict
+from typing import Callable, Optional
 
 from ..utils.logger import get_logger
 from ..utils.feature_flags import is_enabled

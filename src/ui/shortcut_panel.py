@@ -9,14 +9,14 @@ v1.6.4 改动：
   - 主题感知：订阅 theme_changed 信号
 """
 
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QLineEdit, QTreeWidget, QTreeWidgetItem,
     QPushButton, QFrame, QSizePolicy, QHeaderView,
     QDialog, QKeySequenceEdit
 )
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QFont, QKeySequence
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QFont, QKeySequence
 
 from ..utils.dpi_helper import scale, scale_stylesheet
 from ..themes.theme_aware_mixin import ThemeAwareMixin
@@ -128,7 +128,7 @@ class ShortcutPanel(ThemeAwareMixin, QWidget):
     def _init_ui(self):
         self.setWindowTitle("快捷键提示")
         self.setMinimumSize(scale(500), scale(400))
-        self.setWindowFlags(Qt.Window | Qt.WindowStaysOnTopHint)
+        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowStaysOnTopHint)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(
@@ -139,7 +139,7 @@ class ShortcutPanel(ThemeAwareMixin, QWidget):
         header_layout = QHBoxLayout()
 
         title = QLabel("快捷键列表")
-        title.setFont(QFont("Microsoft YaHei", 14, QFont.Bold))
+        title.setFont(QFont("Microsoft YaHei", 14, QFont.Weight.Bold))
         header_layout.addWidget(title)
 
         header_layout.addStretch()
@@ -164,8 +164,8 @@ class ShortcutPanel(ThemeAwareMixin, QWidget):
         self._tree.setAnimated(True)
 
         header = self._tree.header()
-        header.setSectionResizeMode(0, QHeaderView.Stretch)
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
 
         self._tree.itemDoubleClicked.connect(self._on_item_double_clicked)
         layout.addWidget(self._tree)
@@ -221,7 +221,7 @@ class ShortcutPanel(ThemeAwareMixin, QWidget):
             font.setBold(True)
             font.setPointSize(12)
             category_item.setFont(0, font)
-            category_item.setData(0, Qt.UserRole, "__category__")
+            category_item.setData(0, Qt.ItemDataRole.UserRole, "__category__")
 
             for action_id, info in items.items():
                 if filter_lower:
@@ -233,20 +233,20 @@ class ShortcutPanel(ThemeAwareMixin, QWidget):
                     info["name"],
                     info["shortcut"] or "无"
                 ])
-                item.setData(0, Qt.UserRole, action_id)
+                item.setData(0, Qt.ItemDataRole.UserRole, action_id)
 
                 shortcut_text = info["shortcut"]
                 if shortcut_text:
                     from ..core.shortcut_manager import _SYSTEM_SHORTCUTS
                     normalized = self._manager._normalize_key(shortcut_text)
                     if normalized in _SYSTEM_SHORTCUTS:
-                        item.setForeground(1, Qt.gray)
+                        item.setForeground(1, Qt.GlobalColor.gray)
 
     def _on_search(self, text: str):
         self._populate_tree(text)
 
     def _on_item_double_clicked(self, item: QTreeWidgetItem, column: int):
-        action_id = item.data(0, Qt.UserRole)
+        action_id = item.data(0, Qt.ItemDataRole.UserRole)
         if not action_id or action_id == "__category__":
             return
 
@@ -254,7 +254,7 @@ class ShortcutPanel(ThemeAwareMixin, QWidget):
         current_shortcut = self._manager.get_shortcut(action_id) or ""
 
         dialog = ShortcutEditDialog(action_id, name, current_shortcut, self)
-        if dialog.exec_() == QDialog.Accepted:
+        if dialog.exec() == QDialog.DialogCode.Accepted:
             new_shortcut = dialog.get_new_shortcut()
             if new_shortcut == "__reset__":
                 self._manager.reset_shortcut(action_id)

@@ -7,11 +7,11 @@ v1.6.4 改动：
   - 主题感知：订阅 theme_changed 信号
 """
 
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QLabel, QFrame
 )
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QFont
 
 from ..core.config import Config
 from ..themes.theme_aware_mixin import ThemeAwareMixin
@@ -88,8 +88,8 @@ class ResourceBar(ThemeAwareMixin, QWidget):
         layout.addStretch()
 
         separator = QFrame()
-        separator.setFrameShape(QFrame.VLine)
-        separator.setFrameShadow(QFrame.Sunken)
+        separator.setFrameShape(QFrame.Shape.VLine)
+        separator.setFrameShadow(QFrame.Shadow.Sunken)
         layout.addWidget(separator)
 
         self.docs_label = QLabel("文档:0")

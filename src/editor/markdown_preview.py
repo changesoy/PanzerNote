@@ -21,11 +21,11 @@ v1.6.2 改动：
 import os
 import re
 import html as html_module
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QWidget, QSplitter, QVBoxLayout, QTextBrowser, QApplication, QPushButton
 )
-from PyQt5.QtCore import Qt, QTimer, QUrl, QPoint, QEvent
-from PyQt5.QtGui import QFont, QDesktopServices, QCursor
+from PyQt6.QtCore import Qt, QTimer, QUrl, QPoint, QEvent
+from PyQt6.QtGui import QFont, QDesktopServices, QCursor
 
 try:
     from markdown_it import MarkdownIt as _MarkdownIt
@@ -40,7 +40,7 @@ except ImportError:
     HAS_MARKDOWN = False
 
 try:
-    from PyQt5.QtWebEngineWidgets import QWebEngineView
+    from PyQt6.QtWebEngineWidgets import QWebEngineView
     HAS_WEBENGINE = True
 except ImportError:
     HAS_WEBENGINE = False
@@ -262,7 +262,7 @@ class PreviewBrowser(QTextBrowser):
         self._copy_btn = QPushButton("\U0001f4cb", self.viewport())
         self._copy_btn.setFixedSize(26, 20)
         self._copy_btn.setToolTip("复制到剪贴板")
-        self._copy_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self._copy_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self._copy_btn.hide()
         self._copy_btn.setStyleSheet(
             "QPushButton {"
@@ -348,9 +348,9 @@ class PreviewBrowser(QTextBrowser):
     def eventFilter(self, obj, event):
         """拦截复制按钮的 Enter/Leave 事件，防止按钮在点击前消失"""
         if obj is self._copy_btn:
-            if event.type() == QEvent.Enter:
+            if event.type() == QEvent.Type.Enter:
                 self._btn_hovered = True
-            elif event.type() == QEvent.Leave:
+            elif event.type() == QEvent.Type.Leave:
                 self._btn_hovered = False
                 QTimer.singleShot(80, self._after_btn_leave)
         return super().eventFilter(obj, event)
@@ -457,7 +457,7 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        self.splitter = QSplitter(Qt.Horizontal)
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
 
         # 左侧编辑器
         self.editor = Editor(self.config, theme_engine=self._theme_engine)

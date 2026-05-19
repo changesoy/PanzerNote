@@ -33,8 +33,7 @@
 
 from typing import Callable, Dict, List, Optional, Tuple
 
-from PyQt5.QtGui import QKeySequence
-from PyQt5.QtWidgets import QAction
+from PyQt6.QtGui import QKeySequence, QAction
 
 from ..core.config import Config
 from ..utils.logger import get_logger

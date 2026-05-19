@@ -10,13 +10,13 @@ v1.6.4 改动：
 """
 
 import os
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QTreeView, QLabel, QMenu,
-    QAction, QInputDialog, QMessageBox, QFileSystemModel,
+    QInputDialog, QMessageBox,
     QHeaderView, QFrame, QScrollArea, QStyledItemDelegate
 )
-from PyQt5.QtCore import Qt, pyqtSignal, QDir, QModelIndex, QSortFilterProxyModel
-from PyQt5.QtGui import QFont
+from PyQt6.QtCore import Qt, pyqtSignal, QDir, QModelIndex, QSortFilterProxyModel
+from PyQt6.QtGui import QFont, QAction, QFileSystemModel
 
 from ..core.config import Config
 from ..utils.logger import get_logger
@@ -48,10 +48,10 @@ class ExternalFileLabel(QLabel):
         filename = os.path.basename(filepath)
         self.setText(f"  📄 {filename}")
         self.setToolTip(filepath)
-        self.setCursor(Qt.PointingHandCursor)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
+        if event.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit(self.filepath)
         super().mousePressEvent(event)
 
@@ -140,7 +140,7 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
         self._title_frame = title_frame
 
         title_label = QLabel("📁 我的笔记")
-        title_label.setFont(QFont("Microsoft YaHei", 10, QFont.Bold))
+        title_label.setFont(QFont("Microsoft YaHei", 10, QFont.Weight.Bold))
         title_layout.addWidget(title_label)
 
         layout.addWidget(title_frame)
@@ -171,7 +171,7 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
         self.tree_view.setAcceptDrops(True)
         self.tree_view.setDropIndicatorShown(True)
 
-        self.tree_view.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tree_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree_view.customContextMenuRequested.connect(self._show_context_menu)
         self.tree_view.doubleClicked.connect(self._on_double_click)
 
@@ -183,12 +183,12 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
         external_layout.setSpacing(0)
 
         self.external_separator = QFrame()
-        self.external_separator.setFrameShape(QFrame.HLine)
-        self.external_separator.setFrameShadow(QFrame.Sunken)
+        self.external_separator.setFrameShape(QFrame.Shape.HLine)
+        self.external_separator.setFrameShadow(QFrame.Shadow.Sunken)
         external_layout.addWidget(self.external_separator)
 
         self.external_title = QLabel("📂 外部文件")
-        self.external_title.setFont(QFont("Microsoft YaHei", 9, QFont.Bold))
+        self.external_title.setFont(QFont("Microsoft YaHei", 9, QFont.Weight.Bold))
         external_layout.addWidget(self.external_title)
 
         self.external_list = QWidget()
@@ -289,7 +289,7 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
         add_external_action.triggered.connect(self._add_external_file)
         menu.addAction(add_external_action)
 
-        menu.exec_(self.tree_view.viewport().mapToGlobal(position))
+        menu.exec(self.tree_view.viewport().mapToGlobal(position))
 
     def _on_double_click(self, index: QModelIndex):
         if not self.model.isDir(index):
@@ -297,7 +297,7 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
             self.file_open_requested.emit(filepath)
 
     def _add_external_file(self):
-        from PyQt5.QtWidgets import QFileDialog
+        from PyQt6.QtWidgets import QFileDialog
         filepaths, _ = QFileDialog.getOpenFileNames(
             self, "选择外部文件", "",
             "所有文件 (*);;文本文件 (*.txt *.md *.py *.js *.html *.css *.json *.xml *.yaml *.yml *.toml)"
@@ -376,12 +376,12 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
         msg_box = QMessageBox(self)
         msg_box.setWindowTitle("确认删除")
         msg_box.setText(f"确定要删除{type_str} '{name}' 吗？")
-        msg_box.setIcon(QMessageBox.Question)
+        msg_box.setIcon(QMessageBox.Icon.Question)
 
-        yes_btn = msg_box.addButton("确定", QMessageBox.AcceptRole)
-        no_btn = msg_box.addButton("取消", QMessageBox.RejectRole)
+        yes_btn = msg_box.addButton("确定", QMessageBox.ButtonRole.AcceptRole)
+        no_btn = msg_box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
 
-        msg_box.exec_()
+        msg_box.exec()
 
         if msg_box.clickedButton() == yes_btn:
             try:

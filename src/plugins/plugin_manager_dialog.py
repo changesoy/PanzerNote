@@ -4,8 +4,8 @@
 提供插件列表查看、加载/激活/停用/卸载/热加载操作
 """
 
-from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import (
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QListWidget,
     QListWidgetItem, QPushButton, QLabel,
 )
@@ -60,7 +60,7 @@ class PluginManagerDialog(QDialog):
     def _get_selected_plugin_id(self):
         item = self._list_widget.currentItem()
         if item:
-            return item.data(Qt.UserRole)
+            return item.data(Qt.ItemDataRole.UserRole)
         return None
 
     def _refresh_list(self):
@@ -75,7 +75,7 @@ class PluginManagerDialog(QDialog):
             if desc:
                 item_text += f" - {desc}"
             item = QListWidgetItem(item_text)
-            item.setData(Qt.UserRole, name)
+            item.setData(Qt.ItemDataRole.UserRole, name)
             self._list_widget.addItem(item)
         if not plugins:
             self._list_widget.addItem(QListWidgetItem("未发现插件"))

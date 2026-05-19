@@ -7,12 +7,12 @@ v1.5.4 新增
 """
 
 import re
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLineEdit,
     QPushButton, QLabel, QCheckBox, QToolButton, QSizePolicy
 )
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer
-from PyQt5.QtGui import (
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+from PyQt6.QtGui import (
     QColor, QTextCharFormat, QTextCursor, QKeySequence, QTextDocument
 )
 
@@ -71,7 +71,7 @@ class FindReplaceBar(ThemeAwareMixin, QWidget):
 
         self.match_label = QLabel("")
         self.match_label.setMinimumWidth(80)
-        self.match_label.setAlignment(Qt.AlignCenter)
+        self.match_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         find_row.addWidget(self.match_label)
 
         # 选项复选框
@@ -218,7 +218,7 @@ class FindReplaceBar(ThemeAwareMixin, QWidget):
 
         cursor = self._editor.textCursor()
         cursor.setPosition(start)
-        cursor.setPosition(end, QTextCursor.KeepAnchor)
+        cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
         with self._editor.programmatic_modify():
             cursor.insertText(replacement)
         self._editor.setTextCursor(cursor)
@@ -257,14 +257,14 @@ class FindReplaceBar(ThemeAwareMixin, QWidget):
             else:
                 for start, end in reversed(self._matches):
                     cursor.setPosition(start)
-                    cursor.setPosition(end, QTextCursor.KeepAnchor)
+                    cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
                     cursor.insertText(replacement)
                 cursor.endEditBlock()
                 self._update_matches()
                 self._update_match_label()
                 return
 
-            cursor.select(QTextCursor.Document)
+            cursor.select(QTextCursor.SelectionType.Document)
             cursor.insertText(new_text)
         cursor.endEditBlock()
 
@@ -408,7 +408,7 @@ class FindReplaceBar(ThemeAwareMixin, QWidget):
         for i, (start, end) in enumerate(self._matches):
             sel = self._editor.__class__.__bases__[0]  # QPlainTextEdit
             # 使用 QTextEdit.ExtraSelection
-            from PyQt5.QtWidgets import QTextEdit
+            from PyQt6.QtWidgets import QTextEdit
             extra = QTextEdit.ExtraSelection()
 
             if i == self._current_idx:
@@ -419,7 +419,7 @@ class FindReplaceBar(ThemeAwareMixin, QWidget):
 
             cursor = self._editor.textCursor()
             cursor.setPosition(start)
-            cursor.setPosition(end, QTextCursor.KeepAnchor)
+            cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
             extra.cursor = cursor
             selections.append(extra)
 
@@ -438,12 +438,12 @@ class FindReplaceBar(ThemeAwareMixin, QWidget):
         """获取当前行高亮的 ExtraSelection"""
         if not self._editor or self._editor.isReadOnly():
             return []
-        from PyQt5.QtWidgets import QTextEdit
-        from PyQt5.QtGui import QTextFormat
+        from PyQt6.QtWidgets import QTextEdit
+        from PyQt6.QtGui import QTextFormat
         sel = QTextEdit.ExtraSelection()
         current_line_color = self._theme_engine.get_active_theme().colors.editor_current_line if hasattr(self, '_theme_engine') and self._theme_engine else "#FFFDE7"
         sel.format.setBackground(QColor(current_line_color))
-        sel.format.setProperty(QTextFormat.FullWidthSelection, True)
+        sel.format.setProperty(QTextFormat.Property.FullWidthSelection, True)
         sel.cursor = self._editor.textCursor()
         sel.cursor.clearSelection()
         return [sel]
@@ -456,7 +456,7 @@ class FindReplaceBar(ThemeAwareMixin, QWidget):
         start, end = self._matches[self._current_idx]
         cursor = self._editor.textCursor()
         cursor.setPosition(start)
-        cursor.setPosition(end, QTextCursor.KeepAnchor)
+        cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
         self._editor.setTextCursor(cursor)
         self._editor.ensureCursorVisible()
 
@@ -479,12 +479,12 @@ class FindReplaceBar(ThemeAwareMixin, QWidget):
 
     def keyPressEvent(self, event):
         """处理快捷键"""
-        if event.key() == Qt.Key_Escape:
+        if event.key() == Qt.Key.Key_Escape:
             self.close_bar()
             return
 
-        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
-            if event.modifiers() & Qt.ShiftModifier:
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
                 self.find_previous()
             else:
                 self.find_next()

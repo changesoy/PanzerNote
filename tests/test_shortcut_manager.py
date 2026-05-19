@@ -2,7 +2,7 @@
 import os
 import json
 import pytest
-from PyQt5.QtWidgets import QApplication, QWidget
+from PyQt6.QtWidgets import QApplication, QWidget
 
 from src.core.config import Config
 from src.core.shortcut_manager import ShortcutManager, _DEFAULT_SHORTCUTS, _SYSTEM_SHORTCUTS

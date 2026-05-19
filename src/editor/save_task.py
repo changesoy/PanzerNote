@@ -4,7 +4,7 @@
 将文件写入操作放到 QThreadPool 中执行，避免大文件保存时 UI 冻结
 """
 
-from PyQt5.QtCore import QRunnable, QObject, pyqtSignal
+from PyQt6.QtCore import QRunnable, QObject, pyqtSignal
 
 
 class SaveTaskSignals(QObject):

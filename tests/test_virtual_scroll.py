@@ -2,7 +2,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-from PyQt5.QtWidgets import QPlainTextEdit
+from PyQt6.QtWidgets import QPlainTextEdit
 
 from src.editor.virtual_scroll import LazyHighlightManager, LARGE_FILE_THRESHOLD
 from src.utils.feature_flags import set_enabled, is_enabled

@@ -52,7 +52,7 @@ class BenchmarkRunner:
 
     def benchmark_file_open(self) -> BenchmarkResult:
         result = BenchmarkResult("file_open")
-        from PyQt5.QtWidgets import QApplication
+        from PyQt6.QtWidgets import QApplication
         from src.core.config import Config
         from src.editor.editor import Editor
 
@@ -91,9 +91,9 @@ class BenchmarkRunner:
 
     def benchmark_scroll_fps(self) -> BenchmarkResult:
         result = BenchmarkResult("scroll_fps")
-        from PyQt5.QtWidgets import QApplication
-        from PyQt5.QtCore import QEvent
-        from PyQt5.QtGui import QKeyEvent, QWheelEvent, QPoint
+        from PyQt6.QtWidgets import QApplication
+        from PyQt6.QtCore import QEvent
+        from PyQt6.QtGui import QKeyEvent, QWheelEvent, QPoint
         from src.core.config import Config
         from src.editor.editor import Editor
 
@@ -119,7 +119,7 @@ class BenchmarkRunner:
                 scroll_event = QWheelEvent(
                     QPoint(400, 300), QPoint(400, 300),
                     QPoint(0, -120), QPoint(0, -120),
-                    0, Qt.Vertical, Qt.NoButton, Qt.NoModifier,
+                    0, Qt.Orientation.Vertical, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
                 )
                 app.sendEvent(editor.viewport(), scroll_event)
                 app.processEvents()
@@ -138,7 +138,7 @@ class BenchmarkRunner:
 
     def benchmark_minimap_render(self) -> BenchmarkResult:
         result = BenchmarkResult("minimap_render")
-        from PyQt5.QtWidgets import QApplication
+        from PyQt6.QtWidgets import QApplication
         from src.core.config import Config
         from src.editor.editor import Editor
 
@@ -208,7 +208,7 @@ class BenchmarkRunner:
 
     def benchmark_memory_usage(self) -> BenchmarkResult:
         result = BenchmarkResult("memory_usage")
-        from PyQt5.QtWidgets import QApplication
+        from PyQt6.QtWidgets import QApplication
         from src.core.config import Config
         from src.editor.editor import Editor
 

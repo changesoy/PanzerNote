@@ -6,7 +6,7 @@
 """
 
 import re
-from PyQt5.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor, QFont, QTextDocument
+from PyQt6.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor, QFont, QTextDocument
 
 from ..utils.logger import get_logger
 
@@ -82,31 +82,31 @@ class MarkdownHighlighter(QSyntaxHighlighter):
         # 标题
         h1_fmt = QTextCharFormat()
         h1_fmt.setForeground(QColor("#000000"))
-        h1_fmt.setFontWeight(QFont.Bold)
+        h1_fmt.setFontWeight(QFont.Weight.Bold)
         h1_fmt.setFontPointSize(20)
         self.h1_format = h1_fmt
 
         h2_fmt = QTextCharFormat()
         h2_fmt.setForeground(QColor("#000000"))
-        h2_fmt.setFontWeight(QFont.Bold)
+        h2_fmt.setFontWeight(QFont.Weight.Bold)
         h2_fmt.setFontPointSize(17)
         self.h2_format = h2_fmt
 
         h3_fmt = QTextCharFormat()
         h3_fmt.setForeground(QColor("#000000"))
-        h3_fmt.setFontWeight(QFont.Bold)
+        h3_fmt.setFontWeight(QFont.Weight.Bold)
         h3_fmt.setFontPointSize(14)
         self.h3_format = h3_fmt
 
         h456_fmt = QTextCharFormat()
         h456_fmt.setForeground(QColor("#2b2b2b"))
-        h456_fmt.setFontWeight(QFont.Bold)
+        h456_fmt.setFontWeight(QFont.Weight.Bold)
         h456_fmt.setFontPointSize(12)
         self.h456_format = h456_fmt
 
         # 粗体
         bold_fmt = QTextCharFormat()
-        bold_fmt.setFontWeight(QFont.Bold)
+        bold_fmt.setFontWeight(QFont.Weight.Bold)
         bold_fmt.setForeground(QColor("#2b2b2b"))
         self.inline_rules.append((re.compile(r'\*\*[^*]+\*\*'), bold_fmt))
         self.inline_rules.append((re.compile(r'__[^_]+__'), bold_fmt))
@@ -139,7 +139,7 @@ class MarkdownHighlighter(QSyntaxHighlighter):
         # 列表标记
         list_fmt = QTextCharFormat()
         list_fmt.setForeground(QColor("#2b2b2b"))
-        list_fmt.setFontWeight(QFont.Bold)
+        list_fmt.setFontWeight(QFont.Weight.Bold)
         self.inline_rules.append((re.compile(r'^\s*[-*+]\s'), list_fmt))
         self.inline_rules.append((re.compile(r'^\s*\d+\.\s'), list_fmt))
 

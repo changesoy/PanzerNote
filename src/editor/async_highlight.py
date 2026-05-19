@@ -14,7 +14,7 @@ import uuid
 from typing import Optional, Dict, Callable
 from collections import OrderedDict
 
-from PyQt5.QtCore import QThread, pyqtSignal, QObject, QTimer, Qt
+from PyQt6.QtCore import QThread, pyqtSignal, QObject, QTimer, Qt
 
 from ..utils.logger import get_logger
 from ..utils.feature_flags import is_enabled

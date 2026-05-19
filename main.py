@@ -41,9 +41,9 @@ def _crash_excepthook(exc_type, exc_value, exc_tb):
 
 sys.excepthook = _crash_excepthook
 
-from PyQt5.QtWidgets import QApplication
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont, QIcon
+from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QFont, QIcon
 
 from src import __version__
 from src.core.config import Config
@@ -77,9 +77,6 @@ def _verify_version_consistency(logger):
 def main():
     profiler = get_startup_profiler()
 
-    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
-    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
-
     app = QApplication(sys.argv)
     app.setApplicationName("PanzerNote")
     app.setApplicationVersion(__version__)
@@ -104,7 +101,7 @@ def main():
 
     if not config.is_initialized():
         dialog = FirstRunDialog(APP_DIR)
-        if dialog.exec_() != dialog.Accepted:
+        if dialog.exec() != dialog.DialogCode.Accepted:
             sys.exit(0)
         selected_path = dialog.get_selected_path()
         config.set_base_path(selected_path)
@@ -128,13 +125,13 @@ def main():
     if crash_logs:
         latest_crash = sorted(crash_logs)[-1]
         crash_path = os.path.join(log_dir, latest_crash)
-        from PyQt5.QtWidgets import QMessageBox
+        from PyQt6.QtWidgets import QMessageBox
         reply = QMessageBox.question(
             None, "崩溃日志检测",
             f"检测到上次程序异常退出，崩溃日志位于：\n{crash_path}\n\n是否查看？",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No
         )
-        if reply == QMessageBox.Yes:
+        if reply == QMessageBox.StandardButton.Yes:
             import subprocess
             if sys.platform == 'win32':
                 os.startfile(crash_path)
@@ -154,7 +151,7 @@ def main():
 
     logger.info(profiler.get_report())
 
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":

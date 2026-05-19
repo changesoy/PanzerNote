@@ -118,7 +118,7 @@ class _ErrorDialog:
         detail: str = "",
     ) -> None:
         try:
-            from PyQt5.QtWidgets import QMessageBox, QApplication
+            from PyQt6.QtWidgets import QMessageBox, QApplication
 
             app = QApplication.instance()
             if app is None:
@@ -130,7 +130,7 @@ class _ErrorDialog:
             category_label = _CATEGORY_LABELS.get(category, "错误")
 
             msg_box = QMessageBox()
-            msg_box.setIcon(QMessageBox.Warning)
+            msg_box.setIcon(QMessageBox.Icon.Warning)
             msg_box.setWindowTitle(f"PanzerNote - {category_label}")
             msg_box.setText(title)
 
@@ -156,7 +156,7 @@ class _ErrorDialog:
                 }
             """)
 
-            msg_box.exec_()
+            msg_box.exec()
         except Exception:
             get_logger(__name__).error("显示错误对话框失败")
 

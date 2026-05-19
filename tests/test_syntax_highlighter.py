@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import pytest
-from PyQt5.QtGui import QTextDocument
-from PyQt5.QtWidgets import QApplication
+from PyQt6.QtGui import QTextDocument
+from PyQt6.QtWidgets import QApplication
 
 from src.editor.syntax_highlighter import (
     MarkdownHighlighter, PygmentsHighlighter,

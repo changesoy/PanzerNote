@@ -11,15 +11,15 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from ..utils.logger import get_logger
-
 try:
     import yaml
     HAS_YAML = True
 except ImportError:
     HAS_YAML = False
 
-from PyQt5.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, pyqtSignal
+
+from ..utils.logger import get_logger
 
 
 @dataclass

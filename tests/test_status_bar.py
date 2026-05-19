@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import pytest
-from PyQt5.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication
 
 from src.editor.status_bar import StatusBarWidget
 

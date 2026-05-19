@@ -4,7 +4,7 @@
 集中管理主窗口的所有 QTimer
 """
 
-from PyQt5.QtCore import QTimer, QObject
+from PyQt6.QtCore import QTimer, QObject
 from typing import Callable, Optional
 
 from ..core.config import Config

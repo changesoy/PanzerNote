@@ -2,12 +2,12 @@
 """
 高 DPI 语义标注工具
 
-当 AA_EnableHighDpiScaling 启用时（当前生产环境默认启用），
+当高 DPI 缩放启用时（PyQt6 默认启用），
 Qt 已自动处理缩放，scale_factor 恒为 1.0，所有函数为恒等函数。
 
 本模块的 scale() 系列函数保留作为语义标注——调用处写 scale(200)
 而非硬编码 200，表明"此数值是基准像素值，未来若禁用
-AA_EnableHighDpiScaling 则会自动缩放"。
+PyQt6 默认启用高 DPI 缩放，则会自动缩放"。
 
 使用方式:
     from src.utils.dpi_helper import scale, scale_size
@@ -16,8 +16,8 @@ AA_EnableHighDpiScaling 则会自动缩放"。
     size = scale_size(800, 600)
 """
 
-from PyQt5.QtWidgets import QApplication
-from PyQt5.QtCore import Qt, QSize
+from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import Qt, QSize
 
 _BASE_DPI = 96.0
 _scale_factor = 1.0
@@ -29,9 +29,8 @@ def init_dpi():
 
     应在 QApplication 创建后、主窗口显示前调用。
 
-    当 AA_EnableHighDpiScaling 启用时，Qt 已自动处理缩放，
+    当高 DPI 缩放启用时（PyQt6 默认），Qt 已自动处理缩放，
     所有尺寸设置应使用逻辑像素（基准值），scale_factor 应为 1.0。
-    仅在未启用 AA_EnableHighDpiScaling 时才需要手动计算缩放系数。
     """
     global _scale_factor, _initialized
 
@@ -39,10 +38,9 @@ def init_dpi():
     if app is None:
         return
 
-    if app.testAttribute(Qt.AA_EnableHighDpiScaling):
-        _scale_factor = 1.0
-        _initialized = True
-        return
+    _scale_factor = 1.0
+    _initialized = True
+    return
 
     screen = app.primaryScreen()
     if screen is None:
@@ -83,7 +81,7 @@ def scale_factor() -> float:
 def scale(value: int) -> int:
     """将基准像素值缩放为当前 DPI 对应的像素值
 
-    当 AA_EnableHighDpiScaling 启用时，此函数为恒等函数（直接返回 value）。
+    当高 DPI 缩放启用时，此函数为恒等函数（直接返回 value）。
     保留调用作为语义标注，表明 value 是基准像素值。
 
     Args:

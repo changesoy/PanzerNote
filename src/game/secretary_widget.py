@@ -27,11 +27,11 @@ portraits/
 import os
 import json
 import random
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QSizePolicy
 )
-from PyQt5.QtCore import Qt, QTimer, QEvent, QPoint
-from PyQt5.QtGui import QPixmap, QFont, QPainter, QColor
+from PyQt6.QtCore import Qt, QTimer, QEvent, QPoint
+from PyQt6.QtGui import QPixmap, QFont, QPainter, QColor
 
 from ..core.config import Config
 from ..utils.logger import get_logger
@@ -58,7 +58,7 @@ class SpeechBubble(QFrame):
 
         self.label = QLabel()
         self.label.setWordWrap(True)
-        self.label.setAlignment(Qt.AlignCenter)
+        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.label)
 
         self.hide_timer = QTimer(self)
@@ -239,17 +239,17 @@ class SecretaryWidget(ThemeAwareMixin, QWidget):
         layout.addStretch(1)
 
         self.bubble = SpeechBubble()
-        layout.addWidget(self.bubble, 0, Qt.AlignHCenter)
+        layout.addWidget(self.bubble, 0, Qt.AlignmentFlag.AlignHCenter)
 
         self.portrait_label = QLabel()
-        self.portrait_label.setAlignment(Qt.AlignCenter)
-        self.portrait_label.setCursor(Qt.PointingHandCursor)
+        self.portrait_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.portrait_label.setCursor(Qt.CursorShape.PointingHandCursor)
 
         self._load_portrait()
 
-        layout.addWidget(self.portrait_label, 0, Qt.AlignBottom | Qt.AlignHCenter)
+        layout.addWidget(self.portrait_label, 0, Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter)
 
-        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
         if not self.config.get_secretary_setting("show_secretary", True):
             self.hide()
@@ -348,9 +348,9 @@ class SecretaryWidget(ThemeAwareMixin, QWidget):
         if max_w < 10:
             max_w = 150
         if pixmap.height() > max_h:
-            pixmap = pixmap.scaledToHeight(max_h, Qt.SmoothTransformation)
+            pixmap = pixmap.scaledToHeight(max_h, Qt.TransformationMode.SmoothTransformation)
         if pixmap.width() > max_w:
-            pixmap = pixmap.scaledToWidth(max_w, Qt.SmoothTransformation)
+            pixmap = pixmap.scaledToWidth(max_w, Qt.TransformationMode.SmoothTransformation)
         self.portrait_label.setPixmap(pixmap)
 
     def _create_placeholder(self):
@@ -358,21 +358,21 @@ class SecretaryWidget(ThemeAwareMixin, QWidget):
         w = max(80, self.width() - 20)
         h = max(100, self.portrait_label.height() - 20)
         placeholder = QPixmap(w, h)
-        placeholder.fill(Qt.transparent)
+        placeholder.fill(Qt.GlobalColor.transparent)
 
         painter = QPainter(placeholder)
-        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         bg_color = self._theme_engine.get_active_theme().colors.border if hasattr(self, '_theme_engine') and self._theme_engine else "#E0E0E0"
         text_color = self._theme_engine.get_active_theme().colors.text_secondary if hasattr(self, '_theme_engine') and self._theme_engine else "#757575"
         painter.setBrush(QColor(bg_color))
-        painter.setPen(Qt.NoPen)
+        painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(10, 10, w - 20, h - 20, 10, 10)
 
         painter.setPen(QColor(text_color))
         font_size = max(8, min(12, w // 10))
         painter.setFont(QFont("Microsoft YaHei", font_size))
-        painter.drawText(placeholder.rect(), Qt.AlignCenter, "小秘书\n(待添加立绘)")
+        painter.drawText(placeholder.rect(), Qt.AlignmentFlag.AlignCenter, "小秘书\n(待添加立绘)")
 
         painter.end()
 
@@ -445,10 +445,10 @@ class SecretaryWidget(ThemeAwareMixin, QWidget):
     def eventFilter(self, obj, event):
         """事件过滤器 - 监听父容器 resize 和 move 事件"""
         if obj == self._parent_widget:
-            if event.type() == QEvent.Resize:
+            if event.type() == QEvent.Type.Resize:
                 self._apply_size()
                 self._request_position_update()
-            elif event.type() == QEvent.Move:
+            elif event.type() == QEvent.Type.Move:
                 self._request_position_update()
         return super().eventFilter(obj, event)
 
@@ -502,14 +502,14 @@ class SecretaryWidget(ThemeAwareMixin, QWidget):
 
     def mousePressEvent(self, event):
         """鼠标点击事件"""
-        if event.button() == Qt.LeftButton:
+        if event.button() == Qt.MouseButton.LeftButton:
             self.show_random_message()
             self._idle_timer.start()
         super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self, event):
         """双击切换小秘书状态（正常/大破）"""
-        if event.button() == Qt.LeftButton:
+        if event.button() == Qt.MouseButton.LeftButton:
             current_state = self.config.get_secretary_setting("state", "正常")
             new_state = "大破" if current_state == "正常" else "正常"
             self.set_state(new_state)

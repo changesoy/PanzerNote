@@ -13,14 +13,14 @@ import os
 from datetime import datetime
 from typing import Optional, List, Dict, Tuple, Set
 
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QTabWidget, QTabBar, QMessageBox,
-    QFileDialog, QPlainTextEdit, QTextEdit, QMenu, QAction,
+    QFileDialog, QPlainTextEdit, QTextEdit, QMenu,
     QInputDialog, QLabel, QDialog, QHBoxLayout, QComboBox,
     QPushButton, QLineEdit, QFormLayout, QApplication
 )
-from PyQt5.QtCore import Qt, pyqtSignal, QMimeData, QPoint, QByteArray
-from PyQt5.QtGui import QFont, QTextCursor, QColor, QTextCharFormat, QDrag
+from PyQt6.QtCore import Qt, pyqtSignal, QMimeData, QPoint, QByteArray
+from PyQt6.QtGui import QFont, QTextCursor, QColor, QTextCharFormat, QDrag, QAction
 
 from ..core.config import Config
 from ..utils.logger import get_logger
@@ -40,17 +40,17 @@ from .find_replace import FindReplaceBar
 
 class SaveAsDialog(QDialog):
     """另存为对话框 - 支持选择编码"""
-    
+
     def __init__(self, suggested_path: str, current_encoding: str = "UTF-8", parent=None):
         super().__init__(parent)
         self.setWindowTitle("另存为")
         self.setMinimumWidth(500)
-        
+
         self._filepath = ""
         self._encoding = current_encoding
-        
+
         layout = QVBoxLayout(self)
-        
+
         # 文件路径
         path_layout = QHBoxLayout()
         path_layout.addWidget(QLabel("文件名:"))
@@ -60,7 +60,7 @@ class SaveAsDialog(QDialog):
         browse_btn.clicked.connect(self._browse)
         path_layout.addWidget(browse_btn)
         layout.addLayout(path_layout)
-        
+
         # 编码选择
         encoding_layout = QHBoxLayout()
         encoding_layout.addWidget(QLabel("编码:"))
@@ -72,7 +72,7 @@ class SaveAsDialog(QDialog):
         encoding_layout.addWidget(self.encoding_combo)
         encoding_layout.addStretch()
         layout.addLayout(encoding_layout)
-        
+
         # 按钮
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
@@ -83,7 +83,7 @@ class SaveAsDialog(QDialog):
         btn_layout.addWidget(save_btn)
         btn_layout.addWidget(cancel_btn)
         layout.addLayout(btn_layout)
-    
+
     def _browse(self):
         filepath, _ = QFileDialog.getSaveFileName(
             self, "另存为", self.path_edit.text(),
@@ -91,19 +91,19 @@ class SaveAsDialog(QDialog):
         )
         if filepath:
             self.path_edit.setText(filepath)
-    
+
     def _save(self):
         path = self.path_edit.text().strip()
         if not path:
-            QMessageBox.warning(self, "提示", "请输入文件名")
+            QMessageBox.Icon.Warning(self, "提示", "请输入文件名")
             return
         self._filepath = path
         self._encoding = self.encoding_combo.currentText()
         self.accept()
-    
+
     def get_filepath(self) -> str:
         return self._filepath
-    
+
     def get_encoding(self) -> str:
         return self._encoding
 
@@ -131,10 +131,10 @@ class DraggableTabBar(QTabBar):
         self._drag_tab_index = -1
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
+        if event.button() == Qt.MouseButton.LeftButton:
             self._drag_start_pos = event.pos()
             self._drag_tab_index = self.tabAt(event.pos())
-        elif event.button() == Qt.MiddleButton:
+        elif event.button() == Qt.MouseButton.MiddleButton:
             tab_index = self.tabAt(event.pos())
             if tab_index >= 0:
                 self.tabCloseRequested.emit(tab_index)
@@ -143,7 +143,7 @@ class DraggableTabBar(QTabBar):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        if not (event.buttons() & Qt.LeftButton):
+        if not (event.buttons() & Qt.MouseButton.LeftButton):
             super().mouseMoveEvent(event)
             return
 
@@ -180,7 +180,7 @@ class DraggableTabBar(QTabBar):
         mime.setText(os.path.basename(filepath))
         drag.setMimeData(mime)
 
-        result = drag.exec_(Qt.MoveAction | Qt.CopyAction)
+        result = drag.exec(Qt.DropAction.MoveAction | Qt.DropAction.CopyAction)
         self._drag_tab_index = -1
 
 
@@ -190,18 +190,18 @@ class DraggableTabBar(QTabBar):
 
 class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     """编辑器标签页管理"""
-    
+
     current_changed = pyqtSignal(int)
     content_modified = pyqtSignal()
     tab_count_changed = pyqtSignal(int)
     chars_typed = pyqtSignal(int)
     cursor_position_changed = pyqtSignal()
-    
+
     def __init__(self, config: Config, theme_engine=None, parent=None):
         super().__init__(parent)
         self.config = config
         self._theme_engine = theme_engine
-        
+
         self._tab_info: Dict[int, Dict] = {}
         self._next_tab_id = 0
         self._used_untitled_numbers: Set[int] = set()
@@ -213,11 +213,11 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self.setTabsClosable(True)
         self.setMovable(True)
         self.setDocumentMode(True)
-        
+
         self.tabCloseRequested.connect(self._on_tab_close_requested)
         self.currentChanged.connect(self._on_current_changed)
-        
-        self.tabBar().setContextMenuPolicy(Qt.CustomContextMenu)
+
+        self.tabBar().setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tabBar().customContextMenuRequested.connect(self._show_tab_context_menu)
 
         if theme_engine:
@@ -254,13 +254,13 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             editor = self._get_editor_from_widget(widget)
             if editor:
                 yield editor
-    
+
     def _get_next_untitled_number(self) -> int:
         num = 1
         while num in self._used_untitled_numbers:
             num += 1
         return num
-    
+
     def _release_untitled_number(self, title: str):
         if title.startswith("未命名") and title.endswith(".txt"):
             try:
@@ -268,24 +268,24 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 self._used_untitled_numbers.discard(num)
             except ValueError:
                 get_logger(__name__).debug("未命名标签页编号解析失败: %s", title)
-    
+
     def _generate_tab_id(self) -> int:
         tab_id = self._next_tab_id
         self._next_tab_id += 1
         return tab_id
-    
+
     def new_file(self) -> int:
         """新建文件"""
         num = self._get_next_untitled_number()
         self._used_untitled_numbers.add(num)
         title = f"未命名{num}.txt"
-        
+
         editor = Editor(self.config, theme_engine=self._theme_engine)
         self._connect_editor_signals(editor)
         editor.set_file_type(".txt")
-        
+
         index = self.addTab(editor, title)
-        
+
         tab_id = self._generate_tab_id()
         editor.tab_id = tab_id
         self._tab_info[tab_id] = {
@@ -300,16 +300,16 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             "is_markdown": False,
             "history": []
         }
-        
+
         self.setCurrentIndex(index)
         self.tab_count_changed.emit(self.count())
         return index
-    
+
     def _is_markdown_file(self, filepath: str) -> bool:
         """判断是否为Markdown文件"""
         ext = os.path.splitext(filepath)[1].lower()
         return ext in ('.md', '.markdown')
-    
+
     def open_file(self, filepath: str) -> int:
         """打开文件"""
         # 检查文件是否已经打开
@@ -321,12 +321,12 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 if info.get("filepath") == filepath:
                     self.setCurrentIndex(i)
                     return i
-        
+
         # 读取文件内容，检测编码
         content = ""
         detected_encoding = "UTF-8"
         file_guard = self.config.get_file_guard()
-        
+
         try:
             content = file_guard.safe_read(filepath, encoding='utf-8', validate_path=False)
             detected_encoding = "UTF-8"
@@ -355,9 +355,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             get_logger(__name__).error("打开文件失败: %s", e)
             ErrorHandler.show_from_exception(e, ErrorCategory.FILE, "打开文件失败")
             return -1
-        
+
         is_md = self._is_markdown_file(filepath)
-        
+
         if is_md:
             widget = MarkdownPreviewWidget(self.config, theme_engine=self._theme_engine)
             widget.editor.load_content(content)
@@ -369,17 +369,17 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             widget.load_content(content)
             self._connect_editor_signals(widget)
             widget.set_file_type(filepath)
-        
+
         filename = os.path.basename(filepath)
         index = self.addTab(widget, filename)
-        
+
         tab_id = self._generate_tab_id()
         widget.tab_id = tab_id
-        
+
         # 如果是MarkdownPreviewWidget，也设置editor的tab_id
         if is_md:
             widget.editor.tab_id = tab_id
-        
+
         self._tab_info[tab_id] = {
             "filepath": filepath,
             "is_modified": False,
@@ -391,34 +391,34 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             "is_markdown": is_md,
             "history": []
         }
-        
+
         self.setCurrentIndex(index)
         self.tab_count_changed.emit(self.count())
         return index
-    
+
     def save_current(self) -> Tuple[bool, int]:
         """保存当前文件"""
         widget = self.currentWidget()
         if not widget or not hasattr(widget, 'tab_id'):
             return False, 0
-        
+
         info = self._tab_info.get(widget.tab_id, {})
         filepath = info.get("filepath")
-        
+
         if not filepath or info.get("is_new"):
             return self.save_current_as()
-        
+
         encoding = info.get("encoding", "UTF-8")
         return self._save_file(widget, filepath, encoding)
-    
+
     def save_current_as(self) -> Tuple[bool, int]:
         """另存为"""
         widget = self.currentWidget()
         if not widget:
             return False, 0
-        
+
         info = self._tab_info.get(getattr(widget, 'tab_id', None), {})
-        
+
         if info.get("filepath"):
             suggested_name = info["filepath"]
         else:
@@ -426,38 +426,38 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 self.config.get_notebooks_path(),
                 self.tabText(self.currentIndex()).rstrip(" *")
             )
-        
+
         current_encoding = info.get("encoding", "UTF-8")
-        
+
         dialog = SaveAsDialog(suggested_name, current_encoding, self)
-        if dialog.exec_() != QDialog.Accepted:
+        if dialog.exec() != QDialog.DialogCode.Accepted:
             return False, 0
-        
+
         filepath = dialog.get_filepath()
         encoding = dialog.get_encoding()
-        
+
         if not filepath:
             return False, 0
-        
+
         success, chars = self._save_file(widget, filepath, encoding)
-        
+
         if success:
             if info.get("is_new") and info.get("untitled_number"):
                 self._used_untitled_numbers.discard(info["untitled_number"])
             info["is_new"] = False
             info["filepath"] = filepath
             info["encoding"] = encoding
-            
+
             # 更新文件类型
             editor = self._get_editor_from_widget(widget)
             if editor:
                 editor.set_file_type(filepath)
-            
+
             index = self.indexOf(widget)
             self.setTabText(index, os.path.basename(filepath))
-        
+
         return success, chars
-    
+
     def _save_file(self, widget, filepath: str, encoding: str = "UTF-8") -> Tuple[bool, int]:
         """保存文件（异步写入磁盘，UI 不冻结）"""
         if isinstance(widget, MarkdownPreviewWidget):
@@ -487,7 +487,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if title.endswith(" *"):
             self.setTabText(index, title[:-2])
 
-        from PyQt5.QtCore import QThreadPool
+        from PyQt6.QtCore import QThreadPool
         from .save_task import SaveTask
 
         task = SaveTask(self.config.get_file_guard(), filepath, content, encoding.lower())
@@ -511,7 +511,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         QThreadPool.globalInstance().start(task)
 
         return True, new_chars
-    
+
     def save_all(self) -> int:
         total_chars = 0
         unnamed_indices = []
@@ -538,10 +538,10 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 total_chars += chars
 
         return total_chars
-    
+
     def save_all_to_temp(self):
         """保存所有文件到暂存目录（异步写入）"""
-        from PyQt5.QtCore import QThreadPool
+        from PyQt6.QtCore import QThreadPool
         from .save_task import SaveTask
 
         temp_dir = self.config.get_temp_path()
@@ -575,7 +575,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                         self.config.get_file_guard(), save_path, content, "utf-8"
                     )
                     QThreadPool.globalInstance().start(task)
-    
+
     def clear_temp_files(self):
         """清理暂存文件"""
         temp_dir = self.config.get_temp_path()
@@ -585,11 +585,11 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 shutil.rmtree(temp_dir)
             except Exception:
                 get_logger(__name__).warning("清理暂存文件失败: %s", temp_dir)
-    
+
     def release_memory(self):
         """释放内存"""
         current = self.currentWidget()
-        
+
         for i in range(self.count()):
             widget = self.widget(i)
             if widget != current:
@@ -604,7 +604,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     def close_current_tab(self):
         if self.count() > 0:
             self._on_tab_close_requested(self.currentIndex())
-    
+
     def close_all_tabs(self):
         while self.count() > 0:
             if not self._close_tab(0):
@@ -633,7 +633,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 cursor.setPosition(min(cursor_pos, len(widget.editor.toPlainText())))
                 widget.editor.setTextCursor(cursor)
         return True
-    
+
     def close_other_tabs(self, keep_index: int):
         while self.count() > keep_index + 1:
             if not self._close_tab(keep_index + 1):
@@ -662,35 +662,35 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
     def _on_tab_close_requested(self, index: int):
         self._close_tab(index)
-    
+
     def _close_tab(self, index: int) -> bool:
         widget = self.widget(index)
         if not widget or not hasattr(widget, 'tab_id'):
             self.removeTab(index)
             self.tab_count_changed.emit(self.count())
             return True
-        
+
         tab_id = widget.tab_id
         info = self._tab_info.get(tab_id, {})
-        
+
         if isinstance(widget, MarkdownPreviewWidget):
             content = widget.editor.toPlainText()
         elif isinstance(widget, Editor):
             content = widget.toPlainText()
         else:
             content = ""
-        
+
         title = self.tabText(index).rstrip(" *")
         is_new = info.get("is_new", False)
         is_empty = len(content.strip()) == 0
-        
+
         if is_new and is_empty:
             self._release_untitled_number(title)
             del self._tab_info[tab_id]
             self.removeTab(index)
             self.tab_count_changed.emit(self.count())
             return True
-        
+
         if info.get("is_modified"):
             msg_box = QMessageBox(self)
             msg_box.setWindowTitle("保存文件")
@@ -698,15 +698,15 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 msg_box.setText(f"文件 '{title}' 尚未保存。\n\n是否保存？")
             else:
                 msg_box.setText(f"文件 '{title}' 已修改。\n\n是否保存？")
-            msg_box.setIcon(QMessageBox.Question)
-            
-            save_btn = msg_box.addButton("保存", QMessageBox.AcceptRole)
-            discard_btn = msg_box.addButton("不保存", QMessageBox.DestructiveRole)
-            cancel_btn = msg_box.addButton("取消", QMessageBox.RejectRole)
-            
-            msg_box.exec_()
+            msg_box.setIcon(QMessageBox.Icon.Question)
+
+            save_btn = msg_box.addButton("保存", QMessageBox.ButtonRole.AcceptRole)
+            discard_btn = msg_box.addButton("不保存", QMessageBox.ButtonRole.DestructiveRole)
+            cancel_btn = msg_box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+
+            msg_box.exec()
             clicked = msg_box.clickedButton()
-            
+
             if clicked == save_btn:
                 if is_new:
                     old_index = self.currentIndex()
@@ -722,7 +722,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                         return False
             elif clicked == cancel_btn:
                 return False
-        
+
         if info.get("is_new"):
             self._release_untitled_number(title)
         else:
@@ -739,77 +739,77 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 })
                 if len(self._closed_tabs_stack) > 50:
                     self._closed_tabs_stack.pop(0)
-        
+
         del self._tab_info[tab_id]
         self.removeTab(index)
         self.tab_count_changed.emit(self.count())
         return True
-    
+
     def _show_tab_context_menu(self, position):
         index = self.tabBar().tabAt(position)
         if index < 0:
             return
-        
+
         menu = QMenu(self)
-        
+
         save_action = QAction("保存", self)
         save_action.triggered.connect(lambda: self._context_save(index))
         menu.addAction(save_action)
-        
+
         save_as_action = QAction("另存为", self)
         save_as_action.triggered.connect(lambda: self._context_save_as(index))
         menu.addAction(save_as_action)
-        
+
         menu.addSeparator()
-        
+
         rename_action = QAction("重命名", self)
         rename_action.triggered.connect(lambda: self._context_rename(index))
         menu.addAction(rename_action)
-        
+
         menu.addSeparator()
-        
+
         close_action = QAction("关闭", self)
         close_action.triggered.connect(lambda: self._close_tab(index))
         menu.addAction(close_action)
-        
+
         if self.count() > 1:
             close_others = QAction("关闭其他标签", self)
             close_others.triggered.connect(lambda: self.close_other_tabs(index))
             menu.addAction(close_others)
-        
+
         close_all = QAction("关闭所有标签", self)
         close_all.triggered.connect(self.close_all_tabs)
         menu.addAction(close_all)
-        
-        menu.exec_(self.tabBar().mapToGlobal(position))
-    
+
+        menu.exec(self.tabBar().mapToGlobal(position))
+
     def _context_save(self, index: int):
         old = self.currentIndex()
         self.setCurrentIndex(index)
         self.save_current()
         self.setCurrentIndex(old)
-    
+
     def _context_save_as(self, index: int):
         old = self.currentIndex()
         self.setCurrentIndex(index)
         self.save_current_as()
         self.setCurrentIndex(old)
-    
+
     def _context_rename(self, index: int):
         widget = self.widget(index)
         if not widget or not hasattr(widget, 'tab_id'):
             return
-        
+
         info = self._tab_info.get(widget.tab_id, {})
         filepath = info.get("filepath")
-        
+
         if not filepath or info.get("is_new"):
             self._context_save_as(index)
             return
-        
+
         old_name = os.path.basename(filepath)
         new_name, ok = QInputDialog.getText(self, "重命名", "新文件名:", text=old_name)
-        
+
         if ok and new_name and new_name != old_name:
             new_path = os.path.join(os.path.dirname(filepath), new_name)
             try:
@@ -822,7 +822,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             except Exception as e:
                 get_logger(__name__).error("重命名失败: %s", e)
                 ErrorHandler.show_from_exception(e, ErrorCategory.FILE, "重命名失败")
-    
+
     def _on_current_changed(self, index: int):
         if self._find_bar:
             editor = self.current_editor()
@@ -881,12 +881,12 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                         break
 
         self.content_modified.emit()
-    
+
     def current_editor(self) -> Optional[Editor]:
         """获取当前编辑器"""
         widget = self.currentWidget()
         return self._get_editor_from_widget(widget)
-    
+
     def get_current_encoding(self) -> str:
         """获取当前文件的编码"""
         widget = self.currentWidget()
@@ -894,7 +894,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             info = self._tab_info.get(widget.tab_id, {})
             return info.get("encoding", "UTF-8")
         return "UTF-8"
-    
+
     def get_unsaved_files(self) -> List[str]:
         unsaved = []
         for i in range(self.count()):
@@ -913,13 +913,13 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                     else:
                         unsaved.append(self.tabText(i).rstrip(" *"))
         return unsaved
-    
+
     def has_modified_files(self) -> bool:
         for tab_id, info in self._tab_info.items():
             if info.get("is_modified"):
                 return True
         return False
-    
+
     def get_current_file_info(self) -> Optional[Dict]:
         widget = self.currentWidget()
         if not widget:
@@ -957,11 +957,11 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                             "scroll_position": editor.verticalScrollBar().value()
                         })
         return files_info
-    
+
     def set_wrap_mode_all(self, mode: str):
         for editor in self._iter_editors():
             editor.set_wrap_mode(mode)
-    
+
     def toggle_md_preview(self):
         """切换当前MD标签的预览"""
         widget = self.currentWidget()
@@ -1022,12 +1022,12 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         new_path = os.path.join(dest_folder, filename)
 
         if os.path.exists(new_path):
-            msg = QMessageBox.question(
+            msg = QMessageBox.Icon.Question(
                 self, "文件已存在",
                 f"目标文件夹中已存在 '{filename}'，是否覆盖？",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No
             )
-            if msg != QMessageBox.Yes:
+            if msg != QMessageBox.StandardButton.Yes:
                 return False
 
         try:
@@ -1065,39 +1065,39 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             return False
 
     # === 编辑操作代理 ===
-    
+
     def undo(self) -> bool:
         editor = self.current_editor()
         if editor and editor.document().isUndoAvailable():
             editor.undo()
             return True
         return False
-    
+
     def redo(self):
         editor = self.current_editor()
         if editor:
             editor.redo()
-    
+
     def cut(self):
         editor = self.current_editor()
         if editor:
             editor.cut()
-    
+
     def copy(self):
         editor = self.current_editor()
         if editor:
             editor.copy()
-    
+
     def paste(self):
         editor = self.current_editor()
         if editor:
             editor.paste()
-    
+
     def select_all(self):
         editor = self.current_editor()
         if editor:
             editor.selectAll()
-    
+
     def zoom_in(self):
         """放大：字号+1，同步到配置并应用到所有编辑器"""
         current_size = self.config.get_editor_setting("font_size", 12)
@@ -1106,7 +1106,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             self.config.set_editor_setting("font_size", new_size)
             font_family = self.config.get_editor_setting("font_family", "Microsoft YaHei")
             self.set_font_all(font_family, new_size)
-    
+
     def zoom_out(self):
         """缩小：字号-1，同步到配置并应用到所有编辑器"""
         current_size = self.config.get_editor_setting("font_size", 12)
@@ -1115,7 +1115,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             self.config.set_editor_setting("font_size", new_size)
             font_family = self.config.get_editor_setting("font_family", "Microsoft YaHei")
             self.set_font_all(font_family, new_size)
-    
+
     def zoom_reset(self):
         """重置缩放：恢复默认字号12"""
         self.config.set_editor_setting("font_size", 12)

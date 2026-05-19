@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import pytest
-from PyQt5.QtGui import QTextCharFormat, QFont
+from PyQt6.QtGui import QTextCharFormat, QFont
 
 from src.editor.highlight_themes import (
     get_available_themes, get_theme, get_theme_info,
@@ -52,7 +52,7 @@ class TestBuildFormat:
 
     def test_bold(self):
         fmt = build_format({"bold": True})
-        assert fmt.fontWeight() == QFont.Bold
+        assert fmt.fontWeight() == QFont.Weight.Bold
 
     def test_italic(self):
         fmt = build_format({"italic": True})

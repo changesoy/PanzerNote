@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import pytest
-from PyQt5.QtWidgets import QApplication
-from PyQt5.QtCore import QTimer
+from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import QTimer
 
 from src.utils.error_handler import (
     ErrorHandler, ErrorCategory, _sanitize_message,

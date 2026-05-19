@@ -6,8 +6,8 @@
 
 from typing import Any, Callable, Optional, Union
 
-from PyQt5.QtGui import QKeySequence
-from PyQt5.QtWidgets import QAction, QMenu, QMenuBar, QMessageBox
+from PyQt6.QtGui import QKeySequence, QAction
+from PyQt6.QtWidgets import QMenu, QMenuBar, QMessageBox
 
 from ..core.config import Config
 from ..core.shortcut_manager import ShortcutManager
@@ -39,11 +39,11 @@ class MenuBuilder:
         if menu is None:
             return
 
-        self._add_action(menu, "新建文件", QKeySequence.New, mw._new_file, "file.new", "文件")
+        self._add_action(menu, "新建文件", QKeySequence.StandardKey.New, mw._new_file, "file.new", "文件")
         self._add_action(menu, "新建文件夹", None, mw._new_folder, "file.new_folder", "文件")
-        self._add_action(menu, "打开文件", QKeySequence.Open, mw._open_file_dialog, "file.open", "文件")
+        self._add_action(menu, "打开文件", QKeySequence.StandardKey.Open, mw._open_file_dialog, "file.open", "文件")
         menu.addSeparator()
-        self._add_action(menu, "保存", QKeySequence.Save, mw._save_current, "file.save", "文件")
+        self._add_action(menu, "保存", QKeySequence.StandardKey.Save, mw._save_current, "file.save", "文件")
         self._add_action(menu, "另存为", QKeySequence("Ctrl+Shift+S"), mw._save_as, "file.save_as", "文件")
         self._add_action(menu, "全部保存", None, mw._save_all)
         menu.addSeparator()
@@ -70,15 +70,15 @@ class MenuBuilder:
         if menu is None:
             return
 
-        self._add_action(menu, "撤销", QKeySequence.Undo, mw._undo, "edit.undo", "编辑")
-        self._add_action(menu, "重做", QKeySequence.Redo, mw._redo, "edit.redo", "编辑")
+        self._add_action(menu, "撤销", QKeySequence.StandardKey.Undo, mw._undo, "edit.undo", "编辑")
+        self._add_action(menu, "重做", QKeySequence.StandardKey.Redo, mw._redo, "edit.redo", "编辑")
         menu.addSeparator()
-        self._add_action(menu, "剪切", QKeySequence.Cut, mw._cut, "edit.cut", "编辑")
-        self._add_action(menu, "复制", QKeySequence.Copy, mw._copy, "edit.copy", "编辑")
-        self._add_action(menu, "粘贴", QKeySequence.Paste, mw._paste, "edit.paste", "编辑")
-        self._add_action(menu, "全选", QKeySequence.SelectAll, mw._select_all, "edit.select_all", "编辑")
+        self._add_action(menu, "剪切", QKeySequence.StandardKey.Cut, mw._cut, "edit.cut", "编辑")
+        self._add_action(menu, "复制", QKeySequence.StandardKey.Copy, mw._copy, "edit.copy", "编辑")
+        self._add_action(menu, "粘贴", QKeySequence.StandardKey.Paste, mw._paste, "edit.paste", "编辑")
+        self._add_action(menu, "全选", QKeySequence.StandardKey.SelectAll, mw._select_all, "edit.select_all", "编辑")
         menu.addSeparator()
-        self._add_action(menu, "查找", QKeySequence.Find, mw._find, "edit.find", "编辑")
+        self._add_action(menu, "查找", QKeySequence.StandardKey.Find, mw._find, "edit.find", "编辑")
         self._add_action(menu, "替换", QKeySequence("Ctrl+H"), mw._replace, "edit.replace", "编辑")
         menu.addSeparator()
 

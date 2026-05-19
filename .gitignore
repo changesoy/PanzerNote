@@ -1,0 +1,101 @@
+# ============================================================
+# PanzerNote .gitignore
+# ============================================================
+
+# --- 项目文档报告 ---
+PanzerNote v1.6.6 技术审阅报告.md
+PanzerNote v1.6.6 详细修改规划.md
+PanzerNote v1.6.6 性能优化报告.md
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+sdist/
+develop-eggs/
+*.whl
+*.manifest
+*.spec
+
+# --- 虚拟环境 ---
+venv/
+.venv/
+env/
+env.bak/
+pythonenv/
+
+# --- IDE / 编辑器 ---
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+\#*\#
+.\#*
+
+# --- 操作系统 ---
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# --- 环境配置 ---
+.env
+.env.*
+!.env.example
+
+# --- 测试与覆盖率 ---
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+
+# --- 类型检查 ---
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+
+# --- 日志 ---
+*.log
+logs/
+
+# --- 临时文件 ---
+*.bak
+*.tmp
+*.temp
+
+# --- 用户本地配置 ---
+user_data_path.txt
+
+# --- Jupyter Notebook ---
+.ipynb_checkpoints/
+*.ipynb
+
+# --- 数据库 ---
+*.db
+*.sqlite
+*.sqlite3
+
+# --- 打包工具 ---
+*.pyz
+*.pyzw

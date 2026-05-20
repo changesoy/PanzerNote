@@ -95,7 +95,7 @@ class SaveAsDialog(QDialog):
     def _save(self):
         path = self.path_edit.text().strip()
         if not path:
-            QMessageBox.Icon.Warning(self, "提示", "请输入文件名")
+            QMessageBox.warning(self, "提示", "请输入文件名")
             return
         self._filepath = path
         self._encoding = self.encoding_combo.currentText()
@@ -1022,7 +1022,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         new_path = os.path.join(dest_folder, filename)
 
         if os.path.exists(new_path):
-            msg = QMessageBox.Icon.Question(
+            msg = QMessageBox.question(
                 self, "文件已存在",
                 f"目标文件夹中已存在 '{filename}'，是否覆盖？",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No

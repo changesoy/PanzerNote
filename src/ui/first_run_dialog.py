@@ -106,7 +106,7 @@ class FirstRunDialog(QDialog):
         path = self.path_edit.text().strip()
 
         if not path:
-            QMessageBox.Icon.Warning(self, "提示", "请选择保存位置")
+            QMessageBox.warning(self, "提示", "请选择保存位置")
             return
 
         # 检查路径是否有效
@@ -138,7 +138,7 @@ class FirstRunDialog(QDialog):
 
         except Exception as e:
             get_logger(__name__).error("创建目录失败: %s", e)
-            QMessageBox.Icon.Critical(
+            QMessageBox.critical(
                 self,
                 "错误",
                 f"无法创建目录：\n{str(e)}\n\n请选择其他位置或检查权限。"

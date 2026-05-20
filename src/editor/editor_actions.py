@@ -248,7 +248,7 @@ class EditorActionsMixin:
                     self.setPlainText(formatted)
             except json.JSONDecodeError as e:
                 get_logger(__name__).warning("JSON格式化失败: %s", e)
-                QMessageBox.Icon.Warning(
+                QMessageBox.warning(
                     self, "格式化失败",
                     f"JSON格式错误:\n{str(e)}"
                 )
@@ -274,7 +274,7 @@ class EditorActionsMixin:
 
             except Exception as e:
                 get_logger(__name__).warning("XML/HTML格式化失败: %s", e)
-                QMessageBox.Icon.Warning(
+                QMessageBox.warning(
                     self, "格式化失败",
                     f"XML/HTML格式错误:\n{str(e)}"
                 )
@@ -288,10 +288,10 @@ class EditorActionsMixin:
                 with self.programmatic_modify():
                     self.setPlainText(formatted)
             except ImportError:
-                QMessageBox.Icon.Warning(self, "格式化失败", "YAML格式化需要安装 pyyaml 库\n请运行: pip install pyyaml")
+                QMessageBox.warning(self, "格式化失败", "YAML格式化需要安装 pyyaml 库\n请运行: pip install pyyaml")
             except Exception as e:
                 get_logger(__name__).warning("YAML格式化失败: %s", e)
-                QMessageBox.Icon.Warning(self, "格式化失败", f"YAML格式错误:\n{str(e)}")
+                QMessageBox.warning(self, "格式化失败", f"YAML格式错误:\n{str(e)}")
 
         elif self._file_type == 'TOML':
             try:
@@ -302,10 +302,10 @@ class EditorActionsMixin:
                 with self.programmatic_modify():
                     self.setPlainText(formatted)
             except ImportError:
-                QMessageBox.Icon.Warning(self, "格式化失败", "TOML格式化需要安装 tomli 和 tomli_w 库\n请运行: pip install tomli tomli_w")
+                QMessageBox.warning(self, "格式化失败", "TOML格式化需要安装 tomli 和 tomli_w 库\n请运行: pip install tomli tomli_w")
             except Exception as e:
                 get_logger(__name__).warning("TOML格式化失败: %s", e)
-                QMessageBox.Icon.Warning(self, "格式化失败", f"TOML格式错误:\n{str(e)}")
+                QMessageBox.warning(self, "格式化失败", f"TOML格式错误:\n{str(e)}")
 
         elif self._file_type == 'CSS':
             try:
@@ -316,10 +316,10 @@ class EditorActionsMixin:
                 with self.programmatic_modify():
                     self.setPlainText(formatted)
             except ImportError:
-                QMessageBox.Icon.Warning(self, "格式化失败", "CSS格式化需要安装 cssbeautifier 库\n请运行: pip install cssbeautifier")
+                QMessageBox.warning(self, "格式化失败", "CSS格式化需要安装 cssbeautifier 库\n请运行: pip install cssbeautifier")
             except Exception as e:
                 get_logger(__name__).warning("CSS格式化失败: %s", e)
-                QMessageBox.Icon.Warning(self, "格式化失败", f"CSS格式错误:\n{str(e)}")
+                QMessageBox.warning(self, "格式化失败", f"CSS格式错误:\n{str(e)}")
 
         else:
             from ..utils.error_handler import ErrorHandler, ErrorCategory

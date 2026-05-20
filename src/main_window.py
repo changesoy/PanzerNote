@@ -372,11 +372,11 @@ class MainWindow(QMainWindow):
                     self.config.set_encryption_password(password)
                     result = self.config.save_savegame()
                     if result == SavegameSaveResult.SUCCESS:
-                        QMessageBox.Icon.Information(self, "成功", "存档已保存。")
+                        QMessageBox.information(self, "成功", "存档已保存。")
                     else:
-                        QMessageBox.Icon.Warning(self, "保存失败", "存档保存时发生错误。")
+                        QMessageBox.warning(self, "保存失败", "存档保存时发生错误。")
                 else:
-                    QMessageBox.Icon.Warning(self, "密码错误", "密码不正确，存档未保存。")
+                    QMessageBox.warning(self, "密码错误", "密码不正确，存档未保存。")
 
     def _save_to_temp(self):
         """保存到暂存文件"""
@@ -446,7 +446,7 @@ class MainWindow(QMainWindow):
                     if not os.path.isfile(filepath):
                         continue
                     if ext not in self._SUPPORTED_DROP_EXTS:
-                        QMessageBox.Icon.Warning(self, "不支持的文件类型",
+                        QMessageBox.warning(self, "不支持的文件类型",
                                             f"PanzerNote 不支持打开 {ext or '无扩展名'} 类型的文件。")
                         continue
                     self._open_file(filepath)
@@ -555,7 +555,7 @@ class MainWindow(QMainWindow):
     def _export_pdf(self):
         from .editor.markdown_preview import HAS_WEBENGINE
         if not HAS_WEBENGINE:
-            QMessageBox.Icon.Warning(self, "导出失败", "导出PDF需要QtWebEngine组件")
+            QMessageBox.warning(self, "导出失败", "导出PDF需要QtWebEngine组件")
             return
         editor = self.editor_tabs.current_editor()
         if not editor:
@@ -600,7 +600,7 @@ class MainWindow(QMainWindow):
                 f.write(pdf_data)
             self.secretary.show_message(f"已导出PDF: {os.path.basename(filepath)}")
         else:
-            QMessageBox.Icon.Warning(self, "导出失败", "PDF生成失败")
+            QMessageBox.warning(self, "导出失败", "PDF生成失败")
 
     def _export_html(self):
         editor = self.editor_tabs.current_editor()
@@ -637,7 +637,7 @@ class MainWindow(QMainWindow):
                 f.write(full_html)
             self.secretary.show_message(f"已导出HTML: {os.path.basename(filepath)}")
         except Exception as e:
-            QMessageBox.Icon.Warning(self, "导出失败", str(e))
+            QMessageBox.warning(self, "导出失败", str(e))
 
     def _close_current_tab(self):
         """关闭当前标签"""
@@ -842,7 +842,7 @@ class MainWindow(QMainWindow):
         split_tabs = self._split_tabs.pop()
         unsaved = split_tabs.get_unsaved_files()
         if unsaved:
-            reply = QMessageBox.Icon.Question(
+            reply = QMessageBox.question(
                 self, "关闭分屏",
                 "分屏中有未保存的文件，是否关闭？",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No
@@ -904,23 +904,23 @@ class MainWindow(QMainWindow):
 
     def _import_characters(self):
         """导入角色数据"""
-        QMessageBox.Icon.Information(self, "提示", "该功能尚在开发中")
+        QMessageBox.information(self, "提示", "该功能尚在开发中")
 
     def _import_document(self):
         """导入外部文档"""
-        QMessageBox.Icon.Information(self, "提示", "该功能尚在开发中")
+        QMessageBox.information(self, "提示", "该功能尚在开发中")
 
     def _show_typing_stats(self):
         """显示打字统计"""
-        QMessageBox.Icon.Information(self, "提示", "该功能尚在开发中")
+        QMessageBox.information(self, "提示", "该功能尚在开发中")
 
     def _show_construction_stats(self):
         """显示建造记录"""
-        QMessageBox.Icon.Information(self, "提示", "该功能尚在开发中")
+        QMessageBox.information(self, "提示", "该功能尚在开发中")
 
     def _show_collection_stats(self):
         """显示图鉴完成度"""
-        QMessageBox.Icon.Information(self, "提示", "该功能尚在开发中")
+        QMessageBox.information(self, "提示", "该功能尚在开发中")
 
     def _on_file_saved(self, char_count: int):
         """文件保存后的处理"""
@@ -993,7 +993,7 @@ class MainWindow(QMainWindow):
 
     def _show_game_settings(self):
         """显示游戏设置"""
-        QMessageBox.Icon.Information(self, "提示", "该功能尚在开发中")
+        QMessageBox.information(self, "提示", "该功能尚在开发中")
 
     def _export_settings(self):
         filepath, _ = QFileDialog.getSaveFileName(
@@ -1012,7 +1012,7 @@ class MainWindow(QMainWindow):
                 json_module.dump(export_data, f, ensure_ascii=False, indent=2)
             self.secretary.show_message(f"设置已导出到 {os.path.basename(filepath)}")
         except Exception as e:
-            QMessageBox.Icon.Warning(self, "导出失败", str(e))
+            QMessageBox.warning(self, "导出失败", str(e))
 
     def _import_settings(self):
         filepath, _ = QFileDialog.getOpenFileName(
@@ -1025,9 +1025,9 @@ class MainWindow(QMainWindow):
             with open(filepath, 'r', encoding='utf-8') as f:
                 import_data = json_module.load(f)
             if "settings" not in import_data:
-                QMessageBox.Icon.Warning(self, "导入失败", "无效的设置文件格式")
+                QMessageBox.warning(self, "导入失败", "无效的设置文件格式")
                 return
-            reply = QMessageBox.Icon.Question(
+            reply = QMessageBox.question(
                 self, "确认导入",
                 "导入设置将覆盖当前所有设置，是否继续？",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No
@@ -1041,7 +1041,7 @@ class MainWindow(QMainWindow):
             self._apply_editor_settings()
             self.secretary.show_message("设置已导入，部分设置将在重启后生效")
         except Exception as e:
-            QMessageBox.Icon.Warning(self, "导入失败", str(e))
+            QMessageBox.warning(self, "导入失败", str(e))
 
     def _save_settings(self):
         """保存设置"""
@@ -1089,11 +1089,11 @@ class MainWindow(QMainWindow):
 
     def _show_guide(self):
         """显示新手攻略"""
-        QMessageBox.Icon.Information(self, "提示", "该功能尚在开发中")
+        QMessageBox.information(self, "提示", "该功能尚在开发中")
 
     def _show_manual(self):
         """显示使用说明"""
-        QMessageBox.Icon.Information(self, "提示", "该功能尚在开发中")
+        QMessageBox.information(self, "提示", "该功能尚在开发中")
 
     def _show_about(self):
         """显示关于对话框"""

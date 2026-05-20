@@ -32,6 +32,7 @@ from ..themes.theme_aware_mixin import ThemeAwareMixin
 from .editor import Editor
 from .markdown_preview import MarkdownPreviewWidget
 from .find_replace import FindReplaceBar
+from .save_task_manager import SaveTaskManager, SaveState
 
 
 # ════════════════════════════════════════════════════════
@@ -207,6 +208,10 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self._used_untitled_numbers: Set[int] = set()
         self._closed_tabs_stack: List[Dict] = []
 
+        self._save_manager = SaveTaskManager(self)
+        self._save_manager.save_state_changed.connect(self._on_save_state_changed)
+        self._save_manager.save_failed.connect(self._on_save_failed)
+
         self._tab_bar = DraggableTabBar(self)
         self.setTabBar(self._tab_bar)
 
@@ -247,6 +252,13 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         elif isinstance(widget, MarkdownPreviewWidget):
             return widget.editor
         return None
+
+    @staticmethod
+    def _strip_tab_suffix(title: str) -> str:
+        for suffix in (" !", " ⏳", " *"):
+            if title.endswith(suffix):
+                return title[:-len(suffix)]
+        return title
 
     def _iter_editors(self):
         for i in range(self.count()):
@@ -300,6 +312,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             "is_markdown": False,
             "history": []
         }
+        self._save_manager.register_tab(tab_id)
 
         self.setCurrentIndex(index)
         self.tab_count_changed.emit(self.count())
@@ -391,6 +404,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             "is_markdown": is_md,
             "history": []
         }
+        self._save_manager.register_tab(tab_id)
 
         self.setCurrentIndex(index)
         self.tab_count_changed.emit(self.count())
@@ -424,7 +438,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         else:
             suggested_name = os.path.join(
                 self.config.get_notebooks_path(),
-                self.tabText(self.currentIndex()).rstrip(" *")
+                self._strip_tab_suffix(self.tabText(self.currentIndex()))
             )
 
         current_encoding = info.get("encoding", "UTF-8")
@@ -459,7 +473,13 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         return success, chars
 
     def _save_file(self, widget, filepath: str, encoding: str = "UTF-8") -> Tuple[bool, int]:
-        """保存文件（异步写入磁盘，UI 不冻结）"""
+        """保存文件（异步写入磁盘，UI 不冻结）
+
+        通过 SaveTaskManager 管理保存状态：
+        - 提交任务后标记 SAVING，不提前标记 CLEAN
+        - 保存成功后由 Manager 回调标记 CLEAN
+        - 保存失败后由 Manager 回调标记 SAVE_FAILED
+        """
         if isinstance(widget, MarkdownPreviewWidget):
             content = widget.editor.toPlainText()
         elif isinstance(widget, Editor):
@@ -468,46 +488,26 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             return False, 0
 
         tab_id = getattr(widget, 'tab_id', None)
+        if tab_id is None:
+            return False, 0
+
+        if self._save_manager.is_saving(tab_id):
+            return False, 0
+
         info = self._tab_info.get(tab_id, {})
         last_chars = info.get("last_saved_chars", 0)
         new_chars = max(0, len(content) - last_chars)
 
-        info["is_modified"] = False
         info["encoding"] = encoding
         info["last_saved_content"] = content
         info["last_saved_chars"] = len(content)
         info["last_text_length"] = len(content)
 
-        editor = self._get_editor_from_widget(widget)
-        if editor:
-            editor.document().setModified(False)
-
-        index = self.indexOf(widget)
-        title = self.tabText(index)
-        if title.endswith(" *"):
-            self.setTabText(index, title[:-2])
-
         from PyQt6.QtCore import QThreadPool
         from .save_task import SaveTask
 
         task = SaveTask(self.config.get_file_guard(), filepath, content, encoding.lower())
-
-        def _on_save_done(success, fp, exc):
-            if not success:
-                get_logger(__name__).error("保存文件失败: %s", exc)
-                ErrorHandler.show_from_exception(exc, ErrorCategory.FILE, "保存文件失败")
-                if tab_id is not None:
-                    t_info = self._tab_info.get(tab_id, {})
-                    t_info["is_modified"] = True
-                    ed = self._get_editor_from_widget(widget)
-                    if ed:
-                        ed.document().setModified(True)
-                    idx = self.indexOf(widget)
-                    t = self.tabText(idx)
-                    if not t.endswith(" *"):
-                        self.setTabText(idx, t + " *")
-
-        task.signals.finished.connect(_on_save_done)
+        self._save_manager.submit_task(tab_id, task)
         QThreadPool.globalInstance().start(task)
 
         return True, new_chars
@@ -574,6 +574,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                     task = SaveTask(
                         self.config.get_file_guard(), save_path, content, "utf-8"
                     )
+                    task.setAutoDelete(True)
                     QThreadPool.globalInstance().start(task)
 
     def clear_temp_files(self):
@@ -680,12 +681,13 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         else:
             content = ""
 
-        title = self.tabText(index).rstrip(" *")
+        title = self._strip_tab_suffix(self.tabText(index))
         is_new = info.get("is_new", False)
         is_empty = len(content.strip()) == 0
 
         if is_new and is_empty:
             self._release_untitled_number(title)
+            self._save_manager.unregister_tab(tab_id)
             del self._tab_info[tab_id]
             self.removeTab(index)
             self.tab_count_changed.emit(self.count())
@@ -740,6 +742,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 if len(self._closed_tabs_stack) > 50:
                     self._closed_tabs_stack.pop(0)
 
+        self._save_manager.unregister_tab(tab_id)
         del self._tab_info[tab_id]
         self.removeTab(index)
         self.tab_count_changed.emit(self.count())
@@ -864,11 +867,12 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if is_modified != info.get("is_modified", False):
             info["is_modified"] = is_modified
             if is_modified:
+                self._save_manager.mark_dirty(editor.tab_id)
                 for i in range(self.count()):
                     widget = self.widget(i)
                     if getattr(widget, 'tab_id', None) == editor.tab_id:
                         title = self.tabText(i)
-                        if not title.endswith(" *"):
+                        if not title.endswith(" *") and not title.endswith(" ⏳") and not title.endswith(" !"):
                             self.setTabText(i, title + " *")
                         break
             else:
@@ -876,11 +880,49 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                     widget = self.widget(i)
                     if getattr(widget, 'tab_id', None) == editor.tab_id:
                         title = self.tabText(i)
-                        if title.endswith(" *"):
-                            self.setTabText(i, title[:-2])
+                        stripped = self._strip_tab_suffix(title)
+                        if stripped != title:
+                            self.setTabText(i, stripped)
                         break
 
         self.content_modified.emit()
+
+    def _on_save_state_changed(self, tab_id: int, state_name: str) -> None:
+        state = SaveState(state_name)
+        info = self._tab_info.get(tab_id, {})
+        widget = None
+        for i in range(self.count()):
+            w = self.widget(i)
+            if getattr(w, 'tab_id', None) == tab_id:
+                widget = w
+                break
+        if widget is None:
+            return
+
+        index = self.indexOf(widget)
+        base_title = self._strip_tab_suffix(self.tabText(index))
+
+        if state == SaveState.CLEAN:
+            info["is_modified"] = False
+            editor = self._get_editor_from_widget(widget)
+            if editor:
+                editor.document().setModified(False)
+            self.setTabText(index, base_title)
+        elif state == SaveState.SAVING:
+            self.setTabText(index, base_title + " ⏳")
+        elif state == SaveState.SAVE_FAILED:
+            info["is_modified"] = True
+            editor = self._get_editor_from_widget(widget)
+            if editor:
+                editor.document().setModified(True)
+            self.setTabText(index, base_title + " !")
+        elif state == SaveState.DIRTY:
+            info["is_modified"] = True
+
+    def _on_save_failed(self, tab_id: int, filepath: str, exc: object) -> None:
+        info = self._tab_info.get(tab_id, {})
+        basename = os.path.basename(filepath) if filepath else "未知文件"
+        ErrorHandler.show_from_exception(exc, ErrorCategory.FILE, f"保存文件失败：{basename}")
 
     def current_editor(self) -> Optional[Editor]:
         """获取当前编辑器"""
@@ -911,7 +953,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                     if filepath:
                         unsaved.append(os.path.basename(filepath))
                     else:
-                        unsaved.append(self.tabText(i).rstrip(" *"))
+                        unsaved.append(self._strip_tab_suffix(self.tabText(i)))
         return unsaved
 
     def has_modified_files(self) -> bool:

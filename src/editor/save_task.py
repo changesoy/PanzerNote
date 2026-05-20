@@ -16,6 +16,9 @@ class SaveTask(QRunnable):
 
     在 QThreadPool 中执行 safe_write，完成后通过信号通知主线程。
     主线程仍需 toPlainText() 获取内容（同步），但磁盘 IO 在后台执行。
+
+    生命周期由 SaveTaskManager 持有：setAutoDelete(False)，
+    Manager 在任务完成回调中释放引用。
     """
 
     def __init__(self, file_guard, filepath, content, encoding):
@@ -25,7 +28,7 @@ class SaveTask(QRunnable):
         self.content = content
         self.encoding = encoding
         self.signals = SaveTaskSignals()
-        self.setAutoDelete(True)
+        self.setAutoDelete(False)
 
     def run(self):
         try:

@@ -52,6 +52,8 @@ class MainWindow(QMainWindow):
         super().__init__(parent)
         self.config = config
         self._current_view = "editor"
+        self._closing = False
+        self._closing_pending_save = False
         self.setAcceptDrops(True)
 
         self.game_engine = GameEngine(config)
@@ -455,8 +457,30 @@ class MainWindow(QMainWindow):
             event.ignore()
 
     def closeEvent(self, event: QCloseEvent):
-        """关闭窗口事件"""
+        """关闭窗口事件（两阶段关闭）
+
+        阶段1：检查是否有未保存/保存中/保存失败的文件
+              如有，提示用户选择保存/不保存/取消
+              用户选择保存时，event.ignore()，启动异步保存
+        阶段2：等待 SaveTaskManager.all_tasks_finished 信号
+              全部成功 → _finalize_close()
+              任一失败 → 取消关闭，恢复 UI
+        """
+        if self._closing:
+            event.accept()
+            return
+
         self._save_to_temp()
+
+        save_mgr = self.editor_tabs.save_manager
+
+        if save_mgr.any_saving():
+            QMessageBox.information(
+                self, "请稍候",
+                "正在保存文件，请等待保存完成后再关闭。"
+            )
+            event.ignore()
+            return
 
         unsaved_files = self.editor_tabs.get_unsaved_files()
 
@@ -478,15 +502,76 @@ class MainWindow(QMainWindow):
 
             clicked = msg_box.clickedButton()
             if clicked == save_btn:
-                self.editor_tabs.save_all()
-            elif clicked == cancel_btn:
                 event.ignore()
-                return
+                self._closing_pending_save = True
+                self.editor_tabs.save_all()
+                if save_mgr.has_unsaved_work() and not save_mgr.has_pending_tasks():
+                    self._closing_pending_save = False
+                    return
+                if save_mgr.has_pending_tasks():
+                    save_mgr.all_tasks_finished.connect(self._on_close_save_finished)
+                else:
+                    self._finalize_close()
+            elif clicked == discard_btn:
+                self._finalize_close()
+                event.accept()
+            else:
+                event.ignore()
+        else:
+            self._finalize_close()
+            event.accept()
 
+    def _finalize_close(self):
+        """最终关闭逻辑：保存窗口状态、清理临时文件、关闭窗口"""
+        self._closing = True
         self._save_state()
         self.editor_tabs.clear_temp_files()
+        self.close()
 
-        event.accept()
+    def _on_close_save_finished(self):
+        """异步保存全部完成后的回调
+
+        创建者：MainWindow.closeEvent（用户选择保存并退出时）
+        持有者：SaveTaskManager.all_tasks_finished 信号连接
+        完成通知：SaveTaskManager.all_tasks_finished
+        失败通知：SaveTaskManager.save_failed（每个失败任务单独触发）
+        关闭时行为：断开信号连接，重置关闭标志
+        """
+        save_mgr = self.editor_tabs.save_manager
+        try:
+            save_mgr.all_tasks_finished.disconnect(self._on_close_save_finished)
+        except (TypeError, RuntimeError):
+            pass
+
+        if not self._closing_pending_save:
+            return
+
+        failed_tabs = save_mgr.get_failed_tab_ids()
+        if failed_tabs:
+            self._closing_pending_save = False
+            failed_files = []
+            for tab_id in failed_tabs:
+                info = self.editor_tabs._tab_info.get(tab_id, {})
+                filepath = info.get("filepath", "")
+                if filepath:
+                    failed_files.append(os.path.basename(filepath))
+                else:
+                    failed_files.append("未知文件")
+            file_list = "\n".join([f"• {f}" for f in failed_files[:5]])
+            if len(failed_files) > 5:
+                file_list += f"\n...等{len(failed_files)}个文件"
+            QMessageBox.warning(
+                self, "保存失败",
+                f"以下文件保存失败，无法关闭：\n\n{file_list}"
+            )
+            return
+
+        if save_mgr.has_unsaved_work():
+            self._closing_pending_save = False
+            return
+
+        self._closing_pending_save = False
+        self._finalize_close()
 
     def keyPressEvent(self, event):
         """键盘事件"""

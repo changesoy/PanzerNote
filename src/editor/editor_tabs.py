@@ -212,6 +212,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self._save_manager.save_state_changed.connect(self._on_save_state_changed)
         self._save_manager.save_failed.connect(self._on_save_failed)
 
+        self._pending_close_tab_ids: Set[int] = set()
+
         self._tab_bar = DraggableTabBar(self)
         self.setTabBar(self._tab_bar)
 
@@ -235,6 +237,10 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     def set_find_bar(self, find_bar: FindReplaceBar):
         """设置外部传入的查找替换栏"""
         self._find_bar = find_bar
+
+    @property
+    def save_manager(self) -> SaveTaskManager:
+        return self._save_manager
 
     def _get_filepath_for_index(self, index: int) -> Optional[str]:
         """获取指定标签页的文件路径（供 DraggableTabBar 使用）"""
@@ -674,6 +680,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         tab_id = widget.tab_id
         info = self._tab_info.get(tab_id, {})
 
+        if self._save_manager.is_saving(tab_id):
+            return False
+
         if isinstance(widget, MarkdownPreviewWidget):
             content = widget.editor.toPlainText()
         elif isinstance(widget, Editor):
@@ -722,6 +731,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                     success, _ = self._save_file(widget, info["filepath"], encoding)
                     if not success:
                         return False
+                if self._save_manager.is_saving(tab_id):
+                    self._pending_close_tab_ids.add(tab_id)
+                    return False
             elif clicked == cancel_btn:
                 return False
 
@@ -891,10 +903,12 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         state = SaveState(state_name)
         info = self._tab_info.get(tab_id, {})
         widget = None
+        widget_index = -1
         for i in range(self.count()):
             w = self.widget(i)
             if getattr(w, 'tab_id', None) == tab_id:
                 widget = w
+                widget_index = i
                 break
         if widget is None:
             return
@@ -908,6 +922,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             if editor:
                 editor.document().setModified(False)
             self.setTabText(index, base_title)
+            if tab_id in self._pending_close_tab_ids:
+                self._pending_close_tab_ids.discard(tab_id)
+                self._close_tab_after_save(widget_index)
         elif state == SaveState.SAVING:
             self.setTabText(index, base_title + " ⏳")
         elif state == SaveState.SAVE_FAILED:
@@ -916,6 +933,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             if editor:
                 editor.document().setModified(True)
             self.setTabText(index, base_title + " !")
+            if tab_id in self._pending_close_tab_ids:
+                self._pending_close_tab_ids.discard(tab_id)
         elif state == SaveState.DIRTY:
             info["is_modified"] = True
 
@@ -923,6 +942,37 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         info = self._tab_info.get(tab_id, {})
         basename = os.path.basename(filepath) if filepath else "未知文件"
         ErrorHandler.show_from_exception(exc, ErrorCategory.FILE, f"保存文件失败：{basename}")
+
+    def _close_tab_after_save(self, index: int) -> None:
+        widget = self.widget(index)
+        if not widget or not hasattr(widget, 'tab_id'):
+            return
+
+        tab_id = widget.tab_id
+        info = self._tab_info.get(tab_id, {})
+        title = self._strip_tab_suffix(self.tabText(index))
+
+        if info.get("is_new"):
+            self._release_untitled_number(title)
+        else:
+            filepath = info.get("filepath")
+            if filepath and os.path.isfile(filepath):
+                cursor = None
+                if isinstance(widget, Editor):
+                    cursor = widget.textCursor().position()
+                elif isinstance(widget, MarkdownPreviewWidget):
+                    cursor = widget.editor.textCursor().position()
+                self._closed_tabs_stack.append({
+                    "filepath": filepath,
+                    "cursor_position": cursor
+                })
+                if len(self._closed_tabs_stack) > 50:
+                    self._closed_tabs_stack.pop(0)
+
+        self._save_manager.unregister_tab(tab_id)
+        del self._tab_info[tab_id]
+        self.removeTab(index)
+        self.tab_count_changed.emit(self.count())
 
     def current_editor(self) -> Optional[Editor]:
         """获取当前编辑器"""

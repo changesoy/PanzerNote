@@ -74,6 +74,9 @@ class SaveTaskManager(QObject):
     def any_saving(self) -> bool:
         return any(s == SaveState.SAVING for s in self._states.values())
 
+    def has_unsaved_work(self) -> bool:
+        return any(s in (SaveState.DIRTY, SaveState.SAVE_FAILED) for s in self._states.values())
+
     def get_dirty_tab_ids(self) -> list:
         return [tid for tid, s in self._states.items() if s in (SaveState.DIRTY, SaveState.SAVE_FAILED)]
 

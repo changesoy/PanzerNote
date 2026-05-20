@@ -68,6 +68,8 @@ htmlcov/
 coverage.xml
 *.cover
 .hypothesis/
+test_output.txt
+test_result.txt
 
 # --- 类型检查 ---
 .mypy_cache/

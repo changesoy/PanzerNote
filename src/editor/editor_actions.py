@@ -8,7 +8,8 @@
 
 import json
 import xml.dom.minidom as minidom
-from typing import Optional
+from contextlib import contextmanager
+from typing import Generator, Optional
 
 from PyQt6.QtGui import QTextCursor
 from PyQt6.QtWidgets import QMessageBox
@@ -30,6 +31,25 @@ class EditorActionsMixin:
     - _file_type: str
     """
 
+    @contextmanager
+    def programmatic_modify(self) -> Generator[None, None, None]:
+        """标记程序化修改的上下文管理器
+
+        Editor 类覆盖此方法以设置 _programmatic_modify 标志，
+        防止语法高亮器在程序化修改期间重复触发生成。
+        如果宿主类未提供，则默认为空操作。
+        """
+        yield
+
+    def _get_config_indent(self) -> int:
+        """获取编辑器缩进大小配置，使用默认值兜底"""
+        try:
+            if hasattr(self, '_config') and self._config is not None:
+                return self._get_config_indent()
+        except Exception:
+            pass
+        return 4
+
     # ═══════════════════ 行操作 ═══════════════════
 
     def delete_current_line(self) -> None:
@@ -41,15 +61,15 @@ class EditorActionsMixin:
             cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
 
             if cursor.block().next().isValid():
-                cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock, cursor.KeepAnchor)
-                cursor.movePosition(QTextCursor.MoveOperation.NextCharacter, cursor.KeepAnchor)
+                cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
+                cursor.movePosition(QTextCursor.MoveOperation.NextCharacter, QTextCursor.MoveMode.KeepAnchor)
             elif cursor.block().blockNumber() > 0:
                 anchor = cursor.position()
                 cursor.movePosition(QTextCursor.MoveOperation.PreviousCharacter)
-                cursor.setPosition(anchor, cursor.KeepAnchor)
-                cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock, cursor.KeepAnchor)
+                cursor.setPosition(anchor, QTextCursor.MoveMode.KeepAnchor)
+                cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
             else:
-                cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock, cursor.KeepAnchor)
+                cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
 
             cursor.removeSelectedText()
         cursor.endEditBlock()
@@ -61,7 +81,7 @@ class EditorActionsMixin:
 
         with self.programmatic_modify():
             cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
-            cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock, cursor.KeepAnchor)
+            cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
             line_text = cursor.selectedText()
 
             cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
@@ -91,7 +111,7 @@ class EditorActionsMixin:
 
         with self.programmatic_modify():
             cursor.setPosition(start_pos)
-            cursor.setPosition(end_pos, cursor.KeepAnchor)
+            cursor.setPosition(end_pos, QTextCursor.MoveMode.KeepAnchor)
 
             trailing_newline = '\n' if current_block.next().isValid() else ''
             cursor.insertText(current_text + '\n' + prev_text + trailing_newline)
@@ -126,7 +146,7 @@ class EditorActionsMixin:
 
         with self.programmatic_modify():
             cursor.setPosition(start_pos)
-            cursor.setPosition(end_pos, cursor.KeepAnchor)
+            cursor.setPosition(end_pos, QTextCursor.MoveMode.KeepAnchor)
 
             trailing_newline = '\n' if next_block.next().isValid() else ''
             cursor.insertText(next_text + '\n' + current_text + trailing_newline)
@@ -161,7 +181,7 @@ class EditorActionsMixin:
             cursor.insertText(new_text)
 
         cursor.setPosition(start)
-        cursor.setPosition(start + len(new_text), cursor.KeepAnchor)
+        cursor.setPosition(start + len(new_text), QTextCursor.MoveMode.KeepAnchor)
         self.setTextCursor(cursor)
 
     def to_uppercase(self) -> None:
@@ -178,7 +198,7 @@ class EditorActionsMixin:
             cursor.insertText(new_text)
 
         cursor.setPosition(start)
-        cursor.setPosition(start + len(new_text), cursor.KeepAnchor)
+        cursor.setPosition(start + len(new_text), QTextCursor.MoveMode.KeepAnchor)
         self.setTextCursor(cursor)
 
     def to_lowercase(self) -> None:
@@ -195,7 +215,7 @@ class EditorActionsMixin:
             cursor.insertText(new_text)
 
         cursor.setPosition(start)
-        cursor.setPosition(start + len(new_text), cursor.KeepAnchor)
+        cursor.setPosition(start + len(new_text), QTextCursor.MoveMode.KeepAnchor)
         self.setTextCursor(cursor)
 
     def to_titlecase(self) -> None:
@@ -212,7 +232,7 @@ class EditorActionsMixin:
             cursor.insertText(new_text)
 
         cursor.setPosition(start)
-        cursor.setPosition(start + len(new_text), cursor.KeepAnchor)
+        cursor.setPosition(start + len(new_text), QTextCursor.MoveMode.KeepAnchor)
         self.setTextCursor(cursor)
 
     # ═══════════════════ 转到行 ═══════════════════
@@ -241,7 +261,7 @@ class EditorActionsMixin:
 
         if self._file_type == 'JSON':
             try:
-                indent = self._config.get_editor_setting("code_indent_size", 4)
+                indent = self._get_config_indent()
                 parsed = json.loads(content)
                 formatted = json.dumps(parsed, ensure_ascii=False, indent=indent)
                 with self.programmatic_modify():
@@ -283,7 +303,7 @@ class EditorActionsMixin:
             try:
                 import yaml
                 parsed = yaml.safe_load(content)
-                indent = self._config.get_editor_setting("code_indent_size", 4)
+                indent = self._get_config_indent()
                 formatted = yaml.dump(parsed, allow_unicode=True, default_flow_style=False, indent=indent)
                 with self.programmatic_modify():
                     self.setPlainText(formatted)
@@ -311,7 +331,7 @@ class EditorActionsMixin:
             try:
                 import cssbeautifier
                 opts = cssbeautifier.default_options()
-                opts.indent_size = self._config.get_editor_setting("code_indent_size", 4)
+                opts.indent_size = self._get_config_indent()
                 formatted = cssbeautifier.beautify(content, opts)
                 with self.programmatic_modify():
                     self.setPlainText(formatted)

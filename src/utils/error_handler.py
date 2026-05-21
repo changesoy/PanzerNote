@@ -75,6 +75,7 @@ _SENSITIVE_PATTERNS = [
     re.compile(r'token\s*=\s*\S+', re.IGNORECASE),
     re.compile(r'secret\s*=\s*\S+', re.IGNORECASE),
     re.compile(r'(?:api_?key|private_?key|access_?key)\s*=\s*\S+', re.IGNORECASE),
+    re.compile(r'\bkey\s*=\s*\S+', re.IGNORECASE),
 ]
 
 _SUGGESTION_MAP = {

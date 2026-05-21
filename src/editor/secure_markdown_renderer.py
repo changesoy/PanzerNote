@@ -73,7 +73,7 @@ def render_markdown_to_safe_html(markdown_text: str) -> str:
     if HAS_MARKDOWN_IT:
         try:
             md = _MarkdownIt("commonmark", {"html": False})
-            return md.render(markdown_text)
+            return strip_dangerous_html(md.render(markdown_text))
         except Exception:
             get_logger(__name__).debug("markdown-it 渲染失败，回退到 python-markdown")
 

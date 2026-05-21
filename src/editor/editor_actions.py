@@ -45,7 +45,7 @@ class EditorActionsMixin:
         """获取编辑器缩进大小配置，使用默认值兜底"""
         try:
             if hasattr(self, '_config') and self._config is not None:
-                return self._get_config_indent()
+                return int(self._config.get_editor_setting("indent_size", 4))
         except Exception:
             pass
         return 4

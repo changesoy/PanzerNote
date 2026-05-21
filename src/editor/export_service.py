@@ -116,7 +116,12 @@ class ExportService:
                 on_pdf_generated(b"")
                 web_view.deleteLater()
                 return
-            web_view.page().printToPdf(
+            page = web_view.page()
+            if page is None:
+                on_pdf_generated(b"")
+                web_view.deleteLater()
+                return
+            page.printToPdf(
                 lambda pdf_data: _on_pdf_ready(pdf_data)
             )
 

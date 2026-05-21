@@ -28,7 +28,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QRect, QSize
 from PyQt6.QtGui import (
     QFont, QColor, QPainter, QTextFormat, QTextCharFormat,
-    QSyntaxHighlighter, QTextDocument, QKeyEvent, QAction
+    QSyntaxHighlighter, QTextDocument, QTextCursor, QKeyEvent, QAction
 )
 
 from ..core.config import Config
@@ -180,16 +180,18 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
     def _show_context_menu(self, position):
         """显示中文右键菜单"""
         menu = QMenu(self)
+        doc = self.document()
+        assert doc is not None
 
         undo_action = QAction("撤销", self)
         undo_action.setShortcut("Ctrl+Z")
-        undo_action.setEnabled(self.document().isUndoAvailable())
+        undo_action.setEnabled(doc.isUndoAvailable())
         undo_action.triggered.connect(self.undo)
         menu.addAction(undo_action)
 
         redo_action = QAction("重做", self)
         redo_action.setShortcut("Ctrl+Y")
-        redo_action.setEnabled(self.document().isRedoAvailable())
+        redo_action.setEnabled(doc.isRedoAvailable())
         redo_action.triggered.connect(self.redo)
         menu.addAction(redo_action)
 
@@ -228,27 +230,27 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
 
         # 大小写转换子菜单
         case_menu = menu.addMenu("大小写转换")
+        if case_menu:
+            upper_action = QAction("转为大写", self)
+            upper_action.setEnabled(self.textCursor().hasSelection())
+            upper_action.triggered.connect(self.to_uppercase)
+            case_menu.addAction(upper_action)
 
-        upper_action = QAction("转为大写", self)
-        upper_action.setEnabled(self.textCursor().hasSelection())
-        upper_action.triggered.connect(self.to_uppercase)
-        case_menu.addAction(upper_action)
+            lower_action = QAction("转为小写", self)
+            lower_action.setEnabled(self.textCursor().hasSelection())
+            lower_action.triggered.connect(self.to_lowercase)
+            case_menu.addAction(lower_action)
 
-        lower_action = QAction("转为小写", self)
-        lower_action.setEnabled(self.textCursor().hasSelection())
-        lower_action.triggered.connect(self.to_lowercase)
-        case_menu.addAction(lower_action)
+            title_action = QAction("首字母大写", self)
+            title_action.setEnabled(self.textCursor().hasSelection())
+            title_action.triggered.connect(self.to_titlecase)
+            case_menu.addAction(title_action)
 
-        title_action = QAction("首字母大写", self)
-        title_action.setEnabled(self.textCursor().hasSelection())
-        title_action.triggered.connect(self.to_titlecase)
-        case_menu.addAction(title_action)
-
-        toggle_case_action = QAction("切换大小写", self)
-        toggle_case_action.setShortcut("Ctrl+Shift+U")
-        toggle_case_action.setEnabled(self.textCursor().hasSelection())
-        toggle_case_action.triggered.connect(self.toggle_case)
-        case_menu.addAction(toggle_case_action)
+            toggle_case_action = QAction("切换大小写", self)
+            toggle_case_action.setShortcut("Ctrl+Shift+U")
+            toggle_case_action.setEnabled(self.textCursor().hasSelection())
+            toggle_case_action.triggered.connect(self.toggle_case)
+            case_menu.addAction(toggle_case_action)
 
         # JSON/XML格式化（仅对应文件类型显示）
         if self._file_type in ('JSON', 'XML', 'HTML', 'YAML', 'TOML', 'CSS'):
@@ -299,7 +301,8 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         else:
             self.line_number_area.update(0, rect.y(), self.line_number_area.width(), rect.height())
 
-        if rect.contains(self.viewport().rect()):
+        viewport = self.viewport()
+        if viewport is not None and rect.contains(viewport.rect()):
             self._update_line_number_area_width(0)
 
     def resizeEvent(self, event):
@@ -402,7 +405,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
     def _minimap_width(self) -> int:
         """缩略图宽度"""
         if self.minimap:
-            return self.minimap.MINIMAP_WIDTH
+            return int(self.minimap.MINIMAP_WIDTH)
         return 80
 
     def toggle_minimap(self):
@@ -450,8 +453,10 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             self._highlighter.setDocument(None)
             self._highlighter = None
 
+        doc = self.document()
+        assert doc is not None
         self._highlighter, self._file_type = get_highlighter_for_file(
-            self.document(), filepath_or_ext
+            doc, filepath_or_ext
         )
 
         self._lazy_highlight.set_highlighter(self._highlighter)
@@ -472,8 +477,10 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
 
     # ═══════════════════ 键盘事件处理 ═══════════════════
 
-    def keyPressEvent(self, event: QKeyEvent):
+    def keyPressEvent(self, event: QKeyEvent | None):
         """键盘事件 - 自动缩进、行操作、大小写转换等"""
+        if event is None:
+            return
         modifiers = event.modifiers()
         key = event.key()
 
@@ -606,7 +613,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         if text.strip() == '':
             if text.startswith("    "):
                 cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock, QTextCursor.MoveMode.MoveAnchor)
-                cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock, cursor.KeepAnchor)
+                cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
                 new_text = text[4:] + '}'
                 cursor.insertText(new_text)
                 self.setTextCursor(cursor)
@@ -622,7 +629,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             text = block.text()
 
             cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock, QTextCursor.MoveMode.MoveAnchor)
-            cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock, cursor.KeepAnchor)
+            cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
 
             if indent:
                 cursor.insertText("    " + text)
@@ -643,8 +650,10 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
 
         cursor.beginEditBlock()
 
+        doc = self.document()
+        assert doc is not None
         for block_num in range(start_block, end_block + 1):
-            block = self.document().findBlockByNumber(block_num)
+            block = doc.findBlockByNumber(block_num)
             cursor.setPosition(block.position())
 
             if indent:
@@ -652,10 +661,10 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             else:
                 text = block.text()
                 if text.startswith("    "):
-                    cursor.movePosition(QTextCursor.MoveOperation.Right, cursor.KeepAnchor, 4)
+                    cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor, 4)
                     cursor.removeSelectedText()
                 elif text.startswith("\t"):
-                    cursor.movePosition(QTextCursor.MoveOperation.Right, cursor.KeepAnchor, 1)
+                    cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor, 1)
                     cursor.removeSelectedText()
 
         cursor.endEditBlock()
@@ -719,7 +728,9 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
 
     def goto_line(self, line: int):
         """跳转到指定行"""
-        block = self.document().findBlockByNumber(line - 1)
+        doc = self.document()
+        assert doc is not None
+        block = doc.findBlockByNumber(line - 1)
         if block.isValid():
             cursor = self.textCursor()
             cursor.setPosition(block.position())

@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
     QLineEdit
 )
 from PyQt6.QtCore import Qt, QTimer, QEvent, pyqtSignal
-from PyQt6.QtGui import QIcon, QCloseEvent, QAction
+from PyQt6.QtGui import QIcon, QCloseEvent, QAction, QTextCursor
 from typing import List
 
 from . import __version__
@@ -77,6 +77,8 @@ class MainWindow(QMainWindow):
         icon_path = os.path.join(config.get_assets_path(), "icons", "app_icon.png")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
+
+        QTimer.singleShot(0, self._check_session_recovery)
 
     def _init_ui(self):
         """初始化UI"""
@@ -383,6 +385,109 @@ class MainWindow(QMainWindow):
     def _save_to_temp(self):
         """保存到暂存文件"""
         self.editor_tabs.save_all_to_temp()
+
+    def _check_session_recovery(self):
+        """检查是否有可恢复的异常退出会话
+
+        在 window.show() 之后由 QTimer.singleShot(0, ...) 触发，
+        不在 __init__ 中直接弹窗。
+
+        创建者：MainWindow.__init__（通过 QTimer.singleShot 延迟）
+        持有者：TempSessionManager
+        完成通知：同步完成
+        失败通知：日志记录，不中断启动
+        关闭时行为：恢复的会话在关闭时走正常保存流程
+        """
+        session_mgr = self.editor_tabs.session_manager
+        recoverable = session_mgr.find_recoverable_sessions()
+
+        if not recoverable:
+            session_mgr.cleanup_all_clean_sessions()
+            return
+
+        session = recoverable[0]
+        files = session.get("files", [])
+        if not files:
+            return
+
+        file_names = []
+        for f in files:
+            original = f.get("original_path", "")
+            if original:
+                file_names.append(os.path.basename(original))
+            else:
+                file_names.append("未命名文件")
+
+        file_list = "\n".join([f"• {n}" for n in file_names[:5]])
+        if len(file_names) > 5:
+            file_list += f"\n...等{len(file_names)}个文件"
+
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("恢复会话")
+        msg_box.setText(f"检测到上次异常退出，以下文件可能未保存：\n\n{file_list}\n\n是否恢复？")
+        msg_box.setIcon(QMessageBox.Icon.Question)
+
+        recover_btn = msg_box.addButton("恢复", QMessageBox.ButtonRole.AcceptRole)
+        discard_btn = msg_box.addButton("丢弃", QMessageBox.ButtonRole.DestructiveRole)
+        msg_box.exec()
+
+        clicked = msg_box.clickedButton()
+        if clicked == recover_btn:
+            self._recover_session(session)
+        elif clicked == discard_btn:
+            confirm = QMessageBox.question(
+                self, "确认丢弃",
+                "丢弃后将无法恢复这些文件，确定要丢弃吗？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            if confirm == QMessageBox.StandardButton.Yes:
+                session_mgr.remove_recovered_session(session["session_dir"])
+            else:
+                self._recover_session(session)
+
+    def _recover_session(self, session: dict):
+        """恢复指定会话的文件"""
+        session_mgr = self.editor_tabs.session_manager
+        session_dir = session.get("session_dir", "")
+        files = session.get("files", [])
+
+        for f in files:
+            original_path = f.get("original_path", "")
+            autosave_name = f.get("autosave_path", "")
+            encoding = f.get("encoding", "UTF-8")
+            is_new = f.get("is_new", False)
+
+            content = session_mgr.read_autosave_content(session_dir, autosave_name, encoding)
+            if content is None:
+                continue
+
+            if original_path and os.path.isfile(original_path) and not is_new:
+                index = self.editor_tabs.open_file(original_path)
+                if index >= 0:
+                    widget = self.editor_tabs.widget(index)
+                    editor = self.editor_tabs._get_editor_from_widget(widget)
+                    if editor:
+                        cursor = editor.textCursor()
+                        cursor.select(QTextCursor.SelectionType.Document)
+                        cursor.insertText(content)
+                        tab_id = getattr(widget, 'tab_id', None)
+                        if tab_id is not None:
+                            self.editor_tabs._save_manager.mark_dirty(tab_id)
+            else:
+                index = self.editor_tabs.new_file()
+                if index >= 0:
+                    widget = self.editor_tabs.widget(index)
+                    if hasattr(widget, 'tab_id'):
+                        editor = self.editor_tabs._get_editor_from_widget(widget)
+                        if editor:
+                            cursor = editor.textCursor()
+                            cursor.select(QTextCursor.SelectionType.Document)
+                            cursor.insertText(content)
+                            tab_id = widget.tab_id
+                            self.editor_tabs._save_manager.mark_dirty(tab_id)
+
+        session_mgr.remove_recovered_session(session_dir)
 
     # === 挂机机制 ===
 

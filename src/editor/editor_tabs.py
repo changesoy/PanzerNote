@@ -33,6 +33,7 @@ from .editor import Editor
 from .markdown_preview import MarkdownPreviewWidget
 from .find_replace import FindReplaceBar
 from .save_task_manager import SaveTaskManager, SaveState
+from .temp_session_manager import TempSessionManager
 
 
 # ════════════════════════════════════════════════════════
@@ -214,6 +215,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
         self._pending_close_tab_ids: Set[int] = set()
 
+        self._session_manager = TempSessionManager(config.get_temp_path())
+
         self._tab_bar = DraggableTabBar(self)
         self.setTabBar(self._tab_bar)
 
@@ -241,6 +244,10 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     @property
     def save_manager(self) -> SaveTaskManager:
         return self._save_manager
+
+    @property
+    def session_manager(self) -> TempSessionManager:
+        return self._session_manager
 
     def _get_filepath_for_index(self, index: int) -> Optional[str]:
         """获取指定标签页的文件路径（供 DraggableTabBar 使用）"""
@@ -546,52 +553,49 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         return total_chars
 
     def save_all_to_temp(self):
-        """保存所有文件到暂存目录（异步写入）"""
-        from PyQt6.QtCore import QThreadPool
-        from .save_task import SaveTask
+        """保存所有 dirty 文件到暂存目录（通过 TempSessionManager 管理）
 
-        temp_dir = self.config.get_temp_path()
-        os.makedirs(temp_dir, exist_ok=True)
-
-        session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-        session_dir = os.path.join(temp_dir, f"session_{session_id}")
-        os.makedirs(session_dir, exist_ok=True)
-
+        创建者：MainWindow（最小化/自动保存/关闭时调用）
+        持有者：TempSessionManager
+        完成通知：同步完成，无异步回调
+        失败通知：日志记录，不中断流程
+        关闭时行为：由 mark_cleanly_closed / cleanup_session 管理
+        """
+        tab_infos = []
         for i in range(self.count()):
             widget = self.widget(i)
             tab_id = getattr(widget, 'tab_id', None)
-            if tab_id is not None:
-                info = self._tab_info.get(tab_id, {})
-                if info.get("is_modified"):
-                    if isinstance(widget, MarkdownPreviewWidget):
-                        content = widget.editor.toPlainText()
-                    elif isinstance(widget, Editor):
-                        content = widget.toPlainText()
-                    else:
-                        continue
+            if tab_id is None:
+                continue
 
-                    filepath = info.get("filepath")
-                    if filepath:
-                        filename = os.path.basename(filepath) + ".autosave"
-                    else:
-                        filename = f"untitled_{tab_id}.txt.autosave"
+            info = self._tab_info.get(tab_id, {})
+            if not info.get("is_modified"):
+                continue
 
-                    save_path = os.path.join(session_dir, filename)
-                    task = SaveTask(
-                        self.config.get_file_guard(), save_path, content, "utf-8"
-                    )
-                    task.setAutoDelete(True)
-                    QThreadPool.globalInstance().start(task)
+            if isinstance(widget, MarkdownPreviewWidget):
+                content = widget.editor.toPlainText()
+            elif isinstance(widget, Editor):
+                content = widget.toPlainText()
+            else:
+                continue
+
+            tab_infos.append({
+                "tab_id": tab_id,
+                "filepath": info.get("filepath"),
+                "content": content,
+                "encoding": info.get("encoding", "UTF-8"),
+                "is_new": info.get("is_new", False),
+                "is_modified": True
+            })
+
+        if tab_infos:
+            self._session_manager.save_dirty_files(tab_infos)
 
     def clear_temp_files(self):
-        """清理暂存文件"""
-        temp_dir = self.config.get_temp_path()
-        if os.path.exists(temp_dir):
-            import shutil
-            try:
-                shutil.rmtree(temp_dir)
-            except Exception:
-                get_logger(__name__).warning("清理暂存文件失败: %s", temp_dir)
+        """标记正常关闭并清理暂存文件"""
+        self._session_manager.mark_cleanly_closed()
+        self._session_manager.cleanup_session()
+        self._session_manager.cleanup_all_clean_sessions()
 
     def release_memory(self):
         """释放内存"""
@@ -922,6 +926,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             if editor:
                 editor.document().setModified(False)
             self.setTabText(index, base_title)
+            filepath = info.get("filepath")
+            if filepath:
+                self._session_manager.remove_autosave_for_file(filepath)
             if tab_id in self._pending_close_tab_ids:
                 self._pending_close_tab_ids.discard(tab_id)
                 self._close_tab_after_save(widget_index)

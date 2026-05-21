@@ -37,7 +37,7 @@ from .game.secretary_widget import SecretaryWidget
 from .editor.status_bar import StatusBarWidget
 from .editor.find_replace import FindReplaceBar
 from .editor.editor_settings_dialog import EditorSettingsDialog
-from .editor.file_open_service import FileOpenService, FileOpenSource, FileOpenSecurityError
+from .editor.file_open_service import FileOpenService, FileOpenSource, FileOpenSecurityError, _is_inside_root
 from .plugins.plugin_manager import PluginManager
 from .themes.theme_engine import ThemeEngine
 from .themes.theme_preview import ThemePreviewDialog
@@ -747,7 +747,7 @@ class MainWindow(QMainWindow):
         notebooks_path = os.path.normpath(self.config.get_notebooks_path())
         filepath_norm = os.path.normpath(validated)
 
-        if not filepath_norm.startswith(notebooks_path):
+        if not _is_inside_root(filepath_norm, notebooks_path):
             self.config.add_external_file(validated)
             self.file_tree.refresh_external_files()
 
@@ -760,7 +760,7 @@ class MainWindow(QMainWindow):
         notebooks_path = os.path.normpath(self.config.get_notebooks_path())
         filepath_norm = os.path.normpath(filepath)
 
-        if not filepath_norm.startswith(notebooks_path):
+        if not _is_inside_root(filepath_norm, notebooks_path):
             self.config.add_external_file(filepath)
             self.file_tree.refresh_external_files()
 

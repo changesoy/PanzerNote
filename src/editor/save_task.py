@@ -5,6 +5,7 @@
 """
 
 from PyQt6.QtCore import QRunnable, QObject, pyqtSignal
+from ..security.file_access_context import FileAccessContext
 
 
 class SaveTaskSignals(QObject):
@@ -21,12 +22,14 @@ class SaveTask(QRunnable):
     Manager 在任务完成回调中释放引用。
     """
 
-    def __init__(self, file_guard, filepath, content, encoding):
+    def __init__(self, file_guard, filepath, content, encoding,
+                 context=FileAccessContext.USER_DOCUMENT_SAVE):
         super().__init__()
         self.file_guard = file_guard
         self.filepath = filepath
         self.content = content
         self.encoding = encoding
+        self.context = context
         self.signals = SaveTaskSignals()
         self.setAutoDelete(False)
 
@@ -34,7 +37,8 @@ class SaveTask(QRunnable):
         try:
             self.file_guard.safe_write(
                 self.filepath, self.content,
-                encoding=self.encoding
+                encoding=self.encoding,
+                context=self.context,
             )
             self.signals.finished.emit(True, self.filepath, None)
         except Exception as e:

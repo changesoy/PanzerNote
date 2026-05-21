@@ -63,6 +63,13 @@ _MAX_SETTINGS_IMPORT_SIZE = 5 * 1024 * 1024
 _MAX_USER_FILE_SIZE = 100 * 1024 * 1024
 
 
+def _is_inside_root(path: str, root: str) -> bool:
+    try:
+        return os.path.commonpath([path, root]) == root
+    except ValueError:
+        return False
+
+
 def _is_dangerous_extension(filepath: str) -> bool:
     ext = os.path.splitext(filepath)[1].lower()
     return ext in _DANGEROUS_EXTENSIONS
@@ -163,8 +170,7 @@ class FileOpenService:
             return self._validator.validate_path(filepath)
         except PathSecurityError:
             normalized = os.path.normpath(filepath)
-            notebooks = os.path.normpath(self._notebooks_path)
-            if not normalized.startswith(notebooks):
+            if not _is_inside_root(normalized, self._notebooks_path):
                 self._logger.warning(
                     "文件不在 notebooks 白名单中，允许外部打开: %s", filepath
                 )
@@ -175,9 +181,8 @@ class FileOpenService:
             raise FileOpenSecurityError(f"文件不存在: {filepath}")
 
         normalized = os.path.normpath(filepath)
-        notebooks = os.path.normpath(self._notebooks_path)
 
-        if not normalized.startswith(notebooks):
+        if not _is_inside_root(normalized, self._notebooks_path):
             raise FileOpenSecurityError(
                 "插件只能打开 notebooks 目录内的文件"
             )
@@ -207,8 +212,7 @@ class FileOpenService:
             return self._validator.validate_path(filepath)
         except PathSecurityError:
             normalized = os.path.normpath(filepath)
-            notebooks = os.path.normpath(self._notebooks_path)
-            if normalized.startswith(notebooks):
+            if _is_inside_root(normalized, self._notebooks_path):
                 return normalized
             raise FileOpenSecurityError(
                 f"会话恢复路径不在允许范围内: {filepath}"

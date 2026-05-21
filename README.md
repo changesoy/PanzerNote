@@ -76,10 +76,11 @@ portraits/
 
 - **插件生命周期**：完整的 load → activate → deactivate → unload 四阶段管理
 - **线程包装**：插件运行在独立线程中，最大执行超时30秒，异常不影响主进程（非进程隔离）
-- **权限控制**：12种权限分类，每个API调用前检查权限（read_settings/read_savegame/read_workspace/read_file_tree/access_editor/access_ui/access_network/access_filesystem/open_file/show_message/register_command/get_config）。**v1.6.6 安全加固**：MVP_READ_ONLY 改为实例属性防止插件篡改；register_command 使用原子操作防止竞态条件
+- **权限控制**：12种权限分类，每个API调用前检查权限（read_settings/read_savegame/read_workspace/read_file_tree/access_editor/access_ui/access_network/access_filesystem/open_file/show_message/register_command/get_config）。**v1.6.6 安全加固**：MVP_READ_ONLY 改为实例属性防止插件篡改；register_command 使用原子操作防止竞态条件；get_config 返回只读视图，插件无法修改全局配置
 - **PluginAPI**：提供open_file、show_message、register_command、get_config等接口
 - **热加载**：支持不重启主程序的情况下更新插件
-- **示例插件**：hello_panzer（基础功能）、word_counter（UI扩展）
+- **示例插件**：hello_panzer（生命周期 + 只读资源 API 示例）、word_counter（字数统计能力示例，展示编辑器交互权限）
+- **⚠️ 可信插件模型**：当前插件系统是可信插件模型。插件代码运行在主程序进程中，权限系统只限制 PanzerNote 暴露的 API，不是完整安全沙箱。请只安装可信来源的插件。
 
 ### 主题系统
 

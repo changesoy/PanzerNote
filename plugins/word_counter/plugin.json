@@ -1,7 +1,7 @@
 {
   "name": "word_counter",
   "version": "1.0.0",
-  "description": "UI扩展示例插件 - 在状态栏显示文档字数统计，展示UI扩展和编辑器交互",
+  "description": "字数统计能力示例插件 - 展示编辑器交互权限，提供文档字数统计功能接口",
   "author": "PanzerNote Team",
   "entry": "main.py",
   "min_app_version": "1.6.4",

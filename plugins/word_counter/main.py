@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-Word Counter - UI扩展示例插件
+Word Counter - 字数统计能力示例插件
 
-展示 UI 扩展和编辑器交互能力。
-在激活时提供字数统计功能接口。
+展示编辑器交互权限，提供文档字数统计功能接口。
 """
 
 from src.plugins.plugin_base import PluginBase, PluginMeta, PluginPermission
@@ -16,7 +15,7 @@ class Plugin(PluginBase):
         return PluginMeta(
             name="word_counter",
             version="1.0.0",
-            description="UI扩展示例插件 - 文档字数统计",
+            description="字数统计能力示例插件",
             author="PanzerNote Team",
             min_app_version=_app_version,
             permissions=[

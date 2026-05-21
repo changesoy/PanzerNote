@@ -40,6 +40,7 @@ class PluginManager:
         )
         self._plugins: Dict[str, PluginBase] = {}
         self._manifests: Dict[str, Dict] = {}
+        self._disabled_plugins: set = set()
         self._sandbox = PluginSandbox(config, timeout=30)
         self._logger = get_logger(__name__)
 
@@ -94,14 +95,28 @@ class PluginManager:
             self._sandbox.safe_load(plugin, api)
 
             self._plugins[plugin_id] = plugin
+            self._disabled_plugins.discard(plugin_id)
             self._logger.info("插件已加载: %s", plugin_id)
             return plugin
 
+        except SandboxTimeoutError as e:
+            self._disabled_plugins.add(plugin_id)
+            self._logger.warning(
+                "插件 %s 加载超时，已禁用后续调用，建议重启应用: %s",
+                plugin_id, e,
+            )
+            raise PluginLoadError(
+                f"加载插件 {plugin_id} 超时，已禁用该插件后续调用。建议重启应用以清理残留线程。"
+            ) from e
         except Exception as e:
             raise PluginLoadError(f"加载插件 {plugin_id} 失败: {e}") from e
 
     def activate_plugin(self, plugin_id: str) -> None:
         plugin = self._get_plugin(plugin_id)
+        if plugin_id in self._disabled_plugins:
+            raise PluginLoadError(
+                f"插件 {plugin_id} 因超时已被禁用，请重启应用后再试"
+            )
         if plugin.state == PluginState.ACTIVATED:
             self._logger.info("插件已激活: %s", plugin_id)
             return
@@ -112,7 +127,17 @@ class PluginManager:
         try:
             self._sandbox.safe_activate(plugin)
             self._logger.info("插件已激活: %s", plugin_id)
-        except (SandboxTimeoutError, Exception) as e:
+        except SandboxTimeoutError as e:
+            plugin.state = PluginState.ERROR
+            self._disabled_plugins.add(plugin_id)
+            self._logger.warning(
+                "插件 %s 激活超时，已禁用后续调用，建议重启应用: %s",
+                plugin_id, e,
+            )
+            raise PluginLoadError(
+                f"激活插件 {plugin_id} 超时，已禁用该插件后续调用。建议重启应用以清理残留线程。"
+            ) from e
+        except Exception as e:
             plugin.state = PluginState.ERROR
             raise PluginLoadError(f"激活插件 {plugin_id} 失败: {e}") from e
 
@@ -123,7 +148,14 @@ class PluginManager:
         try:
             self._sandbox.safe_deactivate(plugin)
             self._logger.info("插件已停用: %s", plugin_id)
-        except (SandboxTimeoutError, Exception) as e:
+        except SandboxTimeoutError as e:
+            plugin.state = PluginState.ERROR
+            self._disabled_plugins.add(plugin_id)
+            self._logger.warning(
+                "插件 %s 停用超时，已禁用后续调用，建议重启应用: %s",
+                plugin_id, e,
+            )
+        except Exception as e:
             plugin.state = PluginState.ERROR
             self._logger.warning("停用插件 %s 失败: %s", plugin_id, e)
 

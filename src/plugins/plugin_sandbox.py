@@ -22,6 +22,7 @@ import threading
 from typing import Any, Callable, Dict, List, Optional
 
 from ..utils.logger import get_logger
+from .plugin_api_views import ReadOnlyConfigView
 from .plugin_base import PluginBase, PluginPermission, PluginState
 
 
@@ -154,19 +155,19 @@ class PluginAPI:
             raise ValueError(f"命令已注册: {command_id}")
         self._register_command_callback(command_id, handler)
 
-    def get_config(self) -> Any:
-        """获取运行时配置对象（只读访问）
+    def get_config(self) -> ReadOnlyConfigView:
+        """获取只读配置视图
 
-        插件应仅通过此对象读取配置，不应修改。
+        插件通过此视图仅能读取配置，不能修改。
 
         Returns:
-            Config 实例
+            ReadOnlyConfigView 实例
 
         Raises:
             SandboxViolationError: 缺少 GET_CONFIG 权限
         """
         self._check_permission(PluginPermission.GET_CONFIG)
-        return self._config
+        return ReadOnlyConfigView(self._config)
 
     def get_registered_commands(self) -> Dict[str, Callable]:
         """获取本插件注册的所有命令"""
@@ -226,7 +227,10 @@ class PluginSandbox:
 
         if thread.is_alive():
             raise SandboxTimeoutError(
-                f"插件执行超时 ({actual_timeout}秒)"
+                f"插件调用已超时 ({actual_timeout}秒)。"
+                f"当前版本无法强制终止同进程插件线程，"
+                f"已阻止后续插件调用并标记为异常。"
+                f"建议重启应用以清理可能残留的插件线程。"
             )
 
         if error[0] is not None:

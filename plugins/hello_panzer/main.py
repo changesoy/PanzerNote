@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-Hello Panzer - 基础功能示例插件
+Hello Panzer - 生命周期 + 只读资源 API 示例插件
 
-展示插件生命周期管理和只读 API 使用。
+展示插件生命周期管理和只读配置/资源 API 使用。
 """
 
 from src.plugins.plugin_base import PluginBase, PluginMeta, PluginPermission
@@ -15,7 +15,7 @@ class Plugin(PluginBase):
         return PluginMeta(
             name="hello_panzer",
             version="1.0.0",
-            description="基础功能示例插件 - 在日志中输出问候信息",
+            description="生命周期 + 只读资源 API 示例插件",
             author="PanzerNote Team",
             min_app_version=_app_version,
             permissions=[PluginPermission.READ_SETTINGS, PluginPermission.READ_SAVEGAME],

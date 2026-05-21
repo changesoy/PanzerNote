@@ -111,17 +111,18 @@ class ExportService:
 
         web_view = QWebEngineView(parent_widget)
 
-        from PyQt6.QtCore import QTimer
-
         def _on_load_finished(ok):
             if not ok:
                 on_pdf_generated(b"")
-                QTimer.singleShot(0, web_view.deleteLater)
+                web_view.deleteLater()
                 return
             web_view.page().printToPdf(
-                lambda pdf_data: on_pdf_generated(pdf_data)
+                lambda pdf_data: _on_pdf_ready(pdf_data)
             )
-            QTimer.singleShot(3000, web_view.deleteLater)
+
+        def _on_pdf_ready(pdf_data):
+            on_pdf_generated(pdf_data)
+            web_view.deleteLater()
 
         web_view.loadFinished.connect(_on_load_finished)
         web_view.setHtml(full_html)

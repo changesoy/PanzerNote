@@ -16,6 +16,7 @@
         xxx.autosave
 """
 
+import hashlib
 import json
 import os
 import shutil
@@ -110,9 +111,13 @@ class TempSessionManager:
             tab_id = info.get("tab_id", 0)
 
             if filepath:
-                autosave_name = os.path.basename(filepath) + ".autosave"
+                path_hash = hashlib.sha256(filepath.encode('utf-8')).hexdigest()[:12]
+                basename = os.path.basename(filepath)
+                autosave_name = f"{tab_id}_{path_hash}_{basename}.autosave"
+                display_name = basename
             else:
-                autosave_name = f"untitled_{tab_id}.txt.autosave"
+                autosave_name = f"untitled_{tab_id}.autosave"
+                display_name = f"未命名_{tab_id}"
 
             autosave_path = os.path.join(files_dir, autosave_name)
 
@@ -124,8 +129,10 @@ class TempSessionManager:
                 continue
 
             file_entry = {
+                "tab_id": tab_id,
                 "original_path": filepath or "",
                 "autosave_path": autosave_name,
+                "display_name": display_name,
                 "encoding": encoding,
                 "dirty": True,
                 "is_new": is_new
@@ -137,16 +144,16 @@ class TempSessionManager:
                 new_files.append(file_entry)
 
         merged = []
-        seen_paths = set()
+        seen_tab_ids = set()
         for f in manifest.get("files", []):
-            key = f.get("original_path", "")
-            if key:
-                seen_paths.add(key)
-                merged.append(f)
+            tid = f.get("tab_id")
+            if tid is not None:
+                seen_tab_ids.add(tid)
+            merged.append(f)
 
         for f in new_files:
-            key = f.get("original_path", "")
-            if key not in seen_paths or not key:
+            tid = f.get("tab_id")
+            if tid is None or tid not in seen_tab_ids:
                 merged.append(f)
 
         manifest["files"] = merged

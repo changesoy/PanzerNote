@@ -768,9 +768,12 @@ class MainWindow(QMainWindow):
 
     def _on_pdf_generated(self, pdf_data, filepath):
         if pdf_data:
-            with open(filepath, 'wb') as f:
-                f.write(pdf_data)
-            self.secretary.show_message(f"已导出PDF: {os.path.basename(filepath)}")
+            try:
+                with open(filepath, 'wb') as f:
+                    f.write(pdf_data)
+                self.secretary.show_message(f"已导出PDF: {os.path.basename(filepath)}")
+            except Exception as e:
+                ErrorHandler.show_from_exception(e, ErrorCategory.FILE, f"写入PDF文件失败：{os.path.basename(filepath)}")
         else:
             QMessageBox.warning(self, "导出失败", "PDF生成失败")
 

@@ -214,6 +214,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self._save_manager.save_failed.connect(self._on_save_failed)
 
         self._pending_close_tab_ids: Set[int] = set()
+        self._pending_save_info: Dict[int, Dict] = {}
+        self._pending_save_as_info: Dict[int, Dict] = {}
 
         self._session_manager = TempSessionManager(config.get_temp_path())
 
@@ -469,19 +471,13 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         success, chars = self._save_file(widget, filepath, encoding)
 
         if success:
-            if info.get("is_new") and info.get("untitled_number"):
-                self._used_untitled_numbers.discard(info["untitled_number"])
-            info["is_new"] = False
-            info["filepath"] = filepath
-            info["encoding"] = encoding
-
-            # 更新文件类型
-            editor = self._get_editor_from_widget(widget)
-            if editor:
-                editor.set_file_type(filepath)
-
-            index = self.indexOf(widget)
-            self.setTabText(index, os.path.basename(filepath))
+            tab_id = getattr(widget, 'tab_id', None)
+            if tab_id is not None:
+                self._pending_save_as_info[tab_id] = {
+                    "filepath": filepath,
+                    "encoding": encoding,
+                    "untitled_number": info.get("untitled_number") if info.get("is_new") else None,
+                }
 
         return success, chars
 
@@ -490,8 +486,11 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
         通过 SaveTaskManager 管理保存状态：
         - 提交任务后标记 SAVING，不提前标记 CLEAN
-        - 保存成功后由 Manager 回调标记 CLEAN
+        - 保存成功后由 Manager 回调标记 CLEAN，此时才更新副作用
         - 保存失败后由 Manager 回调标记 SAVE_FAILED
+
+        副作用（last_saved_content、last_saved_chars、last_text_length、
+        字符收益结算）仅在保存成功回调中执行。
         """
         if isinstance(widget, MarkdownPreviewWidget):
             content = widget.editor.toPlainText()
@@ -512,9 +511,11 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         new_chars = max(0, len(content) - last_chars)
 
         info["encoding"] = encoding
-        info["last_saved_content"] = content
-        info["last_saved_chars"] = len(content)
-        info["last_text_length"] = len(content)
+
+        self._pending_save_info[tab_id] = {
+            "content": content,
+            "new_chars": new_chars,
+        }
 
         from PyQt6.QtCore import QThreadPool
         from .save_task import SaveTask
@@ -926,6 +927,30 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             if editor:
                 editor.document().setModified(False)
             self.setTabText(index, base_title)
+
+            pending = self._pending_save_info.pop(tab_id, None)
+            if pending:
+                content = pending["content"]
+                new_chars = pending["new_chars"]
+                info["last_saved_content"] = content
+                info["last_saved_chars"] = len(content)
+                info["last_text_length"] = len(content)
+                if new_chars > 0:
+                    self.chars_typed.emit(new_chars)
+
+            save_as_info = self._pending_save_as_info.pop(tab_id, None)
+            if save_as_info:
+                filepath_new = save_as_info["filepath"]
+                encoding_new = save_as_info["encoding"]
+                info["is_new"] = False
+                info["filepath"] = filepath_new
+                info["encoding"] = encoding_new
+                if save_as_info.get("untitled_number"):
+                    self._used_untitled_numbers.discard(save_as_info["untitled_number"])
+                if editor:
+                    editor.set_file_type(filepath_new)
+                self.setTabText(index, os.path.basename(filepath_new))
+
             filepath = info.get("filepath")
             if filepath:
                 self._session_manager.remove_autosave_for_file(filepath)
@@ -940,6 +965,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             if editor:
                 editor.document().setModified(True)
             self.setTabText(index, base_title + " !")
+            self._pending_save_info.pop(tab_id, None)
+            self._pending_save_as_info.pop(tab_id, None)
             if tab_id in self._pending_close_tab_ids:
                 self._pending_close_tab_ids.discard(tab_id)
         elif state == SaveState.DIRTY:

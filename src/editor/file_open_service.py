@@ -43,7 +43,19 @@ _TEXT_EXTENSIONS: Set[str] = {
     '.cs', '.vb', '.f90', '.f95', '.log', '.csv', '.rst',
     '.tex', '.bib', '.makefile', '.cmake', '.dockerfile',
     '.gitignore', '.gitattributes', '.editorconfig',
-    '.env', '.envrc',
+    '.env', '.envrc', '.markdown',
+}
+
+_DANGEROUS_EXTENSIONS: Set[str] = {
+    '.exe', '.dll', '.so', '.dylib', '.sys', '.drv',
+    '.bin', '.dat', '.db', '.sqlite', '.mdb',
+    '.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.xz',
+    '.iso', '.dmg', '.img',
+    '.class', '.pyc', '.pyd', '.o', '.obj', '.a', '.lib',
+    '.woff', '.woff2', '.ttf', '.otf', '.eot',
+    '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.svg', '.webp',
+    '.mp3', '.mp4', '.avi', '.mkv', '.mov', '.wav', '.flac',
+    '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
 }
 
 _MAX_PLUGIN_FILE_SIZE = 10 * 1024 * 1024
@@ -51,22 +63,23 @@ _MAX_SETTINGS_IMPORT_SIZE = 5 * 1024 * 1024
 _MAX_USER_FILE_SIZE = 100 * 1024 * 1024
 
 
-def _is_safe_extension(filepath: str) -> bool:
+def _is_dangerous_extension(filepath: str) -> bool:
     ext = os.path.splitext(filepath)[1].lower()
-    if not ext:
-        return True
+    return ext in _DANGEROUS_EXTENSIONS
+
+
+def _is_known_text_extension(filepath: str) -> bool:
+    ext = os.path.splitext(filepath)[1].lower()
     return ext in _TEXT_EXTENSIONS
 
 
 def _is_binary_file(filepath: str) -> bool:
     try:
         with open(filepath, 'rb') as f:
-            chunk = f.read(1024)
-        null_count = chunk.count(b'\x00')
-        if null_count > 0:
+            chunk = f.read(8192)
+        if b'\x00' in chunk:
             return True
-        text_chars = sum(1 for b in chunk if 32 <= b <= 126 or b in (9, 10, 13))
-        return (len(chunk) - text_chars) / max(len(chunk), 1) > 0.30
+        return False
     except Exception:
         return True
 
@@ -131,13 +144,14 @@ class FileOpenService:
         if not os.path.isfile(filepath):
             raise FileOpenSecurityError(f"文件不存在: {filepath}")
 
-        if not _is_safe_extension(filepath):
+        if _is_dangerous_extension(filepath):
             raise FileOpenSecurityError(
                 f"不支持的文件类型: {os.path.splitext(filepath)[1]}"
             )
 
-        if _is_binary_file(filepath):
-            raise FileOpenSecurityError("不支持二进制文件")
+        if not _is_known_text_extension(filepath):
+            if _is_binary_file(filepath):
+                raise FileOpenSecurityError("不支持二进制文件")
 
         size = os.path.getsize(filepath)
         if size > _MAX_USER_FILE_SIZE:
@@ -168,7 +182,7 @@ class FileOpenService:
                 "插件只能打开 notebooks 目录内的文件"
             )
 
-        if not _is_safe_extension(filepath):
+        if _is_dangerous_extension(filepath):
             raise FileOpenSecurityError(
                 f"不支持的文件类型: {os.path.splitext(filepath)[1]}"
             )
@@ -179,8 +193,9 @@ class FileOpenService:
                 f"文件过大 ({size} > {_MAX_PLUGIN_FILE_SIZE} 字节)"
             )
 
-        if _is_binary_file(filepath):
-            raise FileOpenSecurityError("不支持二进制文件")
+        if not _is_known_text_extension(filepath):
+            if _is_binary_file(filepath):
+                raise FileOpenSecurityError("不支持二进制文件")
 
         return normalized
 

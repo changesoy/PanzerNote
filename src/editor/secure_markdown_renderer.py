@@ -40,8 +40,16 @@ _DANGEROUS_ATTR_RE = re.compile(
     r'\s(on\w+|formaction|action|data\s*[:=])\s*=\s*["\'][^"\']*["\']',
     re.IGNORECASE,
 )
+_DANGEROUS_ATTR_UNQUOTED_RE = re.compile(
+    r'\s(on\w+|formaction|action|data)\s*=\s*[^\s>\"\'/]+',
+    re.IGNORECASE,
+)
 _JAVASCRIPT_URL_RE = re.compile(
     r'(href|src|action)\s*=\s*["\']\s*javascript\s*:',
+    re.IGNORECASE,
+)
+_JAVASCRIPT_URL_UNQUOTED_RE = re.compile(
+    r'(href|src|action)\s*=\s*javascript\s*:',
     re.IGNORECASE,
 )
 
@@ -51,12 +59,14 @@ def strip_dangerous_html(html_text: str) -> str:
 
     统一禁止：
       - script, iframe, object, embed, form, input, textarea, button, link, meta, base
-      - on* 事件属性
-      - javascript: URL
+      - on* 事件属性（带引号和不带引号）
+      - javascript: URL（带引号和不带引号）
     """
     html_text = _DANGEROUS_TAG_RE.sub('&lt;\\1', html_text)
     html_text = _DANGEROUS_ATTR_RE.sub('', html_text)
+    html_text = _DANGEROUS_ATTR_UNQUOTED_RE.sub('', html_text)
     html_text = _JAVASCRIPT_URL_RE.sub('\\1="about:blank"', html_text)
+    html_text = _JAVASCRIPT_URL_UNQUOTED_RE.sub('\\1="about:blank"', html_text)
     return html_text
 
 

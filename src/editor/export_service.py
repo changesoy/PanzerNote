@@ -9,7 +9,7 @@
   HTML：同步完成
   PDF：QWebEngineView.loadFinished → printToPdf 回调
 失败通知：异常抛出 / 回调参数为空
-关闭时行为：QWebEngineView 通过 QTimer.singleShot 延迟 deleteLater 自动清理
+关闭时行为：QWebEngineView 通过 printToPdf 回调完成后 deleteLater 自动清理
 """
 
 import os

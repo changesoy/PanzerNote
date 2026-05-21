@@ -25,7 +25,7 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit, QWidget, QTextEdit, QVBoxLayout,
     QMenu, QMessageBox
 )
-from PyQt6.QtCore import Qt, QRect, QSize
+from PyQt6.QtCore import Qt, QRect, QSize, QTimer, pyqtSignal
 from PyQt6.QtGui import (
     QFont, QColor, QPainter, QTextFormat, QTextCharFormat,
     QSyntaxHighlighter, QTextDocument, QTextCursor, QKeyEvent, QAction
@@ -55,6 +55,8 @@ class LineNumberArea(QWidget):
 
 class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTextEdit):
     """文本编辑器"""
+
+    word_count_recomputed = pyqtSignal()
 
     # 需要自动增加缩进的行尾字符（按语言）
     INDENT_TRIGGERS = {
@@ -117,6 +119,13 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self._init_minimap()
         self._lazy_highlight = LazyHighlightManager(self)
         self._bookmarks: Set[int] = set()
+
+        self._cached_word_count: int = 0
+        self._word_count_dirty: bool = True
+        self._word_count_timer = QTimer(self)
+        self._word_count_timer.setSingleShot(True)
+        self._word_count_timer.setInterval(800)
+        self._word_count_timer.timeout.connect(self._recompute_word_count)
 
     @property
     def is_programmatic_modify(self) -> bool:
@@ -705,12 +714,34 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
     def get_char_count(self) -> int:
         return len(self.toPlainText())
 
+    def get_fast_char_count(self) -> int:
+        return max(0, self.document().characterCount() - 1)
+
     def get_word_count(self) -> int:
         import re
         text = self.toPlainText()
         if not text.strip():
             return 0
         return len(re.findall(r'\b\w+\b', text))
+
+    def get_debounced_word_count(self) -> int:
+        if self._word_count_dirty:
+            self._word_count_timer.start(800)
+        return self._cached_word_count
+
+    def invalidate_word_count(self):
+        self._word_count_dirty = True
+        self._word_count_timer.start(800)
+
+    def _recompute_word_count(self):
+        import re
+        text = self.toPlainText()
+        if not text.strip():
+            self._cached_word_count = 0
+        else:
+            self._cached_word_count = len(re.findall(r'\b\w+\b', text))
+        self._word_count_dirty = False
+        self.word_count_recomputed.emit()
 
     def get_current_line(self) -> int:
         return self.textCursor().blockNumber() + 1

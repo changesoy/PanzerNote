@@ -23,7 +23,7 @@ _FLAGS: Dict[str, bool] = {
     "async_highlight": False,
     "markdown_incremental": False,
     "lazy_loading": False,
-    "signal_driven_stats": False,
+    "signal_driven_stats": True,
 }
 
 _FLAG_ALIASES: Dict[str, str] = {

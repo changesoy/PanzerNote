@@ -199,6 +199,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     tab_count_changed = pyqtSignal(int)
     chars_typed = pyqtSignal(int)
     cursor_position_changed = pyqtSignal()
+    word_count_updated = pyqtSignal()
 
     def __init__(self, config: Config, theme_engine=None, parent=None):
         super().__init__(parent)
@@ -856,11 +857,15 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
     def _connect_editor_signals(self, editor):
         editor.textChanged.connect(self._on_text_changed)
+        editor.cursorPositionChanged.connect(self._on_cursor_position_changed)
         if is_enabled("signal_driven_stats"):
-            editor.cursorPositionChanged.connect(self._on_cursor_position_changed)
+            editor.word_count_recomputed.connect(self._on_word_count_recomputed)
 
     def _on_cursor_position_changed(self):
         self.cursor_position_changed.emit()
+
+    def _on_word_count_recomputed(self):
+        self.word_count_updated.emit()
 
     _PASTE_THRESHOLD = 50
 
@@ -906,6 +911,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                         if stripped != title:
                             self.setTabText(i, stripped)
                         break
+
+        if is_enabled("signal_driven_stats"):
+            editor.invalidate_word_count()
 
         self.content_modified.emit()
 

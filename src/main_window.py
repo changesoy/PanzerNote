@@ -43,6 +43,7 @@ from .themes.theme_engine import ThemeEngine
 from .themes.theme_preview import ThemePreviewDialog
 from .utils.logger import get_logger
 from .utils.error_handler import ErrorHandler, ErrorCategory
+from .utils.feature_flags import is_enabled
 from .utils.dpi_helper import scale, scale_size
 
 
@@ -159,6 +160,7 @@ class MainWindow(QMainWindow):
         self.editor_tabs.tab_count_changed.connect(self._on_tab_count_changed)
         self.editor_tabs.chars_typed.connect(self._on_chars_typed)
         self.editor_tabs.cursor_position_changed.connect(self._update_stats)
+        self.editor_tabs.word_count_updated.connect(self._update_stats)
         self.editor_splitter.addWidget(self.editor_tabs)
 
         self._split_tabs: List[EditorTabWidget] = []
@@ -1030,6 +1032,7 @@ class MainWindow(QMainWindow):
         split_tabs.tab_count_changed.connect(self._on_tab_count_changed)
         split_tabs.chars_typed.connect(self._on_chars_typed)
         split_tabs.cursor_position_changed.connect(self._update_stats)
+        split_tabs.word_count_updated.connect(self._update_stats)
         self.editor_splitter.addWidget(split_tabs)
         self._split_tabs.append(split_tabs)
         split_tabs.new_file()
@@ -1329,8 +1332,12 @@ class MainWindow(QMainWindow):
     def _update_stats(self):
         editor = self.editor_tabs.current_editor()
         if editor:
-            char_count = editor.get_char_count()
-            word_count = editor.get_word_count()
+            if is_enabled("signal_driven_stats"):
+                char_count = editor.get_fast_char_count()
+                word_count = editor.get_debounced_word_count()
+            else:
+                char_count = editor.get_char_count()
+                word_count = editor.get_word_count()
             line = editor.get_current_line()
             col = editor.get_current_column()
             file_type = editor.get_file_type()

@@ -13,11 +13,12 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import (
-    QColor, QTextCharFormat, QTextCursor, QKeySequence, QTextDocument
+    QColor, QTextCursor
 )
 
 from ..themes.theme_aware_mixin import ThemeAwareMixin
 from ..utils.logger import get_logger
+from .search_service import SearchService
 
 
 
@@ -204,28 +205,25 @@ class FindReplaceBar(ThemeAwareMixin, QWidget):
         start, end = self._matches[self._current_idx]
         replacement = self.replace_input.text()
 
-        # 如果使用正则表达式，支持反向引用（\1, \2 等）
+        cursor = self._editor.textCursor()
+        cursor.setPosition(start)
+        cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+
         if self.regex_cb.isChecked():
             pattern = self._build_pattern()
             if pattern is None:
                 return
-            text = self._editor.toPlainText()
-            original = text[start:end]
+            original = cursor.selectedText().replace("\u2029", "\n")
             try:
                 replacement = pattern.sub(replacement, original, count=1)
             except re.error:
-                get_logger(__name__).debug("正则替换失败: %s", pattern)
+                get_logger(__name__).debug("正则替换失败")
 
-        cursor = self._editor.textCursor()
-        cursor.setPosition(start)
-        cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
         with self._editor.programmatic_modify():
             cursor.insertText(replacement)
         self._editor.setTextCursor(cursor)
 
-        # 替换后重新搜索
         self._update_matches()
-        # 调整索引，使下次 find_next 指向替换点之后
         if self._matches:
             new_pos = start + len(replacement)
             self._current_idx = -1
@@ -242,31 +240,18 @@ class FindReplaceBar(ThemeAwareMixin, QWidget):
         if not self._editor or not self._matches:
             return
 
-        replacement = self.replace_input.text()
-        pattern = self._build_pattern()
-        if pattern is None and self.regex_cb.isChecked():
+        query = self.search_input.text()
+        if not query:
             return
 
-        text = self._editor.toPlainText()
-        cursor = self._editor.textCursor()
-        cursor.beginEditBlock()
-
-        with self._editor.programmatic_modify():
-            if self.regex_cb.isChecked() and pattern:
-                new_text = pattern.sub(replacement, text)
-            else:
-                for start, end in reversed(self._matches):
-                    cursor.setPosition(start)
-                    cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
-                    cursor.insertText(replacement)
-                cursor.endEditBlock()
-                self._update_matches()
-                self._update_match_label()
-                return
-
-            cursor.select(QTextCursor.SelectionType.Document)
-            cursor.insertText(new_text)
-        cursor.endEditBlock()
+        replacement = self.replace_input.text()
+        service = SearchService(self._editor)
+        service.replace_all(
+            query, replacement,
+            case_sensitive=self.case_cb.isChecked(),
+            whole_word=self.word_cb.isChecked(),
+            use_regex=self.regex_cb.isChecked(),
+        )
 
         self._update_matches()
         self._update_match_label()
@@ -331,15 +316,18 @@ class FindReplaceBar(ThemeAwareMixin, QWidget):
         if not self._editor:
             return
 
-        pattern = self._build_pattern()
-        if pattern is None:
+        query = self.search_input.text()
+        if not query or len(query) > 500:
             self._update_match_label()
             return
 
-        text = self._editor.toPlainText()
-        for m in pattern.finditer(text):
-            if m.start() != m.end():  # 忽略空匹配
-                self._matches.append((m.start(), m.end()))
+        service = SearchService(self._editor)
+        self._matches = service.find_all(
+            query,
+            case_sensitive=self.case_cb.isChecked(),
+            whole_word=self.word_cb.isChecked(),
+            use_regex=self.regex_cb.isChecked(),
+        )
 
         self._update_match_label()
         self._apply_highlights()
@@ -406,8 +394,6 @@ class FindReplaceBar(ThemeAwareMixin, QWidget):
 
         selections = []
         for i, (start, end) in enumerate(self._matches):
-            sel = self._editor.__class__.__bases__[0]  # QPlainTextEdit
-            # 使用 QTextEdit.ExtraSelection
             from PyQt6.QtWidgets import QTextEdit
             extra = QTextEdit.ExtraSelection()
 
@@ -423,30 +409,15 @@ class FindReplaceBar(ThemeAwareMixin, QWidget):
             extra.cursor = cursor
             selections.append(extra)
 
-        # 合并编辑器原有的当前行高亮
-        current_line_sels = self._get_current_line_selection()
-        self._editor.setExtraSelections(current_line_sels + selections)
+        self._editor.selection_manager.set_layer("search_matches", selections)
+        self._editor.selection_manager.refresh()
 
     def _clear_highlights(self):
         """清除搜索高亮，保留当前行高亮"""
         if not self._editor:
             return
-        current_line_sels = self._get_current_line_selection()
-        self._editor.setExtraSelections(current_line_sels)
-
-    def _get_current_line_selection(self):
-        """获取当前行高亮的 ExtraSelection"""
-        if not self._editor or self._editor.isReadOnly():
-            return []
-        from PyQt6.QtWidgets import QTextEdit
-        from PyQt6.QtGui import QTextFormat
-        sel = QTextEdit.ExtraSelection()
-        current_line_color = self._theme_engine.get_active_theme().colors.editor_current_line if hasattr(self, '_theme_engine') and self._theme_engine else "#FFFDE7"
-        sel.format.setBackground(QColor(current_line_color))
-        sel.format.setProperty(QTextFormat.Property.FullWidthSelection, True)
-        sel.cursor = self._editor.textCursor()
-        sel.cursor.clearSelection()
-        return [sel]
+        self._editor.selection_manager.clear_layer("search_matches")
+        self._editor.selection_manager.refresh()
 
     def _navigate_to_current(self):
         """将编辑器光标移动到当前匹配"""

@@ -26,9 +26,7 @@ _FLAGS: Dict[str, bool] = {
     "signal_driven_stats": True,
 }
 
-_FLAG_ALIASES: Dict[str, str] = {
-    "lazy_highlight": "virtual_scroll",
-}
+_FLAG_ALIASES: Dict[str, str] = {}
 
 _config_path: str = ""
 

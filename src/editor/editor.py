@@ -36,6 +36,7 @@ from .syntax_highlighter import get_highlighter_for_file
 from .editor_actions import EditorActionsMixin
 from .auto_pair_handler import AutoPairHandlerMixin
 from .virtual_scroll import LazyHighlightManager
+from .extra_selection_manager import ExtraSelectionManager
 from ..themes.theme_aware_mixin import ThemeAwareMixin
 
 
@@ -119,6 +120,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self._init_minimap()
         self._lazy_highlight = LazyHighlightManager(self)
         self._bookmarks: Set[int] = set()
+        self._selection_manager = ExtraSelectionManager(self)
 
         self._cached_word_count: int = 0
         self._word_count_dirty: bool = True
@@ -381,9 +383,9 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
 
     def _highlight_current_line(self):
         """高亮当前行"""
-        extra_selections = []
-
-        if not self.isReadOnly():
+        if self.isReadOnly():
+            self._selection_manager.clear_layer("current_line")
+        else:
             selection = QTextEdit.ExtraSelection()
             line_color_name = self._theme_engine.get_active_theme().colors.editor_current_line if self._theme_engine else "#FFFDE7"
             line_color = QColor(line_color_name)
@@ -391,9 +393,8 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             selection.format.setProperty(QTextFormat.Property.FullWidthSelection, True)
             selection.cursor = self.textCursor()
             selection.cursor.clearSelection()
-            extra_selections.append(selection)
-
-        self.setExtraSelections(extra_selections)
+            self._selection_manager.set_layer("current_line", [selection])
+        self._selection_manager.refresh()
 
     # ═══════════════════ 缩略图（Minimap） ═══════════════════
 
@@ -691,14 +692,14 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         try:
             self.cursorPositionChanged.disconnect(self._highlight_current_line)
         except TypeError:
-            pass  # 尚未连接，忽略
+            pass
 
         if enabled:
             self.cursorPositionChanged.connect(self._highlight_current_line)
             self._highlight_current_line()
         else:
-            # 清除已有的高亮
-            self.setExtraSelections([])
+            self._selection_manager.clear_layer("current_line")
+            self._selection_manager.refresh()
 
     def set_editor_font(self, family: str, size: int):
         """动态设置编辑器字体和大小"""
@@ -751,6 +752,10 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
 
     def get_file_type(self) -> str:
         return self._file_type
+
+    @property
+    def selection_manager(self) -> ExtraSelectionManager:
+        return self._selection_manager
 
     def load_content(self, content: str):
         """加载文本内容，大文件自动启用延迟高亮"""

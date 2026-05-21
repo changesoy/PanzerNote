@@ -743,46 +743,28 @@ class MainWindow(QMainWindow):
             self._on_file_saved(total_chars)
 
     def _export_pdf(self):
-        from .editor.markdown_preview import HAS_WEBENGINE
-        if not HAS_WEBENGINE:
-            QMessageBox.warning(self, "导出失败", "导出PDF需要QtWebEngine组件")
-            return
-        editor = self.editor_tabs.current_editor()
-        if not editor:
-            return
-        filepath, _ = QFileDialog.getSaveFileName(
-            self, "导出PDF", "", "PDF文件 (*.pdf)"
-        )
-        if not filepath:
-            return
-        from PyQt6.QtWebEngineWidgets import QWebEngineView
-        from .editor.markdown_preview import MarkdownPreviewWidget
-        widget = self.editor_tabs.currentWidget()
-        content = editor.toPlainText()
-        is_md = isinstance(widget, MarkdownPreviewWidget) or (content and content.strip().startswith('#'))
-        if is_md:
-            try:
-                from markdown_it import MarkdownIt
-                md = MarkdownIt("commonmark", {"html": False})
-                html_content = md.render(content)
-            except ImportError:
-                try:
-                    import markdown
-                    html_content = markdown.markdown(content, extensions=["markdown.extensions.tables"])
-                except ImportError:
-                    html_content = f"<pre>{html_module.escape(content)}</pre>"
-        else:
-            html_content = f"<pre>{html_module.escape(content)}</pre>"
-        full_html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
-        <style>body{{font-family:'Microsoft YaHei',sans-serif;padding:20px;}}
-        pre{{white-space:pre-wrap;}}</style></head><body>{html_content}</body></html>"""
-        web_view = QWebEngineView(self)
-        web_view.setHtml(full_html)
-        from PyQt6.QtCore import QTimer
-        def do_print(ok):
-            web_view.page().printToPdf(lambda pdf_data: self._on_pdf_generated(pdf_data, filepath))
-            QTimer.singleShot(3000, web_view.deleteLater)
-        web_view.loadFinished.connect(do_print)
+        from .editor.export_service import ExportService
+        try:
+            editor = self.editor_tabs.current_editor()
+            if not editor:
+                return
+            filepath, _ = QFileDialog.getSaveFileName(
+                self, "导出PDF", "", "PDF文件 (*.pdf)"
+            )
+            if not filepath:
+                return
+
+            content = editor.toPlainText()
+            widget = self.editor_tabs.currentWidget()
+            widget_type = type(widget).__name__ if widget else ""
+            is_md = ExportService.is_markdown_content(content, widget_type)
+
+            def on_pdf_ready(pdf_data):
+                self._on_pdf_generated(pdf_data, filepath)
+
+            ExportService.export_pdf(content, is_md, self, on_pdf_ready)
+        except RuntimeError as e:
+            QMessageBox.warning(self, "导出失败", str(e))
 
     def _on_pdf_generated(self, pdf_data, filepath):
         if pdf_data:
@@ -793,6 +775,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "导出失败", "PDF生成失败")
 
     def _export_html(self):
+        from .editor.export_service import ExportService
         editor = self.editor_tabs.current_editor()
         if not editor:
             return
@@ -801,30 +784,14 @@ class MainWindow(QMainWindow):
         )
         if not filepath:
             return
+
         content = editor.toPlainText()
-        from .editor.markdown_preview import MarkdownPreviewWidget
         widget = self.editor_tabs.currentWidget()
-        is_md = isinstance(widget, MarkdownPreviewWidget) or (content and content.strip().startswith('#'))
-        if is_md:
-            try:
-                from markdown_it import MarkdownIt
-                md = MarkdownIt("commonmark", {"html": False})
-                html_content = md.render(content)
-            except ImportError:
-                try:
-                    import markdown
-                    html_content = markdown.markdown(content, extensions=["markdown.extensions.tables"])
-                except ImportError:
-                    html_content = f"<pre>{content}</pre>"
-        else:
-            html_content = f"<pre>{content}</pre>"
-        full_html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
-        <style>body{{font-family:'Microsoft YaHei',sans-serif;padding:20px;max-width:800px;margin:0 auto;}}
-        pre{{white-space:pre-wrap;}}code{{background:#f5f5f5;padding:2px 4px;border-radius:3px;}}
-        pre code{{display:block;padding:10px;overflow-x:auto;}}</style></head><body>{html_content}</body></html>"""
+        widget_type = type(widget).__name__ if widget else ""
+        is_md = ExportService.is_markdown_content(content, widget_type)
+
         try:
-            with open(filepath, 'w', encoding='utf-8') as f:
-                f.write(full_html)
+            ExportService.export_html(content, is_md, filepath)
             self.secretary.show_message(f"已导出HTML: {os.path.basename(filepath)}")
         except Exception as e:
             QMessageBox.warning(self, "导出失败", str(e))

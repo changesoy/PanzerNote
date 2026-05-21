@@ -75,21 +75,7 @@ _MK_S2 = "\u231D"  # ⌝
 _MK_E1 = "\u231E"  # ⌞
 _MK_E2 = "\u231F"  # ⌟
 
-_DANGEROUS_TAG_RE = re.compile(
-    r'<(script|iframe|object|embed|form|input|textarea|button|link|meta|base)'
-    r'[\s>]',
-    re.IGNORECASE,
-)
-_DANGEROUS_ATTR_RE = re.compile(
-    r'\s(on\w+|formaction|action|data\s*[:=])\s*=\s*["\'][^"\']*["\']',
-    re.IGNORECASE,
-)
-
-
-def _strip_dangerous_html(html: str) -> str:
-    html = _DANGEROUS_TAG_RE.sub('&lt;\\1', html)
-    html = _DANGEROUS_ATTR_RE.sub('', html)
-    return html
+from .secure_markdown_renderer import strip_dangerous_html as _strip_dangerous_html
 
 # ════════════════════════════════════════════════════════
 #  HTML 模板
@@ -563,27 +549,13 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
     def _render_markdown(self, text: str) -> str:
         if self._md_parser is not None:
             try:
-                return self._md_parser.render(text)
+                result = self._md_parser.render(text)
+                return _strip_dangerous_html(result)
             except Exception:
                 get_logger(__name__).debug("markdown-it 渲染失败，回退到 python-markdown")
 
-        if HAS_MARKDOWN:
-            extensions = [
-                'tables', 'fenced_code', 'toc',
-                'attr_list', 'def_list', 'sane_lists',
-            ]
-            try:
-                result = md_lib.markdown(text, extensions=extensions)
-            except Exception:
-                try:
-                    result = md_lib.markdown(text)
-                except Exception:
-                    get_logger(__name__).warning("python-markdown 渲染失败")
-                    return html_module.escape(text)
-            result = _strip_dangerous_html(result)
-            return result
-
-        return html_module.escape(text)
+        from .secure_markdown_renderer import render_markdown_to_safe_html
+        return render_markdown_to_safe_html(text)
 
     # ──────────── 本地图片路径解析 ────────────
 

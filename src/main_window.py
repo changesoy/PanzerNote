@@ -24,6 +24,7 @@ from typing import List
 
 from . import __version__
 from .core.config import Config
+from .core.config_import_service import ConfigImportService, ConfigImportError
 from .core.timer_manager import TimerManager
 from .core.event_bus import EventBus
 from .core.menu_builder import MenuBuilder
@@ -1239,8 +1240,8 @@ class MainWindow(QMainWindow):
                 validated, encoding='utf-8',
                 context=self.config.INTERNAL_CONFIG_CTX
             )
-            import_data = json_module.loads(content)
-            if not isinstance(import_data, dict) or "settings" not in import_data:
+            data = json_module.loads(content)
+            if not isinstance(data, dict) or "settings" not in data:
                 QMessageBox.warning(self, "导入失败", "无效的设置文件格式")
                 return
             reply = QMessageBox.question(
@@ -1250,12 +1251,17 @@ class MainWindow(QMainWindow):
             )
             if reply == QMessageBox.StandardButton.No:
                 return
-            self.config._settings.update(import_data["settings"])
-            if "workspace" in import_data:
-                self.config._workspace.update(import_data["workspace"])
-            self.config.save()
+            service = ConfigImportService(self.config)
+            skipped = service.import_from_json(content)
+            if skipped:
+                QMessageBox.warning(
+                    self, "导入完成（部分跳过）",
+                    "以下字段因格式不正确已跳过：\n" + "\n".join(skipped[:10])
+                )
             self._apply_editor_settings()
             self.secretary.show_message("设置已导入，部分设置将在重启后生效")
+        except ConfigImportError as e:
+            QMessageBox.warning(self, "导入失败", str(e))
         except Exception as e:
             QMessageBox.warning(self, "导入失败", str(e))
 

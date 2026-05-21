@@ -19,7 +19,7 @@ from .logger import get_logger
 _FLAGS: Dict[str, bool] = {
     "virtual_scroll": False,
     "lazy_highlight": False,
-    "minimap_block_cache": False,
+    "minimap_block_cache": True,
     "async_highlight": False,
     "markdown_incremental": False,
     "lazy_loading": False,

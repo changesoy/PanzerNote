@@ -407,7 +407,7 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self._base_path = ""
         self._async_renderer = None
         self._pending_async_task = None
-        self._incremental_renderer = None
+        self._render_cache = None
         self._md_parser = self._create_md_parser()
         self._html_template_loaded = False
 
@@ -418,7 +418,7 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
 
         if is_enabled("markdown_incremental"):
             from .incremental_renderer import RenderCache
-            self._incremental_renderer = RenderCache(
+            self._render_cache = RenderCache(
                 self._render_markdown, cache_size=50
             )
 
@@ -502,8 +502,8 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
     def _update_preview(self):
         text = self.editor.toPlainText()
 
-        if self._incremental_renderer and is_enabled("markdown_incremental"):
-            html_content = self._incremental_renderer.render(text)
+        if self._render_cache and is_enabled("markdown_incremental"):
+            html_content = self._render_cache.render(text)
         elif HAS_MARKDOWN_IT or HAS_MARKDOWN:
             html_content = self._render_markdown(text)
         else:

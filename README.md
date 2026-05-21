@@ -98,9 +98,23 @@ portraits/
 
 ### 安全防护（v1.6.6 增强）
 
-- **拖放文件类型白名单**：仅允许打开 `.txt`、`.md`、`.py`、`.c`、`.cpp`、`.h`、`.java`、`.js`、`.json`、`.html`、`.css`、`.xml`、`.yaml`、`.yml`、`.toml`、`.ini`、`.log`、`.sql`、`.sh`、`.go`、`.rs` 等文本文件类型，非文本文件拖入时弹出警告
-- **PDF/HTML导出安全**：Markdown转PDF和转HTML时均显式禁用原始HTML渲染，防止XSS注入
-- **插件API防护**：`MVP_READ_ONLY` 从类变量改为实例属性 `_mvp_read_only`，防止恶意插件篡改权限检查标志；`register_command` 使用 `setdefault` 原子操作，消除TOCTOU竞态条件
+**本轮修复清单（v1.6.6 stable fixes）：**
+
+- **QMessageBox 静态调用修正**：修正 `QMessageBox.Icon.*(...)` 枚举值误用为函数调用的问题，改为 `QMessageBox.warning()` / `.information()` 等静态方法
+- **保存状态机**：保存任务不再立即标记 clean，明确 dirty→saving→clean/save_failed 状态流转，保存失败后恢复 dirty 状态
+- **关闭时等待保存**：closeEvent 两阶段关闭，保存中不允许退出，保存失败中断关闭流程，全部成功后才最终关闭
+- **临时会话恢复**：异常退出后保留 autosave session，重启时提示恢复，恢复提示在 window.show() 之后弹出
+- **HTML/PDF 安全导出**：统一走 secure_markdown_renderer，纯文本 fallback 使用 html.escape()，禁用 script/iframe/onerror/javascript: 等危险内容
+- **文件打开安全入口**：FileOpenService 统一校验文件打开来源（用户/拖放/插件/会话恢复/设置导入），分类控制路径白名单、扩展名和二进制检测
+- **插件 API 边界收窄**：get_config() 返回 ReadOnlyConfigView 只读视图，open_file 走 FileOpenService.PLUGIN 路径校验，超时文案诚实说明无法强制终止线程
+- **可信插件模型声明**：插件代码运行在主进程，权限系统仅限制暴露 API，非完整安全沙箱
+- **状态栏信号驱动统计**：signal_driven_stats 默认开启，字符数使用 characterCount() 避免全文复制，词数 800ms 防抖统计，行列号由 cursorPositionChanged 驱动
+- **搜索高亮修复**：普通搜索使用 QTextDocument.find() 获取权威光标位置，ExtraSelectionManager 统一管理高亮层避免互相覆盖，replace_all 从后向前逐匹配替换
+- **Feature Flags 修正**：修复 \_FLAG_ALIASES 中 lazy_highlight→virtual_scroll 错误映射，signal_driven_stats/minimap_block_cache 默认开启，实验功能保持关闭
+- **设置导入校验**：ConfigImportService 逐字段校验类型和值范围，非法字段跳过并报告，不再直接 \_settings.update()
+- **依赖梳理**：pyproject.toml 分组 preview/format/dev/all，requirements.txt 补全可选依赖
+- **安全日志脱敏**：ErrorHandler 自动脱敏 password/token/secret/api_key/key 等敏感字段，日志中不出现明文凭据
+- **增量渲染器命名澄清**：incremental_renderer.py 实际为全文 hash 渲染缓存（非真正 block 级增量渲染），README 不再宣称未实现能力
 
 ### 版本管理
 
@@ -119,11 +133,11 @@ portraits/
 ### 安装依赖
 
 ```bash
-pip install -r requirements.txt
-pip install PyQtWebEngine  # 可选，Markdown预览用QWebEngineView（否则退化为QTextBrowser）
+pip install -e ".[preview,format]"  # 完整安装（含预览、格式化依赖）
+pip install -e "."                  # 仅核心依赖
 ```
 
-> **安全模块依赖**：`cryptography>=44.0.0` 已包含在 `requirements.txt` 中，用于存档数据加密（PBKDF2 + AES-GCM）。
+> **可选依赖分组**：`preview`（markdown-it-py/PyQt6-WebEngine）、`format`（PyYAML/tomli/cssbeautifier）、`dev`（pytest/mypy）
 
 ### 运行
 

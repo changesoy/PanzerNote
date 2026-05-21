@@ -34,7 +34,7 @@ class SaveTask(QRunnable):
         try:
             self.file_guard.safe_write(
                 self.filepath, self.content,
-                encoding=self.encoding, validate_path=False
+                encoding=self.encoding
             )
             self.signals.finished.emit(True, self.filepath, None)
         except Exception as e:

@@ -18,6 +18,7 @@ from ..utils.logger import get_logger
 from ..utils.exceptions import safe_call
 from ..security.path_validator import PathValidator, PathSecurityError
 from ..security.file_guard import FileGuard, FileSizeExceededError, FileOperationTimeoutError
+from ..security.file_access_context import FileAccessContext
 from ..security.crypto_manager import CryptoManager
 from ..security.input_validator import InputValidator
 from .savegame_manager import SavegameManager
@@ -30,6 +31,9 @@ class Config:
     职责：设置读写、工作区状态、路径管理。
     游戏存档委托给 SavegameManager，安全组件委托给 SecurityManager。
     """
+
+    INTERNAL_CONFIG_CTX = FileAccessContext.INTERNAL_CONFIG
+    INTERNAL_SAVEGAME_CTX = FileAccessContext.INTERNAL_SAVEGAME
 
     DEFAULT_SETTINGS = {
         "initialized": False,
@@ -146,7 +150,7 @@ class Config:
         if os.path.exists(path_file):
             try:
                 path = self._file_guard.safe_read(
-                    path_file, encoding='utf-8', validate_path=False
+                    path_file, encoding='utf-8', context=self.INTERNAL_CONFIG_CTX
                 )
                 if path and os.path.exists(path):
                     self._base_path = path.strip()
@@ -158,7 +162,7 @@ class Config:
         if self._base_path:
             path_file = self._get_user_data_path_file()
             self._file_guard.safe_write(
-                path_file, self._base_path, encoding='utf-8', validate_path=False
+                path_file, self._base_path, encoding='utf-8', context=self.INTERNAL_CONFIG_CTX
             )
 
     def _get_config_dir(self) -> str:
@@ -174,7 +178,7 @@ class Config:
     def _load_json(self, filepath: str, default: Dict) -> Dict:
         if os.path.exists(filepath):
             try:
-                content = self._file_guard.safe_read(filepath, validate_path=False)
+                content = self._file_guard.safe_read(filepath, context=self.INTERNAL_CONFIG_CTX)
                 return json.loads(content)
             except (json.JSONDecodeError, IOError, FileSizeExceededError,
                     FileOperationTimeoutError, PathSecurityError) as e:
@@ -184,7 +188,7 @@ class Config:
 
     def _save_json(self, filepath: str, data: Dict):
         content = json.dumps(data, ensure_ascii=False, indent=2)
-        self._file_guard.safe_write(filepath, content, validate_path=False)
+        self._file_guard.safe_write(filepath, content, context=self.INTERNAL_CONFIG_CTX)
 
     def _load_all(self):
         config_dir = self._get_config_dir()

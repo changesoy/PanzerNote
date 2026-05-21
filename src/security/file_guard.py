@@ -28,6 +28,7 @@ from typing import Optional
 
 from ..utils.logger import get_logger
 from .path_validator import PathValidator, PathSecurityError
+from .file_access_context import FileAccessContext
 
 
 class FileSizeExceededError(Exception):
@@ -152,11 +153,23 @@ class FileGuard:
         except (FileNotFoundError, FileSecurityError):
             return False
 
+    @staticmethod
+    def _should_validate(validate_path: bool, context: Optional[FileAccessContext]) -> bool:
+        """根据访问上下文决定是否需要路径白名单校验
+
+        明确上下文的调用已通过 FileOpenService 或内部路径校验，
+        无需重复走 PathValidator 白名单。仅未指定上下文时按 validate_path 决定。
+        """
+        if context is not None:
+            return False
+        return validate_path
+
     def safe_read(
         self,
         filepath: str,
         encoding: str = 'utf-8',
         validate_path: bool = True,
+        context: Optional[FileAccessContext] = None,
     ) -> str:
         """安全读取文件内容（分块读取 + 超时检测）
 
@@ -164,6 +177,7 @@ class FileGuard:
             filepath: 文件路径
             encoding: 文件编码
             validate_path: 是否验证路径安全性
+            context: 文件访问上下文（优先级高于 validate_path）
 
         Returns:
             文件内容字符串
@@ -173,7 +187,7 @@ class FileGuard:
             FileSizeExceededError: 文件大小超限
             FileOperationTimeoutError: 操作超时
         """
-        if validate_path:
+        if self._should_validate(validate_path, context):
             self._validator.validate_path(filepath)
 
         if os.path.exists(filepath):
@@ -208,6 +222,7 @@ class FileGuard:
         content: str,
         encoding: str = 'utf-8',
         validate_path: bool = True,
+        context: Optional[FileAccessContext] = None,
     ) -> None:
         """安全写入文件内容
 
@@ -216,13 +231,14 @@ class FileGuard:
             content: 写入内容
             encoding: 文件编码
             validate_path: 是否验证路径安全性
+            context: 文件访问上下文（优先级高于 validate_path）
 
         Raises:
             PathSecurityError: 路径不安全
             FileSizeExceededError: 内容大小超限
             FileEncodingError: 编码失败
         """
-        if validate_path:
+        if self._should_validate(validate_path, context):
             self._validator.validate_path(filepath)
 
         encoded_content = content.encode(encoding)
@@ -242,17 +258,19 @@ class FileGuard:
         self,
         filepath: str,
         validate_path: bool = True,
+        context: Optional[FileAccessContext] = None,
     ) -> bytes:
         """安全读取二进制文件（分块读取 + 超时检测）
 
         Args:
             filepath: 文件路径
             validate_path: 是否验证路径安全性
+            context: 文件访问上下文（优先级高于 validate_path）
 
         Returns:
             文件二进制内容
         """
-        if validate_path:
+        if self._should_validate(validate_path, context):
             self._validator.validate_path(filepath)
 
         if os.path.exists(filepath):
@@ -286,6 +304,7 @@ class FileGuard:
         filepath: str,
         data: bytes,
         validate_path: bool = True,
+        context: Optional[FileAccessContext] = None,
     ) -> None:
         """安全写入二进制文件
 
@@ -293,8 +312,9 @@ class FileGuard:
             filepath: 文件路径
             data: 二进制数据
             validate_path: 是否验证路径安全性
+            context: 文件访问上下文（优先级高于 validate_path）
         """
-        if validate_path:
+        if self._should_validate(validate_path, context):
             self._validator.validate_path(filepath)
 
         if len(data) > self._max_file_size:

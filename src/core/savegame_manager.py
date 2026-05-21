@@ -14,6 +14,7 @@ from ..utils.logger import get_logger
 from ..utils.exceptions import safe_call
 from ..security.path_validator import PathSecurityError
 from ..security.file_guard import FileGuard, FileSizeExceededError, FileOperationTimeoutError
+from ..security.file_access_context import FileAccessContext
 from ..security.crypto_manager import CryptoManager, DecryptionError
 
 
@@ -28,6 +29,8 @@ class SavegameManager:
 
     从 Config 中拆出，负责所有游戏存档相关的读写和状态管理。
     """
+
+    SAVEGAME_CTX = FileAccessContext.INTERNAL_SAVEGAME
 
     DEFAULT_SAVEGAME = {
         "resources": {
@@ -73,7 +76,7 @@ class SavegameManager:
     def _load_json(self, filepath: str, default: Dict) -> Dict:
         if os.path.exists(filepath):
             try:
-                content = self._file_guard.safe_read(filepath, validate_path=False)
+                content = self._file_guard.safe_read(filepath, context=self.SAVEGAME_CTX)
                 return json.loads(content)
             except (json.JSONDecodeError, IOError, FileSizeExceededError,
                     FileOperationTimeoutError, PathSecurityError) as e:
@@ -136,7 +139,7 @@ class SavegameManager:
 
     def _save_json(self, filepath: str, data: Dict):
         content = json.dumps(data, ensure_ascii=False, indent=2)
-        self._file_guard.safe_write(filepath, content, validate_path=False)
+        self._file_guard.safe_write(filepath, content, context=self.SAVEGAME_CTX)
 
     def _backup_encrypted_file(self):
         import shutil

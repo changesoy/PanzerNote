@@ -323,7 +323,7 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
             filepath = os.path.join(parent_dir, name)
             try:
                 file_guard = self.config.get_file_guard()
-                file_guard.safe_write(filepath, "", validate_path=False)
+                file_guard.safe_write(filepath, "")
                 self.file_open_requested.emit(filepath)
             except Exception as e:
                 get_logger(__name__).error("创建文件失败: %s", e)

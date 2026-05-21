@@ -101,14 +101,49 @@ class PathValidator:
         for pattern in self._TRAVERSAL_PATTERNS:
             if pattern.search(normalized):
                 return True
+        return False
+
+    def is_path_symlink_escape(self, path: str) -> bool:
+        """检查符号链接是否逃逸到白名单之外
+
+        不再简单用 realpath != abspath 拒绝所有 symlink。
+        改为：解析 realpath → 检查 resolved path 是否仍在 allowed_roots 内。
+        在 allowed_roots 内的合法 symlink 允许通过。
+        逃逸到 allowed_roots 之外的 symlink 拒绝。
+        """
+        if not self._allowed_roots:
+            return True
+
         try:
             real = os.path.realpath(path)
-            abs_path = os.path.abspath(path)
-            if real != abs_path:
-                return True
         except (OSError, ValueError):
             return True
-        return False
+
+        if os.path.islink(path):
+            try:
+                abs_path = os.path.abspath(path)
+                if os.path.normcase(real) == os.path.normcase(abs_path):
+                    return False
+            except (OSError, ValueError):
+                pass
+        else:
+            try:
+                abs_path = os.path.abspath(path)
+                if os.path.normcase(real) == os.path.normcase(abs_path):
+                    return False
+            except (OSError, ValueError):
+                pass
+
+        clean = self._strip_long_path_prefix(real)
+        case_path = self._case_normalize(clean)
+        for root in self._allowed_roots:
+            if case_path == root or case_path.startswith(root + os.sep):
+                return False
+
+        self._logger.warning(
+            "符号链接逃逸到白名单之外: %s -> %s", path, real
+        )
+        return True
 
     def is_path_in_whitelist(self, path: str) -> bool:
         if not self._allowed_roots:
@@ -134,6 +169,9 @@ class PathValidator:
         if self.is_path_traversal(path):
             self._logger.warning("检测到目录穿越攻击: %s", path)
             return False
+        if self.is_path_symlink_escape(path):
+            self._logger.warning("检测到符号链接逃逸: %s", path)
+            return False
         if not self.is_path_in_whitelist(path):
             self._logger.debug("路径不在白名单中: %s", path)
             return False
@@ -146,6 +184,8 @@ class PathValidator:
             raise PathSecurityError(f"路径长度超限: {len(path)} > {self.MAX_PATH_LENGTH}")
         if self.is_path_traversal(path):
             raise PathTraversalError(f"检测到目录穿越攻击: {path}")
+        if self.is_path_symlink_escape(path):
+            raise PathSecurityError(f"检测到符号链接逃逸: {path}")
         if not self.is_path_in_whitelist(path):
             raise PathNotInWhitelistError(f"路径不在白名单中: {path}")
         normalized = self.normalize(path)

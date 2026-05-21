@@ -37,6 +37,7 @@ from .game.secretary_widget import SecretaryWidget
 from .editor.status_bar import StatusBarWidget
 from .editor.find_replace import FindReplaceBar
 from .editor.editor_settings_dialog import EditorSettingsDialog
+from .editor.file_open_service import FileOpenService, FileOpenSource, FileOpenSecurityError
 from .plugins.plugin_manager import PluginManager
 from .themes.theme_engine import ThemeEngine
 from .themes.theme_preview import ThemePreviewDialog
@@ -51,6 +52,10 @@ class MainWindow(QMainWindow):
     def __init__(self, config: Config, parent=None):
         super().__init__(parent)
         self.config = config
+        self._file_open_service = FileOpenService(
+            config.get_path_validator(),
+            config.get_notebooks_path(),
+        )
         self._current_view = "editor"
         self._closing = False
         self._closing_pending_save = False
@@ -463,7 +468,16 @@ class MainWindow(QMainWindow):
                 continue
 
             if original_path and os.path.isfile(original_path) and not is_new:
-                index = self.editor_tabs.open_file(original_path)
+                try:
+                    validated = self._file_open_service.validate_open_request(
+                        original_path, FileOpenSource.SESSION_RESTORE
+                    )
+                except FileOpenSecurityError:
+                    get_logger(__name__).warning(
+                        "恢复会话文件被安全策略拒绝: %s", original_path
+                    )
+                    continue
+                index = self.editor_tabs.open_file(validated)
                 if index >= 0:
                     widget = self.editor_tabs.widget(index)
                     editor = self.editor_tabs._get_editor_from_widget(widget)
@@ -556,7 +570,14 @@ class MainWindow(QMainWindow):
                         QMessageBox.warning(self, "不支持的文件类型",
                                             f"PanzerNote 不支持打开 {ext or '无扩展名'} 类型的文件。")
                         continue
-                    self._open_file(filepath)
+                    try:
+                        validated = self._file_open_service.validate_open_request(
+                            filepath, FileOpenSource.DRAG_DROP
+                        )
+                    except FileOpenSecurityError as e:
+                        QMessageBox.warning(self, "无法打开文件", str(e))
+                        continue
+                    self._open_file_bypass_service(validated)
             event.acceptProposedAction()
         else:
             event.ignore()
@@ -714,7 +735,28 @@ class MainWindow(QMainWindow):
             self._open_file(filepath)
 
     def _open_file(self, filepath: str):
-        """打开文件"""
+        """打开文件（统一走 FileOpenService 安全入口）"""
+        try:
+            validated = self._file_open_service.validate_open_request(
+                filepath, FileOpenSource.USER_DIALOG
+            )
+        except FileOpenSecurityError as e:
+            QMessageBox.warning(self, "无法打开文件", str(e))
+            return
+
+        notebooks_path = os.path.normpath(self.config.get_notebooks_path())
+        filepath_norm = os.path.normpath(validated)
+
+        if not filepath_norm.startswith(notebooks_path):
+            self.config.add_external_file(validated)
+            self.file_tree.refresh_external_files()
+
+        self.editor_tabs.open_file(validated)
+        self.config.add_recent_file(validated)
+        self._update_recent_menu()
+
+    def _open_file_bypass_service(self, filepath: str):
+        """由拖放等已通过 FileOpenService 校验后调用，不再重复校验"""
         notebooks_path = os.path.normpath(self.config.get_notebooks_path())
         filepath_norm = os.path.normpath(filepath)
 
@@ -1182,9 +1224,20 @@ class MainWindow(QMainWindow):
             return
         import json as json_module
         try:
-            with open(filepath, 'r', encoding='utf-8') as f:
-                import_data = json_module.load(f)
-            if "settings" not in import_data:
+            validated = self._file_open_service.validate_open_request(
+                filepath, FileOpenSource.SETTINGS_IMPORT
+            )
+        except FileOpenSecurityError as e:
+            QMessageBox.warning(self, "导入失败", str(e))
+            return
+
+        try:
+            content = self.config.get_file_guard().safe_read(
+                validated, encoding='utf-8',
+                context=self.config.INTERNAL_CONFIG_CTX
+            )
+            import_data = json_module.loads(content)
+            if not isinstance(import_data, dict) or "settings" not in import_data:
                 QMessageBox.warning(self, "导入失败", "无效的设置文件格式")
                 return
             reply = QMessageBox.question(
@@ -1352,8 +1405,15 @@ class MainWindow(QMainWindow):
 
     def _plugin_open_file(self, filepath: str) -> bool:
         try:
-            self.editor_tabs.open_file(filepath)
+            from .editor.file_open_service import FileOpenSource, FileOpenSecurityError
+            validated = self._file_open_service.validate_open_request(
+                filepath, FileOpenSource.PLUGIN
+            )
+            self.editor_tabs.open_file(validated)
             return True
+        except FileOpenSecurityError as e:
+            get_logger(__name__).warning("插件 open_file 被安全策略拒绝: %s", e)
+            return False
         except Exception as e:
             get_logger(__name__).warning("插件 open_file 失败: %s", e)
             return False

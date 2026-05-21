@@ -27,6 +27,7 @@ from ..utils.logger import get_logger
 from ..utils.error_handler import ErrorHandler, ErrorCategory
 from ..utils.feature_flags import is_enabled
 from ..security.file_guard import FileSizeExceededError, FileOperationTimeoutError
+from ..security.file_access_context import FileAccessContext
 from ..security.input_validator import InputValidator
 from ..themes.theme_aware_mixin import ThemeAwareMixin
 from .editor import Editor
@@ -356,19 +357,23 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         file_guard = self.config.get_file_guard()
 
         try:
-            content = file_guard.safe_read(filepath, encoding='utf-8', validate_path=False)
+            content = file_guard.safe_read(filepath, encoding='utf-8',
+                                           context=FileAccessContext.USER_DOCUMENT_READ)
             detected_encoding = "UTF-8"
         except UnicodeDecodeError:
             try:
-                content = file_guard.safe_read(filepath, encoding='gbk', validate_path=False)
+                content = file_guard.safe_read(filepath, encoding='gbk',
+                                               context=FileAccessContext.USER_DOCUMENT_READ)
                 detected_encoding = "GBK"
             except UnicodeDecodeError:
                 try:
-                    content = file_guard.safe_read(filepath, encoding='utf-16', validate_path=False)
+                    content = file_guard.safe_read(filepath, encoding='utf-16',
+                                                   context=FileAccessContext.USER_DOCUMENT_READ)
                     detected_encoding = "UTF-16"
                 except (UnicodeDecodeError, OSError):
                     try:
-                        raw = file_guard.safe_read_bytes(filepath, validate_path=False)
+                        raw = file_guard.safe_read_bytes(filepath,
+                                                         context=FileAccessContext.USER_DOCUMENT_READ)
                         content = raw.decode('utf-8', errors='ignore')
                         detected_encoding = "UTF-8"
                     except Exception as e:

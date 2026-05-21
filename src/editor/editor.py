@@ -114,13 +114,14 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self._programmatic_modify = False
         self._is_pasting = False
 
+        self._selection_manager = ExtraSelectionManager(self)
+
         self._init_ui()
         self._init_minimap_attrs()
         self._init_line_numbers()
         self._init_minimap()
         self._lazy_highlight = LazyHighlightManager(self)
         self._bookmarks: Set[int] = set()
-        self._selection_manager = ExtraSelectionManager(self)
 
         self._cached_word_count: int = 0
         self._word_count_dirty: bool = True

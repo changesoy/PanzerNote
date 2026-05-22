@@ -81,6 +81,10 @@ class MainWindow(QMainWindow):
         self._connect_signals()
         self._apply_theme()
 
+        self._save_notify_timer = QTimer(self)
+        self._save_notify_timer.setSingleShot(True)
+        self._save_notify_timer.timeout.connect(self._do_save_notify)
+
         icon_path = os.path.join(config.get_assets_path(), "icons", "app_icon.png")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
@@ -1126,7 +1130,11 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "提示", "该功能尚在开发中")
 
     def _on_file_saved(self):
-        """文件保存成功后的处理（由 SaveState.CLEAN 回调触发）"""
+        """文件保存成功后防抖通知（由 SaveState.CLEAN 回调触发）"""
+        self._save_notify_timer.start(300)
+
+    def _do_save_notify(self):
+        """防抖到期后执行保存通知"""
         self.resource_bar.refresh()
         self.secretary.show_message("文件已保存！")
 

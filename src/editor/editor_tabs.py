@@ -200,6 +200,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     chars_typed = pyqtSignal(int)
     cursor_position_changed = pyqtSignal()
     word_count_updated = pyqtSignal()
+    file_saved = pyqtSignal()
 
     def __init__(self, config: Config, theme_engine=None, parent=None):
         super().__init__(parent)
@@ -530,7 +531,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self._save_manager.submit_task(tab_id, task)
         QThreadPool.globalInstance().start(task)
 
-        return True, new_chars
+        return True, 0
 
     def save_all(self) -> int:
         total_chars = 0
@@ -967,6 +968,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             filepath = info.get("filepath")
             if filepath:
                 self._session_manager.remove_autosave_for_file(filepath)
+            self.file_saved.emit()
             if tab_id in self._pending_close_tab_ids:
                 self._pending_close_tab_ids.discard(tab_id)
                 self._close_tab_after_save(widget_index)

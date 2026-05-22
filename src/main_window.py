@@ -162,6 +162,7 @@ class MainWindow(QMainWindow):
         self.editor_tabs.chars_typed.connect(self._on_chars_typed)
         self.editor_tabs.cursor_position_changed.connect(self._update_stats)
         self.editor_tabs.word_count_updated.connect(self._update_stats)
+        self.editor_tabs.file_saved.connect(self._on_file_saved)
         self.editor_splitter.addWidget(self.editor_tabs)
 
         self._split_tabs: List[EditorTabWidget] = []
@@ -773,9 +774,7 @@ class MainWindow(QMainWindow):
 
     def _save_current(self):
         """保存当前文件"""
-        saved, char_count = self.editor_tabs.save_current()
-        if saved and char_count > 0:
-            self._on_file_saved(char_count)
+        self.editor_tabs.save_current()
 
     def _save_as(self):
         """另存为"""
@@ -783,9 +782,7 @@ class MainWindow(QMainWindow):
 
     def _save_all(self):
         """保存所有文件"""
-        total_chars = self.editor_tabs.save_all()
-        if total_chars > 0:
-            self._on_file_saved(total_chars)
+        self.editor_tabs.save_all()
 
     def _export_pdf(self):
         from .editor.export_service import ExportService
@@ -1128,8 +1125,8 @@ class MainWindow(QMainWindow):
         """显示图鉴完成度"""
         QMessageBox.information(self, "提示", "该功能尚在开发中")
 
-    def _on_file_saved(self, char_count: int):
-        """文件保存后的处理"""
+    def _on_file_saved(self):
+        """文件保存成功后的处理（由 SaveState.CLEAN 回调触发）"""
         self.resource_bar.refresh()
         self.secretary.show_message("文件已保存！")
 

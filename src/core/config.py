@@ -349,6 +349,17 @@ class Config:
 
     # === 工作区状态 ===
 
+    _KNOWN_WORKSPACE_KEYS = frozenset({
+        "last_session", "recent_files", "external_files",
+        "editor", "game", "secretary", "view", "window",
+        "resources", "cores",
+    })
+
+    def update_workspace_field(self, key: str, value):
+        if key not in self._KNOWN_WORKSPACE_KEYS:
+            raise KeyError(f"未知的 workspace 字段: {key}")
+        self._workspace[key] = value
+
     def get_workspace(self) -> Dict:
         return self._workspace
 

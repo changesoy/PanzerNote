@@ -73,6 +73,11 @@ class MainWindow(QMainWindow):
         self.plugin_manager = PluginManager(config)
         self.plugin_manager.scan_plugins()
         self._register_plugin_callbacks()
+
+        self._save_notify_timer = QTimer(self)
+        self._save_notify_timer.setSingleShot(True)
+        self._save_notify_timer.timeout.connect(self._do_save_notify)
+
         self._init_ui()
         self._init_menubar()
         self._init_statusbar()
@@ -80,10 +85,6 @@ class MainWindow(QMainWindow):
         self._restore_state()
         self._connect_signals()
         self._apply_theme()
-
-        self._save_notify_timer = QTimer(self)
-        self._save_notify_timer.setSingleShot(True)
-        self._save_notify_timer.timeout.connect(self._do_save_notify)
 
         icon_path = os.path.join(config.get_assets_path(), "icons", "app_icon.png")
         if os.path.exists(icon_path):

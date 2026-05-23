@@ -6,7 +6,6 @@
 v1.5.4 新增
 """
 
-import re
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLineEdit,
     QPushButton, QLabel, QCheckBox, QToolButton, QSizePolicy
@@ -205,23 +204,16 @@ class FindReplaceBar(ThemeAwareMixin, QWidget):
         start, end = self._matches[self._current_idx]
         replacement = self.replace_input.text()
 
-        cursor = self._editor.textCursor()
-        cursor.setPosition(start)
-        cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
-
-        if self.regex_cb.isChecked():
-            pattern = self._build_pattern()
-            if pattern is None:
-                return
-            original = cursor.selectedText().replace("\u2029", "\n")
-            try:
-                replacement = pattern.sub(replacement, original, count=1)
-            except re.error:
-                get_logger(__name__).debug("正则替换失败")
-
-        with self._editor.programmatic_modify():
-            cursor.insertText(replacement)
-        self._editor.setTextCursor(cursor)
+        service = SearchService(self._editor)
+        use_regex = self.regex_cb.isChecked()
+        success = service.replace_current(
+            start, end, replacement,
+            use_regex=use_regex,
+            query=self.search_input.text() if use_regex else "",
+            case_sensitive=self.case_cb.isChecked(),
+        )
+        if not success:
+            return
 
         self._update_matches()
         if self._matches:
@@ -281,32 +273,6 @@ class FindReplaceBar(ThemeAwareMixin, QWidget):
         else:
             self._current_idx = -1
             self._update_match_label()
-
-    def _build_pattern(self):
-        """根据选项构建正则表达式，失败返回 None"""
-        query = self.search_input.text()
-        if not query:
-            return None
-
-        if len(query) > 500:
-            return None
-
-        flags = 0
-        if not self.case_cb.isChecked():
-            flags |= re.IGNORECASE
-
-        if self.regex_cb.isChecked():
-            try:
-                pattern = re.compile(query, flags)
-            except re.error:
-                return None
-        else:
-            escaped = re.escape(query)
-            if self.word_cb.isChecked():
-                escaped = r'\b' + escaped + r'\b'
-            pattern = re.compile(escaped, flags)
-
-        return pattern
 
     def _update_matches(self):
         """重新搜索并更新匹配列表和高亮"""

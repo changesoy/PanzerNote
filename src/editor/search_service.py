@@ -165,6 +165,49 @@ class SearchService:
 
         return count
 
+    def replace_current(
+        self,
+        start: int,
+        end: int,
+        replacement: str,
+        use_regex: bool = False,
+        query: str = "",
+        case_sensitive: bool = False,
+    ) -> bool:
+        """替换指定位置的当前匹配
+
+        Args:
+            start: 匹配起始位置
+            end: 匹配结束位置
+            replacement: 替换文本
+            use_regex: 是否使用正则替换
+            query: 正则表达式（use_regex=True 时需要）
+            case_sensitive: 大小写敏感
+
+        Returns:
+            是否替换成功
+        """
+        cursor = self._editor.textCursor()
+        cursor.setPosition(start)
+        cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+
+        repl = replacement
+        if use_regex and query:
+            pattern = self._build_regex(query, case_sensitive)
+            if pattern:
+                original = cursor.selectedText().replace("\u2029", "\n")
+                try:
+                    repl = pattern.sub(replacement, original, count=1)
+                except re.error:
+                    self._logger.debug("正则替换失败")
+            else:
+                return False
+
+        with self._editor.programmatic_modify():
+            cursor.insertText(repl)
+        self._editor.setTextCursor(cursor)
+        return True
+
     def _build_regex(self, query: str, case_sensitive: bool) -> Optional[re.Pattern]:
         flags = 0
         if not case_sensitive:

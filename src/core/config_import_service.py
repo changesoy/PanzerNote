@@ -8,7 +8,7 @@
 """
 
 import json as json_module
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple, Union
 
 from ..utils.logger import get_logger
 
@@ -34,7 +34,7 @@ class ConfigImportService:
         "last_login", "chars_typed_today", "total_chars", "total_documents",
     })
 
-    _SETTINGS_TYPE_RULES = {
+    _SETTINGS_TYPE_RULES: Dict[str, tuple] = {
         "initialized": (bool,),
         "base_path": (str,),
         "open_files": (list,),
@@ -53,13 +53,70 @@ class ConfigImportService:
         "shortcuts": (dict,),
     }
 
+    _SETTINGS_RANGE_RULES: Dict[str, Tuple[Optional[float], Optional[float]]] = {
+        "active_tab_index": (0, None),
+        "chars_typed_today": (0, None),
+        "total_chars": (0, None),
+        "total_documents": (0, None),
+    }
+
+    _SETTINGS_NESTED_RULES: Dict[str, Dict[str, Tuple[tuple, Optional[Tuple[Optional[float], Optional[float]]]]]] = {
+        "editor": {
+            "font_family": ((str,), None),
+            "font_size": ((int,), (1, 200)),
+            "line_spacing": ((int, float), (0.5, 5.0)),
+            "show_line_numbers": ((bool,), None),
+            "auto_wrap": ((bool,), None),
+            "wrap_mode": ((str,), None),
+            "highlight_current_line": ((bool,), None),
+            "auto_save_interval": ((int,), (0, 3600)),
+            "max_history_count": ((int,), (0, 1000)),
+            "default_encoding": ((str,), None),
+            "line_ending": ((str,), None),
+            "code_highlight_theme": ((str,), None),
+            "show_minimap": ((bool,), None),
+            "auto_minimap": ((bool,), None),
+            "auto_pair_brackets": ((bool,), None),
+        },
+        "game": {
+            "typing_reward_rate": ((int, float), (0, None)),
+            "idle_reward_rate": ((int, float), (0, None)),
+            "daily_typing_limit": ((int,), (0, None)),
+            "construction_time_rate": ((int, float), (0, None)),
+            "construction_slots": ((int,), (1, 10)),
+        },
+        "secretary": {
+            "character_id": ((str, type(None)), None),
+            "character_name": ((str, type(None)), None),
+            "skin_name": ((str, type(None)), None),
+            "state": ((str,), None),
+            "user_nickname": ((str,), None),
+            "secretary_self": ((str,), None),
+            "enable_voice": ((bool,), None),
+            "show_secretary": ((bool,), None),
+            "size_percent": ((int, float), (1, 100)),
+        },
+        "view": {
+            "theme": ((str,), None),
+            "sidebar_width": ((int,), (50, 800)),
+            "show_file_tree": ((bool,), None),
+        },
+        "window": {
+            "width": ((int,), (100, None)),
+            "height": ((int,), (100, None)),
+            "x": ((int,), None),
+            "y": ((int,), None),
+            "maximized": ((bool,), None),
+        },
+    }
+
     _KNOWN_WORKSPACE_KEYS = frozenset({
         "last_session", "recent_files", "external_files",
         "editor", "game", "secretary", "view", "window",
         "resources", "cores",
     })
 
-    _WORKSPACE_TYPE_RULES = {
+    _WORKSPACE_TYPE_RULES: Dict[str, tuple] = {
         "last_session": (dict,),
         "recent_files": (list,),
         "external_files": (list,),
@@ -70,6 +127,25 @@ class ConfigImportService:
         "window": (dict,),
         "resources": (dict,),
         "cores": (dict,),
+    }
+
+    _WORKSPACE_NESTED_RULES: Dict[str, Dict[str, Tuple[tuple, Optional[Tuple[Optional[float], Optional[float]]]]]] = {
+        "last_session": {
+            "open_files": ((list,), None),
+            "active_tab_index": ((int,), (0, None)),
+            "current_view": ((str,), None),
+        },
+    }
+
+    _INT_ONLY_KEYS: frozenset = frozenset({
+        "active_tab_index",
+    })
+
+    _NESTED_INT_ONLY_KEYS: Dict[str, frozenset] = {
+        "editor": frozenset({"font_size", "auto_save_interval", "max_history_count"}),
+        "game": frozenset({"daily_typing_limit", "construction_slots"}),
+        "window": frozenset({"width", "height", "x", "y"}),
+        "last_session": frozenset({"active_tab_index"}),
     }
 
     def __init__(self, config):
@@ -134,29 +210,100 @@ class ConfigImportService:
             except KeyError:
                 self._skip(f"workspace.{key}", "未知字段")
 
+    def _check_type(self, value, expected_types: tuple, reject_bool_for_int: bool = False) -> bool:
+        if reject_bool_for_int and isinstance(value, bool) and int in expected_types and bool not in expected_types:
+            return False
+        return isinstance(value, expected_types)
+
+    def _check_range(self, value, range_rule: Optional[Tuple[Optional[float], Optional[float]]]) -> bool:
+        if range_rule is None:
+            return True
+        lo, hi = range_rule
+        if lo is not None and value < lo:
+            return False
+        if hi is not None and value > hi:
+            return False
+        return True
+
     def _validate_setting(self, key: str, value) -> bool:
         expected_types = self._SETTINGS_TYPE_RULES.get(key)
-        if expected_types and not isinstance(value, expected_types):
-            self._skip(key, f"期望 {expected_types}，实际: {type(value).__name__}")
+        if expected_types:
+            reject_bool = key in self._INT_ONLY_KEYS
+            if not self._check_type(value, expected_types, reject_bool_for_int=reject_bool):
+                self._skip(key, f"期望 {expected_types}，实际: {type(value).__name__}")
+                return False
+
+        range_rule = self._SETTINGS_RANGE_RULES.get(key)
+        if range_rule and not self._check_range(value, range_rule):
+            lo, hi = range_rule
+            self._skip(key, f"值 {value} 超出范围 [{lo}, {hi}]")
             return False
+
         if isinstance(value, dict):
             for sub_key in value:
                 if not isinstance(sub_key, str):
                     self._skip(key, "含非字符串键名")
                     return False
+            nested_rules = self._SETTINGS_NESTED_RULES.get(key)
+            if nested_rules:
+                if not self._validate_nested(f"settings.{key}", value, nested_rules):
+                    return False
+
         return True
 
     def _validate_workspace_field(self, key: str, value) -> bool:
         expected_types = self._WORKSPACE_TYPE_RULES.get(key)
-        if expected_types and not isinstance(value, expected_types):
-            self._skip(f"workspace.{key}", f"期望 {expected_types}，实际: {type(value).__name__}")
-            return False
+        if expected_types:
+            if not self._check_type(value, expected_types):
+                self._skip(f"workspace.{key}", f"期望 {expected_types}，实际: {type(value).__name__}")
+                return False
+
         if isinstance(value, dict):
             for sub_key in value:
                 if not isinstance(sub_key, str):
                     self._skip(f"workspace.{key}", "含非字符串键名")
                     return False
+            nested_rules = self._WORKSPACE_NESTED_RULES.get(key)
+            if nested_rules:
+                if not self._validate_nested(f"workspace.{key}", value, nested_rules):
+                    return False
+
         return True
+
+    def _validate_nested(
+        self,
+        prefix: str,
+        data: dict,
+        rules: Dict[str, Tuple[tuple, Optional[Tuple[Optional[float], Optional[float]]]]],
+    ) -> bool:
+        valid = True
+        section_name = prefix.split(".")[-1]
+        int_only = self._NESTED_INT_ONLY_KEYS.get(section_name, frozenset())
+
+        for sub_key, sub_value in data.items():
+            if not isinstance(sub_key, str):
+                self._skip(f"{prefix}.{sub_key}", "非字符串键名")
+                valid = False
+                continue
+
+            rule = rules.get(sub_key)
+            if rule is None:
+                continue
+
+            expected_types, range_rule = rule
+            reject_bool = sub_key in int_only
+
+            if not self._check_type(sub_value, expected_types, reject_bool_for_int=reject_bool):
+                self._skip(f"{prefix}.{sub_key}", f"期望 {expected_types}，实际: {type(sub_value).__name__}")
+                valid = False
+                continue
+
+            if range_rule and not self._check_range(sub_value, range_rule):
+                lo, hi = range_rule
+                self._skip(f"{prefix}.{sub_key}", f"值 {sub_value} 超出范围 [{lo}, {hi}]")
+                valid = False
+
+        return valid
 
     def _skip(self, key: str, reason: str):
         msg = f"设置项 '{key}' 校验失败: {reason}"

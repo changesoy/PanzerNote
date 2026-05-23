@@ -112,7 +112,7 @@ portraits/
 - **搜索高亮修复**：普通搜索使用 QTextDocument.find() 获取权威光标位置，ExtraSelectionManager 统一管理高亮层避免互相覆盖，replace_all 从后向前逐匹配替换
 - **Feature Flags 修正**：修复 \_FLAG_ALIASES 中 lazy_highlight→virtual_scroll 错误映射，signal_driven_stats/minimap_block_cache 默认开启，实验功能保持关闭
 - **设置导入校验**：ConfigImportService 逐字段校验类型和值范围，非法字段跳过并报告，不再直接 \_settings.update()
-- **依赖梳理**：pyproject.toml 分组 preview/format/dev/all，requirements.txt 补全可选依赖
+- **依赖梳理**：pyproject.toml 分组 format/dev/all，所有运行时依赖均为必需
 - **安全日志脱敏**：ErrorHandler 自动脱敏 password/token/secret/api_key/key 等敏感字段，日志中不出现明文凭据
 - **增量渲染器命名澄清**：incremental_renderer.py 实际为全文 hash 渲染缓存（非真正 block 级增量渲染），README 不再宣称未实现能力
 
@@ -133,11 +133,11 @@ portraits/
 ### 安装依赖
 
 ```bash
-pip install -e ".[preview,format]"  # 完整安装（含预览、格式化依赖）
-pip install -e "."                  # 仅核心依赖
+pip install -e ".[format]"  # 完整安装（含格式化依赖）
+pip install -e "."                  # 核心依赖（已包含预览功能）
 ```
 
-> **可选依赖分组**：`preview`（markdown-it-py/PyQt6-WebEngine）、`format`（PyYAML/tomli/cssbeautifier）、`dev`（pytest/mypy）
+> **可选依赖分组**：`format`（PyYAML/tomli/cssbeautifier）、`dev`（pytest/mypy）
 
 ### 运行
 

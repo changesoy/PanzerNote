@@ -135,17 +135,35 @@ class ConfigImportService:
             "active_tab_index": ((int,), (0, None)),
             "current_view": ((str,), None),
         },
+        "resources": {
+            "steel": ((int, float), (0, None)),
+            "oil": ((int, float), (0, None)),
+            "ammo": ((int, float), (0, None)),
+            "fuel": ((int, float), (0, None)),
+            "rare_metal": ((int, float), (0, None)),
+        },
+        "cores": {
+            "total": ((int, float), (0, None)),
+            "available": ((int, float), (0, None)),
+        },
     }
 
-    _INT_ONLY_KEYS: frozenset = frozenset({
+    _NUMERIC_KEYS_REJECT_BOOL: frozenset = frozenset({
+        "chars_typed_today",
+        "total_chars",
+        "total_documents",
         "active_tab_index",
     })
 
-    _NESTED_INT_ONLY_KEYS: Dict[str, frozenset] = {
-        "editor": frozenset({"font_size", "auto_save_interval", "max_history_count"}),
-        "game": frozenset({"daily_typing_limit", "construction_slots"}),
+    _NESTED_NUMERIC_REJECT_BOOL: Dict[str, frozenset] = {
+        "editor": frozenset({"font_size", "line_spacing", "auto_save_interval", "max_history_count"}),
+        "game": frozenset({"typing_reward_rate", "idle_reward_rate", "daily_typing_limit", "construction_time_rate", "construction_slots"}),
+        "secretary": frozenset({"size_percent"}),
+        "view": frozenset({"sidebar_width"}),
         "window": frozenset({"width", "height", "x", "y"}),
         "last_session": frozenset({"active_tab_index"}),
+        "resources": frozenset({"steel", "oil", "ammo", "fuel", "rare_metal"}),
+        "cores": frozenset({"total", "available"}),
     }
 
     def __init__(self, config):
@@ -210,8 +228,8 @@ class ConfigImportService:
             except KeyError:
                 self._skip(f"workspace.{key}", "未知字段")
 
-    def _check_type(self, value, expected_types: tuple, reject_bool_for_int: bool = False) -> bool:
-        if reject_bool_for_int and isinstance(value, bool) and int in expected_types and bool not in expected_types:
+    def _check_type(self, value, expected_types: tuple, reject_bool: bool = False) -> bool:
+        if reject_bool and isinstance(value, bool) and bool not in expected_types:
             return False
         return isinstance(value, expected_types)
 
@@ -228,8 +246,8 @@ class ConfigImportService:
     def _validate_setting(self, key: str, value) -> bool:
         expected_types = self._SETTINGS_TYPE_RULES.get(key)
         if expected_types:
-            reject_bool = key in self._INT_ONLY_KEYS
-            if not self._check_type(value, expected_types, reject_bool_for_int=reject_bool):
+            reject_bool = key in self._NUMERIC_KEYS_REJECT_BOOL
+            if not self._check_type(value, expected_types, reject_bool=reject_bool):
                 self._skip(key, f"期望 {expected_types}，实际: {type(value).__name__}")
                 return False
 
@@ -278,7 +296,7 @@ class ConfigImportService:
     ) -> bool:
         valid = True
         section_name = prefix.split(".")[-1]
-        int_only = self._NESTED_INT_ONLY_KEYS.get(section_name, frozenset())
+        numeric_keys = self._NESTED_NUMERIC_REJECT_BOOL.get(section_name, frozenset())
 
         for sub_key, sub_value in data.items():
             if not isinstance(sub_key, str):
@@ -288,12 +306,14 @@ class ConfigImportService:
 
             rule = rules.get(sub_key)
             if rule is None:
+                self._skip(f"{prefix}.{sub_key}", "未知字段")
+                valid = False
                 continue
 
             expected_types, range_rule = rule
-            reject_bool = sub_key in int_only
+            reject_bool = sub_key in numeric_keys
 
-            if not self._check_type(sub_value, expected_types, reject_bool_for_int=reject_bool):
+            if not self._check_type(sub_value, expected_types, reject_bool=reject_bool):
                 self._skip(f"{prefix}.{sub_key}", f"期望 {expected_types}，实际: {type(sub_value).__name__}")
                 valid = False
                 continue

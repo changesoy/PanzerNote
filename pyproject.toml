@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "PanzerNote"
 dynamic = ["version"]
-description = "战车少女主题记事本"
+description = "战车少女主题笔记工具 - Markdown编辑、存档加密、插件系统、主题引擎、挂机资源收集"
 authors = [
     {name = "Changes"},
 ]

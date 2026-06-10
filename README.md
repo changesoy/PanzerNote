@@ -115,6 +115,7 @@ portraits/
 - **依赖梳理**：pyproject.toml 分组 format/dev/all，所有运行时依赖均为必需
 - **安全日志脱敏**：ErrorHandler 自动脱敏 password/token/secret/api_key/key 等敏感字段，日志中不出现明文凭据
 - **增量渲染器命名澄清**：incremental_renderer.py 实际为全文 hash 渲染缓存（非真正 block 级增量渲染），README 不再宣称未实现能力
+- **静态类型检查**：全项目通过 mypy 严格模式检查（0 error / 66 源文件），所有边界模块类型安全，消除 Optional 未判空、返回 Any、union-attr 等潜在运行时风险
 
 ### 版本管理
 
@@ -197,6 +198,7 @@ PanzerNote/
 │   ├── main_window.py         # 主窗口（已拆分，v1.6.6：拖放文件类型白名单/分屏语义优化）
 │   ├── core/                  # 核心模块
 │   │   ├── config.py          # 配置管理（组合SavegameManager + SecurityManager）
+│   │   ├── config_import_service.py # 配置导入服务（类型校验 + 白名单）
 │   │   ├── savegame_manager.py # 存档管理器（加载/保存/加密状态/SavegameSaveResult枚举/每日签到）
 │   │   ├── security_manager.py # 安全管理器（PathValidator/FileGuard/InputValidator集成）
 │   │   ├── timer_manager.py   # 定时器管理中心
@@ -209,17 +211,24 @@ PanzerNote/
 │   │   ├── editor_actions.py  # 行操作、大小写转换、格式化
 │   │   ├── auto_pair_handler.py # 括号/引号自动配对（v1.6.6 性能优化：frozenset快速过滤/单字符访问/选区包裹优化）
 │   │   ├── save_task.py        # 后台文件保存任务（v1.6.6 新增：QThreadPool异步写入）
+│   │   ├── save_task_manager.py # 保存任务管理器（dirty→saving→clean/save_failed 状态机）
+│   │   ├── temp_session_manager.py # 临时会话恢复（异常退出 autosave session 恢复）
 │   │   ├── virtual_scroll.py  # 虚拟滚动管理器
 │   │   ├── async_highlight.py # 异步代码高亮渲染器
-│   │   ├── incremental_renderer.py # Markdown增量渲染引擎
+│   │   ├── incremental_renderer.py # Markdown渲染缓存（全文 hash 缓存，非 block 级增量渲染）
 │   │   ├── syntax_highlighter.py # 语法高亮
 │   │   ├── highlight_themes.py # 代码高亮主题管理
 │   │   ├── markdown_preview.py # Markdown分屏预览（v1.6.6：MarkdownIt实例复用/JS增量更新/主题修复）
 │   │   ├── minimap.py         # 代码缩略图（v1.6.6：块级缓存增量失效）
 │   │   ├── find_replace.py    # 增强型查找替换栏
+│   │   ├── search_service.py  # 搜索服务（QTextDocument.find 权威光标 + 从后向前逐匹配替换）
+│   │   ├── extra_selection_manager.py # 高亮层管理（统一 ExtraSelection 避免互相覆盖）
+│   │   ├── secure_markdown_renderer.py # 安全 Markdown 渲染（统一清洗 script/iframe/onerror/javascript:）
+│   │   ├── export_service.py  # 导出服务（HTML/PDF 统一安全管线）
+│   │   ├── file_open_service.py # 文件打开安全入口（来源校验/路径白名单/二进制检测）
 │   │   ├── editor_settings_dialog.py # 记事本设置对话框
 │   │   ├── file_tree.py       # 文件树
-│   │   └── status_bar.py      # 状态栏
+│   │   └── status_bar.py      # 状态栏（signal_driven_stats：字符数 O(1)/词数防抖）
 │   ├── game/                  # 游戏模块
 │   │   ├── game_engine.py     # 挂机收益计算引擎
 │   │   ├── resource_bar.py    # 资源栏
@@ -232,6 +241,7 @@ PanzerNote/
 │   │   ├── __init__.py        # 安全模块导出与异常定义
 │   │   ├── path_validator.py  # 路径安全验证（规范化/白名单/穿越防护）
 │   │   ├── file_guard.py      # 文件操作安全控制（大小限制/超时控制）
+│   │   ├── file_access_context.py # 文件访问上下文（来源枚举 + 权限分级）
 │   │   ├── crypto_manager.py  # 存档加密系统（PBKDF2+AES-GCM/迁移/备份）
 │   │   ├── input_validator.py # 输入验证框架（文件名/搜索/设置值）
 │   ├── plugins/               # 插件系统

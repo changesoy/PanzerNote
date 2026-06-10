@@ -21,6 +21,8 @@ v1.6.2 改动：
 import os
 import re
 import html as html_module
+from typing import Optional, Union
+
 from PyQt6.QtWidgets import (
     QWidget, QSplitter, QVBoxLayout, QTextBrowser, QApplication, QPushButton
 )
@@ -288,6 +290,8 @@ class PreviewBrowser(QTextBrowser):
     def _cache_cursors(self):
         """在 QTextDocument 中查找所有代码块标记并缓存 cursor"""
         doc = self.document()
+        if doc is None:
+            return
         self._code_cursors = []
         for i in range(len(self._code_blocks)):
             s_marker = f"{_MK_S1}{i}{_MK_S2}"
@@ -319,7 +323,10 @@ class PreviewBrowser(QTextBrowser):
 
     def _show_btn(self, top_y, idx):
         self._hover_idx = idx
-        x = self.viewport().width() - self._copy_btn.width() - 6
+        vp = self.viewport()
+        if vp is None:
+            return
+        x = vp.width() - self._copy_btn.width() - 6
         y = max(2, top_y + 3)
         self._copy_btn.move(x, y)
         self._copy_btn.show()
@@ -343,6 +350,9 @@ class PreviewBrowser(QTextBrowser):
 
     def _after_btn_leave(self):
         vp = self.viewport()
+        if vp is None:
+            self._hide_btn()
+            return
         local = vp.mapFromGlobal(QCursor.pos())
         if vp.rect().contains(local):
             self._mouse_pos = local
@@ -372,7 +382,9 @@ class PreviewBrowser(QTextBrowser):
 
     def _copy_current(self):
         if 0 <= self._hover_idx < len(self._code_blocks):
-            QApplication.clipboard().setText(self._code_blocks[self._hover_idx])
+            cb = QApplication.clipboard()
+            if cb is not None:
+                cb.setText(self._code_blocks[self._hover_idx])
 
     def _on_anchor_clicked(self, url: QUrl):
         url_str = url.toString()
@@ -380,7 +392,9 @@ class PreviewBrowser(QTextBrowser):
             try:
                 idx = int(url_str.split(":")[1])
                 if 0 <= idx < len(self._code_blocks):
-                    QApplication.clipboard().setText(self._code_blocks[idx])
+                    cb = QApplication.clipboard()
+                    if cb is not None:
+                        cb.setText(self._code_blocks[idx])
             except (ValueError, IndexError):
                 get_logger(__name__).debug("代码块复制链接解析失败: %s", url_str)
         else:
@@ -403,10 +417,10 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self._theme_engine = theme_engine
         self.tab_id = None
 
-        self._code_blocks = []
+        self._code_blocks: list[str] = []
         self._base_path = ""
         self._async_renderer = None
-        self._pending_async_task = None
+        self._pending_async_task: Optional[str] = None
         self._render_cache = None
         self._md_parser = self._create_md_parser()
         self._html_template_loaded = False
@@ -450,6 +464,7 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self.splitter.addWidget(self.editor)
 
         # 右侧预览
+        self.preview: Union[QWebEngineView, PreviewBrowser]
         if HAS_WEBENGINE:
             self.preview = QWebEngineView()
         else:
@@ -468,7 +483,7 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
 
         self._preview_visible = True
 
-        if HAS_WEBENGINE:
+        if HAS_WEBENGINE and isinstance(self.preview, QWebEngineView):
             self.preview.loadFinished.connect(self._on_load_finished)
 
         if self._theme_engine:
@@ -490,9 +505,11 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
                 f"}}"
             )
 
-    def _connect_signals(self):
+    def _connect_signals(self) -> None:
         self.editor.textChanged.connect(self._on_text_changed)
-        self.editor.verticalScrollBar().valueChanged.connect(self._sync_scroll)
+        vbar = self.editor.verticalScrollBar()
+        if vbar is not None:
+            vbar.valueChanged.connect(self._sync_scroll)
 
     def _on_text_changed(self):
         self._preview_timer.start()
@@ -519,19 +536,21 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         if isinstance(self.preview, PreviewBrowser):
             self.preview.set_code_blocks(self._code_blocks)
 
-        if HAS_WEBENGINE and self._html_template_loaded:
+        if HAS_WEBENGINE and isinstance(self.preview, QWebEngineView) and self._html_template_loaded:
             import json
             js = f"document.getElementById('content').innerHTML = {json.dumps(html_content)};"
-            self.preview.page().runJavaScript(js)
+            page = self.preview.page()
+            if page is not None:
+                page.runJavaScript(js)
         else:
             full_html = PREVIEW_HTML_TEMPLATE.format(content=html_content)
-            if HAS_WEBENGINE:
+            if HAS_WEBENGINE and isinstance(self.preview, QWebEngineView):
                 if self._base_path:
                     base_url = QUrl.fromLocalFile(self._base_path + '/')
                     self.preview.setHtml(full_html, base_url)
                 else:
                     self.preview.setHtml(full_html)
-            else:
+            elif isinstance(self.preview, PreviewBrowser):
                 self.preview.setHtml(full_html)
 
     def _create_md_parser(self):
@@ -624,7 +643,8 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         theme = self.config.get_editor_setting("code_highlight_theme", None)
 
         if self._pending_async_task:
-            self._async_renderer.cancel(self._pending_async_task)
+            if self._async_renderer is not None:
+                self._async_renderer.cancel(self._pending_async_task)
             self._pending_async_task = None
 
         def _replace(m):
@@ -697,13 +717,13 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         if isinstance(self.preview, PreviewBrowser):
             self.preview.set_code_blocks(self._code_blocks)
 
-        if HAS_WEBENGINE:
+        if HAS_WEBENGINE and isinstance(self.preview, QWebEngineView):
             if self._base_path:
                 base_url = QUrl.fromLocalFile(self._base_path + '/')
                 self.preview.setHtml(full_html, base_url)
             else:
                 self.preview.setHtml(full_html)
-        else:
+        elif isinstance(self.preview, PreviewBrowser):
             self.preview.setHtml(full_html)
 
     def _on_async_highlight_ready(self, task_id: str, html: str, language: str):
@@ -795,15 +815,18 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         if not self._preview_visible:
             return
         bar = self.editor.verticalScrollBar()
-        if bar.maximum() == 0:
+        if bar is None or bar.maximum() == 0:
             return
         ratio = value / bar.maximum() if bar.maximum() > 0 else 0
-        if HAS_WEBENGINE:
+        if HAS_WEBENGINE and isinstance(self.preview, QWebEngineView):
             js = f"window.scrollTo(0, document.body.scrollHeight * {ratio});"
-            self.preview.page().runJavaScript(js)
-        else:
+            page = self.preview.page()
+            if page is not None:
+                page.runJavaScript(js)
+        elif isinstance(self.preview, PreviewBrowser):
             pb = self.preview.verticalScrollBar()
-            pb.setValue(int(ratio * pb.maximum()))
+            if pb is not None:
+                pb.setValue(int(ratio * pb.maximum()))
 
     # ──────────── 预览显隐 ────────────
 

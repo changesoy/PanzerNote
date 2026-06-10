@@ -105,7 +105,7 @@ class EditorSettingsDialog(QDialog):
 
         self.secretary_size_slider = QSlider(Qt.Orientation.Horizontal)
         self.secretary_size_slider.setRange(3, 20)
-        self.secretary_size_slider.setTickPosition(QSlider.TicksBelow)
+        self.secretary_size_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
         self.secretary_size_slider.setTickInterval(1)
         size_layout.addWidget(self.secretary_size_slider)
 

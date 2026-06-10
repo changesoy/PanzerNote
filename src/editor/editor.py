@@ -20,7 +20,7 @@ import os
 import json
 import xml.dom.minidom as minidom
 from contextlib import contextmanager
-from typing import Generator, Set
+from typing import Generator, Optional, Set
 from PyQt6.QtWidgets import (
     QPlainTextEdit, QWidget, QTextEdit, QVBoxLayout,
     QMenu, QMessageBox
@@ -107,7 +107,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         super().__init__(parent)
         self.config = config
         self._theme_engine = theme_engine
-        self.tab_id = None
+        self.tab_id: Optional[int] = None
         self._highlighter = None
         self._file_type = "纯文本"
         self._wrap_mode = "no_wrap"
@@ -717,7 +717,10 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         return len(self.toPlainText())
 
     def get_fast_char_count(self) -> int:
-        return max(0, self.document().characterCount() - 1)
+        doc = self.document()
+        if doc is None:
+            return 0
+        return max(0, doc.characterCount() - 1)
 
     def get_word_count(self) -> int:
         import re

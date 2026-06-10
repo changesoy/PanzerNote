@@ -32,7 +32,7 @@ class AutoPairHandlerMixin:
     - AUTO_PAIR_CHARS: dict
     """
 
-    def _ensure_auto_pair_cache(self):
+    def _ensure_auto_pair_cache(self) -> None:
         pairs = self.AUTO_PAIR_CHARS
         version = (id(pairs), tuple(pairs.items()))
 
@@ -53,7 +53,7 @@ class AutoPairHandlerMixin:
     def _doc_char_at(self, pos: int) -> str:
         doc = self.document()
         if 0 <= pos < doc.characterCount() - 1:
-            return doc.characterAt(pos)
+            return str(doc.characterAt(pos))
         return ""
 
     def _handle_auto_pair_keypress(self, event: QKeyEvent) -> bool:

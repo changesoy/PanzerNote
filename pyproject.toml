@@ -73,7 +73,7 @@ show_column_numbers = true
 show_error_context = true
 
 [[tool.mypy.overrides]]
-module = ["PyQt6.*", "PyQt6.QtCore", "PyQt6.QtWidgets", "PyQt6.QtGui", "PyQt6.QtWebEngineWidgets", "markdown", "PIL.*", "pygments.*"]
+module = ["PyQt6.*", "PyQt6.QtCore", "PyQt6.QtWidgets", "PyQt6.QtGui", "PyQt6.QtWebEngineWidgets", "markdown", "pygments.*", "yaml", "cssbeautifier", "send2trash"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

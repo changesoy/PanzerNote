@@ -7,6 +7,8 @@ v1.6.4 改动：
   - 主题感知：订阅 theme_changed 信号
 """
 
+from typing import Optional
+
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QToolButton, QFrame
 )
@@ -159,7 +161,7 @@ class GameSidebar(ThemeAwareMixin, QWidget):
     def _on_btn_clicked(self, view: str):
         self.view_changed.emit(view)
 
-    def set_current_view(self, view: str):
+    def set_current_view(self, view: Optional[str]):
         for name, btn in self._buttons.items():
             btn.set_current(name == view)
         if hasattr(self, '_theme_engine') and self._theme_engine:

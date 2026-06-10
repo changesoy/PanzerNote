@@ -289,7 +289,9 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
         add_external_action.triggered.connect(self._add_external_file)
         menu.addAction(add_external_action)
 
-        menu.exec(self.tree_view.viewport().mapToGlobal(position))
+        vp = self.tree_view.viewport()
+        if vp is not None:
+            menu.exec(vp.mapToGlobal(position))
 
     def _on_double_click(self, index: QModelIndex):
         if not self.model.isDir(index):
@@ -403,8 +405,10 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
 
         while self.external_list_layout.count():
             item = self.external_list_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            if item is not None:
+                w = item.widget()
+                if w is not None:
+                    w.deleteLater()
 
         valid_files = [f for f in external_files if os.path.exists(f)]
 

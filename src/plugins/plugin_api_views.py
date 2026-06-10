@@ -7,7 +7,7 @@
 而非真实的 Config 实例，防止插件越权修改全局配置。
 """
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, cast
 
 
 class ReadOnlyConfigView:
@@ -44,20 +44,20 @@ class ReadOnlyConfigView:
         return self._config.get_secretary_setting(key, default)
 
     def get_recent_files(self) -> List[str]:
-        return self._config.get_recent_files()
+        return cast(List[str], self._config.get_recent_files())
 
     def get_base_path(self) -> str:
-        return self._config.get_base_path()
+        return cast(str, self._config.get_base_path())
 
     def get_app_version(self) -> str:
         from .. import __version__
         return __version__
 
     def get_notebooks_path(self) -> str:
-        return self._config.get_notebooks_path()
+        return cast(str, self._config.get_notebooks_path())
 
     def get_resources(self) -> Dict[str, int]:
-        return self._config.get_resources()
+        return cast(Dict[str, int], self._config.get_resources())
 
     def get_savegame_field(self, key: str, default: Any = None) -> Any:
         return self._config.get_savegame().get(key, default)

@@ -12,7 +12,7 @@ v1.6.4 改动：
 
 import os
 import json
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, cast
 
 from ..utils.logger import get_logger
 from ..utils.exceptions import safe_call
@@ -145,7 +145,7 @@ class Config:
         return os.path.join(self._app_dir, "user_data_path.txt")
 
     @safe_call(catch=Exception)
-    def _load_user_data_path(self):
+    def _load_user_data_path(self) -> None:
         path_file = self._get_user_data_path_file()
         if os.path.exists(path_file):
             try:
@@ -158,7 +158,7 @@ class Config:
                 get_logger(__name__).debug("读取 user_data_path.txt 失败")
 
     @safe_call()
-    def _save_user_data_path(self):
+    def _save_user_data_path(self) -> None:
         if self._base_path:
             path_file = self._get_user_data_path_file()
             self._file_guard.safe_write(
@@ -179,18 +179,18 @@ class Config:
         if os.path.exists(filepath):
             try:
                 content = self._file_guard.safe_read(filepath, context=self.INTERNAL_CONFIG_CTX)
-                return json.loads(content)
+                return cast(Dict[str, Any], json.loads(content))
             except (json.JSONDecodeError, IOError, FileSizeExceededError,
                     FileOperationTimeoutError, PathSecurityError) as e:
                 get_logger(__name__).warning("加载配置文件失败: %s, 错误: %s", filepath, e)
                 return default.copy()
         return default.copy()
 
-    def _save_json(self, filepath: str, data: Dict):
+    def _save_json(self, filepath: str, data: Dict) -> None:
         content = json.dumps(data, ensure_ascii=False, indent=2)
         self._file_guard.safe_write(filepath, content, context=self.INTERNAL_CONFIG_CTX)
 
-    def _load_all(self):
+    def _load_all(self) -> None:
         config_dir = self._get_config_dir()
 
         settings_path = os.path.join(config_dir, "settings.json")
@@ -227,24 +227,24 @@ class Config:
 
     # === 保存 ===
 
-    def save(self):
+    def save(self) -> None:
         self.save_settings()
         self.save_workspace()
         self.save_savegame()
         self._save_user_data_path()
 
-    def save_settings(self):
+    def save_settings(self) -> None:
         config_dir = self._get_config_dir()
         os.makedirs(config_dir, exist_ok=True)
         self._save_json(os.path.join(config_dir, "settings.json"), self._settings)
         self._save_user_data_path()
 
-    def save_workspace(self):
+    def save_workspace(self) -> None:
         config_dir = self._get_config_dir()
         os.makedirs(config_dir, exist_ok=True)
         self._save_json(os.path.join(config_dir, "workspace.json"), self._workspace)
 
-    def save_savegame(self):
+    def save_savegame(self) -> Any:
         from .savegame_manager import SavegameSaveResult
         return self._savegame_manager.save()
 
@@ -253,7 +253,7 @@ class Config:
     def get_base_path(self) -> str:
         return self._base_path or self._app_dir
 
-    def set_base_path(self, path: str):
+    def set_base_path(self, path: str) -> None:
         self._settings["base_path"] = path
         self._base_path = path
         self._path_validator.add_allowed_root(path)
@@ -274,7 +274,7 @@ class Config:
     def get_portraits_path(self) -> str:
         return os.path.join(self.get_assets_path(), "portraits")
 
-    def ensure_directories(self):
+    def ensure_directories(self) -> None:
         portraits = self.get_portraits_path()
         for subdir in ["原始/正常", "原始/大破", "皮肤/正常", "皮肤/大破"]:
             os.makedirs(os.path.join(portraits, subdir), exist_ok=True)
@@ -293,56 +293,56 @@ class Config:
             return os.path.exists(settings_path)
         return False
 
-    def set_initialized(self, value: bool):
+    def set_initialized(self, value: bool) -> None:
         self._settings["initialized"] = value
 
     # === 设置访问 ===
 
-    def _get_ns_setting(self, namespace: str, key: str, default=None):
+    def _get_ns_setting(self, namespace: str, key: str, default: Any = None) -> Any:
         return self._settings.get(namespace, {}).get(key, default)
 
-    def _set_ns_setting(self, namespace: str, key: str, value):
+    def _set_ns_setting(self, namespace: str, key: str, value: Any) -> None:
         if namespace not in self._settings:
             self._settings[namespace] = {}
         self._settings[namespace][key] = value
 
-    def get_editor_setting(self, key: str, default=None):
+    def get_editor_setting(self, key: str, default: Any = None) -> Any:
         return self._get_ns_setting("editor", key, default)
 
-    def set_editor_setting(self, key: str, value):
+    def set_editor_setting(self, key: str, value: Any) -> None:
         self._set_ns_setting("editor", key, value)
 
-    def get_game_setting(self, key: str, default=None):
+    def get_game_setting(self, key: str, default: Any = None) -> Any:
         return self._get_ns_setting("game", key, default)
 
-    def set_game_setting(self, key: str, value):
+    def set_game_setting(self, key: str, value: Any) -> None:
         self._set_ns_setting("game", key, value)
 
-    def get_secretary_setting(self, key: str, default=None):
+    def get_secretary_setting(self, key: str, default: Any = None) -> Any:
         return self._get_ns_setting("secretary", key, default)
 
-    def set_secretary_setting(self, key: str, value):
+    def set_secretary_setting(self, key: str, value: Any) -> None:
         self._set_ns_setting("secretary", key, value)
 
-    def get_view_setting(self, key: str, default=None):
+    def get_view_setting(self, key: str, default: Any = None) -> Any:
         return self._get_ns_setting("view", key, default)
 
-    def set_view_setting(self, key: str, value):
+    def set_view_setting(self, key: str, value: Any) -> None:
         self._set_ns_setting("view", key, value)
 
-    def get_window_setting(self, key: str, default=None):
+    def get_window_setting(self, key: str, default: Any = None) -> Any:
         return self._get_ns_setting("window", key, default)
 
-    def set_window_setting(self, key: str, value):
+    def set_window_setting(self, key: str, value: Any) -> None:
         self._set_ns_setting("window", key, value)
 
-    def get_setting(self, key: str, default=None):
+    def get_setting(self, key: str, default: Any = None) -> Any:
         return self._settings.get(key, default)
 
-    def set_setting(self, key: str, value):
+    def set_setting(self, key: str, value: Any) -> None:
         self._settings[key] = value
 
-    def reset_to_defaults(self):
+    def reset_to_defaults(self) -> None:
         import copy
         self._settings = copy.deepcopy(self.DEFAULT_SETTINGS)
         self.save_settings()
@@ -355,7 +355,7 @@ class Config:
         "resources", "cores",
     })
 
-    def update_workspace_field(self, key: str, value):
+    def update_workspace_field(self, key: str, value: Any) -> None:
         if key not in self._KNOWN_WORKSPACE_KEYS:
             raise KeyError(f"未知的 workspace 字段: {key}")
         self._workspace[key] = value
@@ -363,25 +363,25 @@ class Config:
     def get_workspace(self) -> Dict:
         return self._workspace
 
-    def set_open_files(self, files: List[Dict]):
+    def set_open_files(self, files: List[Dict]) -> None:
         self._workspace["last_session"]["open_files"] = files
 
     def get_open_files(self) -> List[Dict]:
-        return self._workspace.get("last_session", {}).get("open_files", [])
+        return cast(List[Dict[str, Any]], self._workspace.get("last_session", {}).get("open_files", []))
 
-    def set_active_tab_index(self, index: int):
+    def set_active_tab_index(self, index: int) -> None:
         self._workspace["last_session"]["active_tab_index"] = index
 
     def get_active_tab_index(self) -> int:
-        return self._workspace.get("last_session", {}).get("active_tab_index", 0)
+        return int(self._workspace.get("last_session", {}).get("active_tab_index", 0))
 
-    def set_current_view(self, view: str):
+    def set_current_view(self, view: str) -> None:
         self._workspace["last_session"]["current_view"] = view
 
     def get_current_view(self) -> str:
-        return self._workspace.get("last_session", {}).get("current_view", "editor")
+        return str(self._workspace.get("last_session", {}).get("current_view", "editor"))
 
-    def add_recent_file(self, filepath: str):
+    def add_recent_file(self, filepath: str) -> None:
         recent = self._workspace.get("recent_files", [])
         if filepath in recent:
             recent.remove(filepath)
@@ -389,12 +389,12 @@ class Config:
         self._workspace["recent_files"] = recent[:20]
 
     def get_recent_files(self) -> List[str]:
-        return self._workspace.get("recent_files", [])
+        return cast(List[str], self._workspace.get("recent_files", []))
 
     def get_external_files(self) -> List[str]:
-        return self._workspace.get("external_files", [])
+        return cast(List[str], self._workspace.get("external_files", []))
 
-    def add_external_file(self, filepath: str):
+    def add_external_file(self, filepath: str) -> None:
         if "external_files" not in self._workspace:
             self._workspace["external_files"] = []
         external = self._workspace["external_files"]
@@ -402,7 +402,7 @@ class Config:
             external.append(filepath)
             self.save_workspace()
 
-    def remove_external_file(self, filepath: str):
+    def remove_external_file(self, filepath: str) -> None:
         external = self._workspace.get("external_files", [])
         if filepath in external:
             external.remove(filepath)
@@ -420,34 +420,34 @@ class Config:
     def get_resources(self) -> Dict[str, int]:
         return self._savegame_manager.get_resources()
 
-    def set_resources(self, resources: Dict[str, int]):
+    def set_resources(self, resources: Dict[str, int]) -> None:
         self._savegame_manager.set_resources(resources)
 
-    def add_resource(self, resource_type: str, amount: int):
+    def add_resource(self, resource_type: str, amount: int) -> None:
         self._savegame_manager.add_resource(resource_type, amount)
 
     def get_cores(self) -> int:
         return self._savegame_manager.get_cores()
 
-    def set_cores(self, amount: int):
+    def set_cores(self, amount: int) -> None:
         self._savegame_manager.set_cores(amount)
 
-    def add_cores(self, amount: int):
+    def add_cores(self, amount: int) -> None:
         self._savegame_manager.add_cores(amount)
 
     def get_today_chars_typed(self) -> int:
         return self._savegame_manager.get_today_chars_typed()
 
-    def add_chars_typed(self, count: int):
+    def add_chars_typed(self, count: int) -> None:
         self._savegame_manager.add_chars_typed(count)
 
     def get_total_documents(self) -> int:
         return self._savegame_manager.get_total_documents()
 
-    def set_total_documents(self, count: int):
+    def set_total_documents(self, count: int) -> None:
         self._savegame_manager.set_total_documents(count)
 
-    def update_last_login(self):
+    def update_last_login(self) -> None:
         self._savegame_manager.update_last_login()
 
     def get_last_login(self) -> Optional[str]:
@@ -491,9 +491,9 @@ class Config:
         key: str,
         value: Any,
         expected_type: type,
-        min_val=None,
-        max_val=None,
-        allowed_values=None,
+        min_val: Any = None,
+        max_val: Any = None,
+        allowed_values: Any = None,
     ) -> Any:
         return self._security_manager.validate_setting_value(
             key, value, expected_type,

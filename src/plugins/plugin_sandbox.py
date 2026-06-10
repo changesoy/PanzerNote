@@ -19,7 +19,7 @@
 """
 
 import threading
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, cast
 
 from ..utils.logger import get_logger
 from .plugin_api_views import ReadOnlyConfigView
@@ -85,7 +85,7 @@ class PluginAPI:
 
     def get_resources(self) -> Dict[str, int]:
         self._check_permission(PluginPermission.READ_SAVEGAME)
-        return self._config.get_resources()
+        return cast(Dict[str, int], self._config.get_resources())
 
     def get_savegame_field(self, key: str, default: Any = None) -> Any:
         self._check_permission(PluginPermission.READ_SAVEGAME)
@@ -93,11 +93,11 @@ class PluginAPI:
 
     def get_recent_files(self) -> List[str]:
         self._check_permission(PluginPermission.READ_WORKSPACE)
-        return self._config.get_recent_files()
+        return cast(List[str], self._config.get_recent_files())
 
     def get_notebooks_path(self) -> str:
         self._check_permission(PluginPermission.READ_FILE_TREE)
-        return self._config.get_notebooks_path()
+        return cast(str, self._config.get_notebooks_path())
 
     def get_app_version(self) -> str:
         from .. import __version__

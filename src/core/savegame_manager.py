@@ -8,7 +8,7 @@ import json
 import os
 from datetime import datetime
 from enum import Enum, auto
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 
 from ..utils.logger import get_logger
 from ..utils.exceptions import safe_call
@@ -77,7 +77,7 @@ class SavegameManager:
         if os.path.exists(filepath):
             try:
                 content = self._file_guard.safe_read(filepath, context=self.SAVEGAME_CTX)
-                return json.loads(content)
+                return cast(Dict[str, Any], json.loads(content))
             except (json.JSONDecodeError, IOError, FileSizeExceededError,
                     FileOperationTimeoutError, PathSecurityError) as e:
                 self._logger.warning("加载存档文件失败: %s, 错误: %s", filepath, e)
@@ -206,9 +206,8 @@ class SavegameManager:
         return self._savegame
 
     def get_resources(self) -> Dict[str, int]:
-        return self._savegame.get("resources", {
-            "fuel": 0, "ammo": 0, "steel": 0, "bauxite": 0
-        })
+        default: Dict[str, int] = {"fuel": 0, "ammo": 0, "steel": 0, "bauxite": 0}
+        return cast(Dict[str, int], self._savegame.get("resources", default))
 
     def set_resources(self, resources: Dict[str, int]):
         self._savegame["resources"] = resources
@@ -220,7 +219,7 @@ class SavegameManager:
         self._savegame["resources"][resource_type] = max(0, current + amount)
 
     def get_cores(self) -> int:
-        return self._savegame.get("cores", 0)
+        return int(self._savegame.get("cores", 0))
 
     def set_cores(self, amount: int):
         self._savegame["cores"] = max(0, amount)
@@ -235,7 +234,7 @@ class SavegameManager:
         if saved_date != today:
             self._savegame["today_date"] = today
             self._savegame["today_chars_typed"] = 0
-        return self._savegame.get("today_chars_typed", 0)
+        return int(self._savegame.get("today_chars_typed", 0))
 
     def add_chars_typed(self, count: int):
         self.get_today_chars_typed()
@@ -243,7 +242,7 @@ class SavegameManager:
         self._savegame["total_chars_typed"] = self._savegame.get("total_chars_typed", 0) + count
 
     def get_total_documents(self) -> int:
-        return self._savegame.get("total_documents", 0)
+        return int(self._savegame.get("total_documents", 0))
 
     def set_total_documents(self, count: int):
         self._savegame["total_documents"] = count

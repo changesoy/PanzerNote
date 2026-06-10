@@ -32,14 +32,16 @@ class LazyHighlightManager(QObject):
         self._editor = editor
         self._highlighter = None
         self._is_large_file = False
-        self._highlighted_blocks = set()
+        self._highlighted_blocks: set[int] = set()
         self._pending_highlight_timer = QTimer(self)
         self._pending_highlight_timer.setSingleShot(True)
         self._pending_highlight_timer.setInterval(50)
         self._pending_highlight_timer.timeout.connect(self._do_pending_highlight)
-        self._pending_ranges = []
+        self._pending_ranges: list[tuple[int, int]] = []
 
-        self._editor.verticalScrollBar().valueChanged.connect(self._on_scroll)
+        vbar = self._editor.verticalScrollBar()
+        if vbar is not None:
+            vbar.valueChanged.connect(self._on_scroll)
 
     def set_highlighter(self, highlighter):
         self._highlighter = highlighter

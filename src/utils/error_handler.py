@@ -205,7 +205,7 @@ class ErrorHandler:
     @classmethod
     def show_from_exception(
         cls,
-        exception: Exception,
+        exception: BaseException,
         category: ErrorCategory = ErrorCategory.GENERAL,
         title: Optional[str] = None,
         suggestion: Optional[str] = None,

@@ -68,7 +68,7 @@ class GameEngine:
 
         return reward
 
-    def add_typing_reward(self, reward: int):
+    def add_typing_reward(self, reward: int) -> None:
         """将打字奖励转化为资源
 
         打字奖励按 1:1:1:0.2 比例分配到燃料/弹药/钢材/铝材

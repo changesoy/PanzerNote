@@ -22,7 +22,7 @@ import os
 import shutil
 import uuid
 from datetime import datetime
-from typing import List, Dict, Optional
+from typing import Any, List, Dict, Optional, cast
 
 from ..utils.logger import get_logger
 
@@ -90,6 +90,7 @@ class TempSessionManager:
         if not self._current_session_dir:
             self.create_session()
 
+        assert self._current_session_dir is not None
         manifest = self._read_manifest(self._current_session_dir)
         if manifest is None:
             return
@@ -122,8 +123,8 @@ class TempSessionManager:
             autosave_path = os.path.join(files_dir, autosave_name)
 
             try:
-                with open(autosave_path, "w", encoding=encoding, errors="replace") as f:
-                    f.write(content)
+                with open(autosave_path, "w", encoding=encoding, errors="replace") as fh:
+                    fh.write(content)
             except Exception as e:
                 get_logger(__name__).error("写入 autosave 失败: %s, %s", autosave_path, e)
                 continue
@@ -251,8 +252,8 @@ class TempSessionManager:
         if not os.path.isfile(autosave_path):
             return None
         try:
-            with open(autosave_path, "r", encoding=encoding, errors="replace") as f:
-                return f.read()
+            with open(autosave_path, "r", encoding=encoding, errors="replace") as fh:
+                return fh.read()
         except Exception as e:
             get_logger(__name__).error("读取 autosave 失败: %s, %s", autosave_path, e)
             return None
@@ -301,8 +302,8 @@ class TempSessionManager:
         if not os.path.isfile(manifest_path):
             return None
         try:
-            with open(manifest_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+            with open(manifest_path, "r", encoding="utf-8") as fh:
+                return cast(Optional[Dict[str, Any]], json.load(fh))
         except Exception as e:
             get_logger(__name__).error("读取 manifest 失败: %s, %s", manifest_path, e)
             return None
@@ -310,7 +311,7 @@ class TempSessionManager:
     def _write_manifest(self, session_dir: str, manifest: Dict) -> None:
         manifest_path = os.path.join(session_dir, self.MANIFEST_FILENAME)
         try:
-            with open(manifest_path, "w", encoding="utf-8") as f:
-                json.dump(manifest, f, ensure_ascii=False, indent=2)
+            with open(manifest_path, "w", encoding="utf-8") as fh:
+                json.dump(manifest, fh, ensure_ascii=False, indent=2)
         except Exception as e:
             get_logger(__name__).error("写入 manifest 失败: %s, %s", manifest_path, e)

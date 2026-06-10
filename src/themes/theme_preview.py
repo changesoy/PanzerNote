@@ -79,9 +79,9 @@ class ThemePreviewWidget(QWidget):
 
         active = self._engine.get_active_theme()
         for i in range(self._theme_list.count()):
-            item = self._theme_list.item(i)
-            if item.data(Qt.ItemDataRole.UserRole) == active.id:
-                self._theme_list.setCurrentItem(item)
+            theme_item = self._theme_list.item(i)
+            if theme_item is not None and theme_item.data(Qt.ItemDataRole.UserRole) == active.id:
+                self._theme_list.setCurrentItem(theme_item)
                 break
 
     def _on_theme_selected(self, current: QListWidgetItem, previous: QListWidgetItem):
@@ -96,8 +96,10 @@ class ThemePreviewWidget(QWidget):
     def _update_preview(self, theme: ThemeDefinition):
         while self._preview_layout.count():
             child = self._preview_layout.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
+            if child is not None:
+                w = child.widget()
+                if w is not None:
+                    w.deleteLater()
 
         info_group = QGroupBox("主题信息")
         info_layout = QFormLayout()
@@ -210,7 +212,7 @@ class ThemePreviewDialog(QDialog):
         self._preview_widget.theme_applied.connect(self._on_theme_applied)
         layout.addWidget(self._preview_widget)
 
-        btn_box = QDialogButtonBox(QDialogButtonBox.Close)
+        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         btn_box.rejected.connect(self.reject)
         layout.addWidget(btn_box)
 

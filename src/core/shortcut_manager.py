@@ -284,7 +284,7 @@ class ShortcutManager:
             return self._shortcuts[action_id][1]
         return None
 
-    def get_all_shortcuts(self) -> Dict[str, Dict[str, str]]:
+    def get_all_shortcuts(self) -> Dict[str, Dict[str, Dict[str, str]]]:
         """获取所有快捷键，按分类组织
 
         Returns:

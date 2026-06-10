@@ -17,7 +17,7 @@ import base64
 import json
 import os
 import shutil
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
@@ -145,7 +145,7 @@ class CryptoManager:
             aesgcm = AESGCM(key)
             plaintext = aesgcm.decrypt(nonce, ciphertext, None)
 
-            result = json.loads(plaintext.decode('utf-8'))
+            result: Dict[str, Any] = cast(Dict[str, Any], json.loads(plaintext.decode('utf-8')))
             self._logger.info("数据解密完成")
             return result
 

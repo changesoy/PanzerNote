@@ -197,7 +197,7 @@ class MenuBuilder:
         self,
         menu: QMenu,
         text: str,
-        shortcut: Optional[Union[QKeySequence, int]],
+        shortcut: Optional[Union[QKeySequence, QKeySequence.StandardKey, int]],
         callback: Callable,
         action_id: Optional[str] = None,
         category: str = "通用",

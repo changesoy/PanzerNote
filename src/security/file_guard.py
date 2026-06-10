@@ -108,8 +108,9 @@ class FileGuard:
         """获取文件实际磁盘占用大小"""
         try:
             result = os.stat(filepath)
-            if hasattr(result, 'st_blocks'):
-                return result.st_blocks * 512
+            blocks = getattr(result, "st_blocks", None)
+            if blocks is not None:
+                return int(blocks) * 512
             return result.st_size
         except OSError as e:
             raise FileSecurityError(f"无法获取文件大小: {e}")

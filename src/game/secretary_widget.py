@@ -27,6 +27,8 @@ portraits/
 import os
 import json
 import random
+from typing import Optional
+
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QSizePolicy
 )
@@ -176,7 +178,7 @@ class SecretaryWidget(ThemeAwareMixin, QWidget):
         self._parent_widget = parent
         self._position_dirty = False
         self._last_position = QPoint()
-        self._size_percent = self.config.get_secretary_setting(
+        self._size_percent: int = self.config.get_secretary_setting(
             "size_percent", _DEFAULT_SIZE_PERCENT
         )
 
@@ -468,7 +470,7 @@ class SecretaryWidget(ThemeAwareMixin, QWidget):
         self.show_event_message("点击")
 
     def set_secretary(self, char_id: str, char_name: str,
-                      skin_name: str = None, state: str = "正常"):
+                      skin_name: Optional[str] = None, state: str = "正常"):
         """设置小秘书
 
         Args:

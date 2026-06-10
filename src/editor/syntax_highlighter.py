@@ -6,6 +6,7 @@
 """
 
 import re
+from typing import Optional
 from PyQt6.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor, QFont, QTextDocument
 
 from ..utils.logger import get_logger
@@ -44,7 +45,7 @@ class PygmentsHighlighter(QSyntaxHighlighter):
             tt = tt.parent if hasattr(tt, 'parent') else None
         return None
 
-    def highlightBlock(self, text: str):
+    def highlightBlock(self, text: Optional[str]):
         """高亮单行文本"""
         if not text:
             return
@@ -167,7 +168,9 @@ class MarkdownHighlighter(QSyntaxHighlighter):
 
         self._fence_re = re.compile(r'^```')
 
-    def highlightBlock(self, text: str):
+    def highlightBlock(self, text: Optional[str]):
+        if text is None:
+            return
         prev_state = self.previousBlockState()
 
         if prev_state == self.STATE_CODE_BLOCK:

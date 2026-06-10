@@ -13,6 +13,8 @@
     行数变化时后续块也标记为脏，确保缓存索引一致。
 """
 
+from typing import Optional
+
 from PyQt6.QtWidgets import QWidget
 from PyQt6.QtCore import Qt, QTimer, QRectF
 from PyQt6.QtGui import QPainter, QColor, QPixmap, QPicture
@@ -49,7 +51,7 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
         self.setCursor(Qt.CursorShape.ArrowCursor)
         self.setMouseTracking(True)
 
-        self._cache_pixmap: QPixmap = None
+        self._cache_pixmap: Optional[QPixmap] = None
         self._cache_valid = False
 
         self._block_cache: dict = {}
@@ -130,12 +132,14 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
             self._block_cache.clear()
 
     def _get_line_height(self) -> float:
-        block_count = max(1, self._editor.document().blockCount())
+        doc = self._editor.document()
+        assert doc is not None
+        block_count = max(1, doc.blockCount())
         available = self.height() - self.TOP_MARGIN * 2
         natural = block_count * self.BASE_LINE_HEIGHT
         if natural <= available:
-            return self.BASE_LINE_HEIGHT
-        return max(self.MIN_LINE_HEIGHT, available / block_count)
+            return float(self.BASE_LINE_HEIGHT)
+        return float(max(self.MIN_LINE_HEIGHT, available / block_count))
 
     def _get_viewport_rect(self) -> QRectF:
         editor = self._editor
@@ -210,12 +214,12 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
             if cache_idx in self._block_cache and cache_idx not in self._block_dirty:
                 picture = self._block_cache[cache_idx]
                 y_offset = start_line * line_h + self.TOP_MARGIN
-                painter.drawPicture(0, y_offset, picture)
+                painter.drawPicture(0, int(y_offset), picture)
             else:
                 picture = QPicture()
                 pic_painter = QPainter(picture)
                 pic_painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-                y = self.TOP_MARGIN
+                y: float = self.TOP_MARGIN
 
                 for line_num in range(start_line, end_line):
                     block = doc.findBlockByNumber(line_num)
@@ -229,7 +233,7 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
                 self._block_dirty.discard(cache_idx)
 
                 y_offset = start_line * line_h + self.TOP_MARGIN
-                painter.drawPicture(0, y_offset, picture)
+                painter.drawPicture(0, int(y_offset), picture)
 
     def _render_content(self, painter: QPainter):
         doc = self._editor.document()

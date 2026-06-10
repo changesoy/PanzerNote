@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer, QEvent, pyqtSignal
 from PyQt6.QtGui import QIcon, QCloseEvent, QAction, QTextCursor
-from typing import List
+from typing import List, Optional
 
 from . import __version__
 from .core.config import Config
@@ -54,6 +54,10 @@ class MainWindow(QMainWindow):
     def __init__(self, config: Config, parent=None):
         super().__init__(parent)
         self.config = config
+        # 预声明由 MenuBuilder 动态挂载的属性
+        self.recent_menu: QMenu
+        self._wrap_no_wrap_action: QAction
+        self._wrap_limit_action: QAction
         self._file_open_service = FileOpenService(
             config.get_path_validator(),
             config.get_notebooks_path(),
@@ -211,7 +215,9 @@ class MainWindow(QMainWindow):
     def _init_menubar(self):
         """初始化菜单栏"""
         builder = MenuBuilder(self.config, self.shortcut_manager)
-        builder.build(self.menuBar(), self)
+        mb = self.menuBar()
+        assert mb is not None
+        builder.build(mb, self)
 
     def _init_statusbar(self):
         """初始化状态栏"""
@@ -306,7 +312,9 @@ class MainWindow(QMainWindow):
                         editor.setTextCursor(cursor)
                     if scroll_pos is not None:
                         from PyQt6.QtCore import QTimer
-                        QTimer.singleShot(0, lambda v=scroll_pos: editor.verticalScrollBar().setValue(v))
+                        vbar = editor.verticalScrollBar()
+                        if vbar is not None:
+                            QTimer.singleShot(0, lambda v=scroll_pos, sb=vbar: sb.setValue(v))
 
         if self._pending_files:
             from PyQt6.QtCore import QTimer
@@ -331,7 +339,9 @@ class MainWindow(QMainWindow):
                 cursor.setPosition(min(cursor_pos, len(editor.toPlainText())))
                 editor.setTextCursor(cursor)
             if scroll_pos is not None:
-                QTimer.singleShot(0, lambda v=scroll_pos: editor.verticalScrollBar().setValue(v))
+                vbar = editor.verticalScrollBar()
+                if vbar is not None:
+                    QTimer.singleShot(0, lambda v=scroll_pos, sb=vbar: sb.setValue(v))
 
     def _connect_signals(self):
         """连接信号"""
@@ -383,7 +393,7 @@ class MainWindow(QMainWindow):
             from PyQt6.QtWidgets import QInputDialog
             password, ok = QInputDialog.getText(
                 self, "解锁存档", "请输入存档加密密码：",
-                QLineEdit.Password, ""
+                QLineEdit.EchoMode.Password, ""
             )
             if ok and password:
                 if self.config.verify_encryption_password(password):
@@ -507,8 +517,9 @@ class MainWindow(QMainWindow):
                             cursor = editor.textCursor()
                             cursor.select(QTextCursor.SelectionType.Document)
                             cursor.insertText(content)
-                            tab_id = widget.tab_id
-                            self.editor_tabs._save_manager.mark_dirty(tab_id)
+                            tab_id = getattr(widget, 'tab_id', None)
+                            if tab_id is not None:
+                                self.editor_tabs._save_manager.mark_dirty(tab_id)
 
         session_mgr.remove_recovered_session(session_dir)
 
@@ -546,8 +557,10 @@ class MainWindow(QMainWindow):
 
     # === 事件处理 ===
 
-    def changeEvent(self, event: QEvent):
+    def changeEvent(self, event: Optional[QEvent]):
         """窗口状态变化事件"""
+        if event is None:
+            return
         if event.type() == QEvent.Type.WindowStateChange:
             if self.isMinimized():
                 self._save_to_temp()
@@ -591,7 +604,7 @@ class MainWindow(QMainWindow):
         else:
             event.ignore()
 
-    def closeEvent(self, event: QCloseEvent):
+    def closeEvent(self, event: Optional[QCloseEvent]):
         """关闭窗口事件（两阶段关闭）
 
         阶段1：检查是否有未保存/保存中/保存失败的文件
@@ -601,6 +614,8 @@ class MainWindow(QMainWindow):
               全部成功 → _finalize_close()
               任一失败 → 取消关闭，恢复 UI
         """
+        if event is None:
+            return
         if self._closing:
             event.accept()
             return

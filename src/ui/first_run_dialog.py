@@ -6,6 +6,8 @@
 
 import os
 import shutil
+from typing import Optional
+
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QLineEdit, QPushButton, QFileDialog, QMessageBox
@@ -19,7 +21,7 @@ from ..utils.logger import get_logger
 class FirstRunDialog(QDialog):
     """首次运行对话框"""
 
-    def __init__(self, app_dir: str = None, parent=None):
+    def __init__(self, app_dir: Optional[str] = None, parent=None):
         super().__init__(parent)
         self._app_dir = app_dir or os.path.dirname(os.path.dirname(__file__))
         self._selected_path = ""

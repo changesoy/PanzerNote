@@ -12,7 +12,7 @@ import importlib.util
 import json
 import os
 import sys
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional, Type, cast
 
 from ..utils.logger import get_logger
 from .plugin_base import PluginBase, PluginMeta, PluginPermission, PluginState
@@ -49,7 +49,7 @@ class PluginManager:
         return self._plugins_dir
 
     def scan_plugins(self) -> List[str]:
-        discovered = []
+        discovered: List[str] = []
         if not os.path.isdir(self._plugins_dir):
             self._logger.info("插件目录不存在: %s", self._plugins_dir)
             return discovered
@@ -221,8 +221,8 @@ class PluginManager:
         return result
 
     def _load_manifest(self, manifest_path: str) -> Dict:
-        with open(manifest_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
+        with open(manifest_path, 'r', encoding='utf-8') as fh:
+            return cast(Dict[str, Any], json.load(fh))
 
     def _validate_manifest(self, manifest: Dict) -> None:
         missing = self.REQUIRED_MANIFEST_FIELDS - set(manifest.keys())
@@ -249,6 +249,9 @@ class PluginManager:
                 PluginPermission(p)
             except ValueError:
                 raise PluginValidationError(f"无效权限: {p}")
+
+    def _find_plugin_path(self, plugin_id: str) -> str:
+        return os.path.join(self._plugins_dir, self._find_plugin_dir(plugin_id))
 
     def _find_plugin_dir(self, plugin_id: str) -> str:
         for entry in os.listdir(self._plugins_dir):
@@ -303,7 +306,7 @@ class PluginManager:
                 f"{self.PLUGIN_ENTRY_CLASS} 必须继承 PluginBase"
             )
 
-        return plugin_class
+        return cast(Type[PluginBase], plugin_class)
 
     def _get_plugin(self, plugin_id: str) -> PluginBase:
         if plugin_id not in self._plugins:

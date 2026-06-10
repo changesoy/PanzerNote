@@ -11,7 +11,7 @@ v1.5.4 改动：
 
 import os
 from datetime import datetime
-from typing import Optional, List, Dict, Tuple, Set
+from typing import Optional, List, Dict, Tuple, Set, cast
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QTabWidget, QTabBar, QMessageBox,
@@ -232,15 +232,17 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self.tabCloseRequested.connect(self._on_tab_close_requested)
         self.currentChanged.connect(self._on_current_changed)
 
-        self.tabBar().setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.tabBar().customContextMenuRequested.connect(self._show_tab_context_menu)
+        tb = self.tabBar()
+        if tb is not None:
+            tb.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            tb.customContextMenuRequested.connect(self._show_tab_context_menu)
 
         if theme_engine:
             self._init_theme(theme_engine)
 
         # ── 查找替换栏（嵌入在标签内容上方） ──
         # 不在这里创建，而是由 main_window 在 editor_container 中创建
-        self._find_bar = None
+        self._find_bar: Optional[FindReplaceBar] = None
 
     def set_find_bar(self, find_bar: FindReplaceBar):
         """设置外部传入的查找替换栏"""
@@ -261,7 +263,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             info = self._tab_info.get(widget.tab_id, {})
             filepath = info.get("filepath")
             if filepath and not info.get("is_new"):
-                return filepath
+                return str(filepath)
         return None
 
     def _get_editor_from_widget(self, widget) -> Optional[Editor]:
@@ -412,7 +414,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         widget.tab_id = tab_id
 
         # 如果是MarkdownPreviewWidget，也设置editor的tab_id
-        if is_md:
+        if is_md and isinstance(widget, MarkdownPreviewWidget):
             widget.editor.tab_id = tab_id
 
         self._tab_info[tab_id] = {
@@ -453,7 +455,10 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if not widget:
             return False, 0
 
-        info = self._tab_info.get(getattr(widget, 'tab_id', None), {})
+        tid = getattr(widget, 'tab_id', None)
+        if tid is None:
+            return False, 0
+        info = self._tab_info.get(tid, {})
 
         if info.get("filepath"):
             suggested_name = info["filepath"]
@@ -529,7 +534,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
         task = SaveTask(self.config.get_file_guard(), filepath, content, encoding.lower())
         self._save_manager.submit_task(tab_id, task)
-        QThreadPool.globalInstance().start(task)
+        pool = QThreadPool.globalInstance()
+        if pool is not None:
+            pool.start(task)
 
         return True, 0
 
@@ -618,7 +625,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                     info["history"] = []
                     editor = self._get_editor_from_widget(widget)
                     if editor:
-                        editor.document().clearUndoRedoStacks()
+                        doc = editor.document()
+                        if doc is not None:
+                            doc.clearUndoRedoStacks()
 
     def close_current_tab(self):
         if self.count() > 0:
@@ -636,7 +645,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         filepath = entry["filepath"]
         cursor_pos = entry.get("cursor_position")
         for i in range(self.count()):
-            info = self._tab_info.get(self.widget(i).tab_id, {})
+            w = self.widget(i)
+            tid = getattr(w, 'tab_id', None) if w is not None else None
+            info = self._tab_info.get(tid, {}) if tid else {}
             if info.get("filepath") == filepath:
                 self.setCurrentIndex(i)
                 return True
@@ -773,7 +784,10 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         return True
 
     def _show_tab_context_menu(self, position):
-        index = self.tabBar().tabAt(position)
+        tb = self.tabBar()
+        if tb is None:
+            return
+        index = tb.tabAt(position)
         if index < 0:
             return
 
@@ -808,7 +822,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         close_all.triggered.connect(self.close_all_tabs)
         menu.addAction(close_all)
 
-        menu.exec(self.tabBar().mapToGlobal(position))
+        menu.exec(tb.mapToGlobal(position))
 
     def _context_save(self, index: int):
         old = self.currentIndex()
@@ -871,13 +885,21 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     _PASTE_THRESHOLD = 50
 
     def _on_text_changed(self):
-        editor = self.sender()
-        if not editor or not hasattr(editor, 'tab_id'):
+        editor_obj = self.sender()
+        if editor_obj is None or not hasattr(editor_obj, 'tab_id'):
             return
 
-        info = self._tab_info.get(editor.tab_id, {})
+        editor: Editor = cast(Editor, editor_obj)
+        tab_id = editor.tab_id
+        if tab_id is None:
+            return
 
-        current_len = editor.document().characterCount() - 1
+        info = self._tab_info.get(tab_id, {})
+
+        doc = editor.document()
+        if doc is None:
+            return
+        current_len = doc.characterCount() - 1
         last_len = info.get("last_text_length", current_len)
         delta = current_len - last_len
         info["last_text_length"] = current_len
@@ -890,15 +912,15 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 self.chars_typed.emit(delta)
 
         last_saved_chars = info.get("last_saved_chars", 0)
-        is_modified = editor.document().isModified()
+        is_modified = doc.isModified()
 
         if is_modified != info.get("is_modified", False):
             info["is_modified"] = is_modified
             if is_modified:
-                self._save_manager.mark_dirty(editor.tab_id)
+                self._save_manager.mark_dirty(tab_id)
                 for i in range(self.count()):
                     widget = self.widget(i)
-                    if getattr(widget, 'tab_id', None) == editor.tab_id:
+                    if getattr(widget, 'tab_id', None) == tab_id:
                         title = self.tabText(i)
                         if not title.endswith(" *") and not title.endswith(" ⏳") and not title.endswith(" !"):
                             self.setTabText(i, title + " *")
@@ -939,7 +961,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             info["is_modified"] = False
             editor = self._get_editor_from_widget(widget)
             if editor:
-                editor.document().setModified(False)
+                doc = editor.document()
+                if doc is not None:
+                    doc.setModified(False)
             self.setTabText(index, base_title)
 
             pending = self._pending_save_info.pop(tab_id, None)
@@ -978,7 +1002,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             info["is_modified"] = True
             editor = self._get_editor_from_widget(widget)
             if editor:
-                editor.document().setModified(True)
+                doc = editor.document()
+                if doc is not None:
+                    doc.setModified(True)
             self.setTabText(index, base_title + " !")
             self._pending_save_info.pop(tab_id, None)
             self._pending_save_as_info.pop(tab_id, None)
@@ -987,7 +1013,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         elif state == SaveState.DIRTY:
             info["is_modified"] = True
 
-    def _on_save_failed(self, tab_id: int, filepath: str, exc: object) -> None:
+    def _on_save_failed(self, tab_id: int, filepath: str, exc: BaseException) -> None:
         info = self._tab_info.get(tab_id, {})
         basename = os.path.basename(filepath) if filepath else "未知文件"
         ErrorHandler.show_from_exception(exc, ErrorCategory.FILE, f"保存文件失败：{basename}")
@@ -1033,7 +1059,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         widget = self.currentWidget()
         if widget and hasattr(widget, 'tab_id'):
             info = self._tab_info.get(widget.tab_id, {})
-            return info.get("encoding", "UTF-8")
+            return str(info.get("encoding", "UTF-8"))
         return "UTF-8"
 
     def get_unsaved_files(self) -> List[str]:
@@ -1077,7 +1103,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if editor:
             cursor = editor.textCursor()
             result["cursor_position"] = cursor.position()
-            result["scroll_position"] = editor.verticalScrollBar().value()
+            vbar = editor.verticalScrollBar()
+            if vbar is not None:
+                result["scroll_position"] = vbar.value()
         return result
 
     def get_open_files_info(self) -> List[Dict]:
@@ -1092,10 +1120,11 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                     editor = self._get_editor_from_widget(widget)
                     if editor:
                         cursor = editor.textCursor()
+                        vbar2 = editor.verticalScrollBar()
                         files_info.append({
                             "path": filepath,
                             "cursor_position": cursor.position(),
-                            "scroll_position": editor.verticalScrollBar().value()
+                            "scroll_position": vbar2.value() if vbar2 is not None else 0
                         })
         return files_info
 
@@ -1209,9 +1238,11 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
     def undo(self) -> bool:
         editor = self.current_editor()
-        if editor and editor.document().isUndoAvailable():
-            editor.undo()
-            return True
+        if editor:
+            doc = editor.document()
+            if doc is not None and doc.isUndoAvailable():
+                editor.undo()
+                return True
         return False
 
     def redo(self):
@@ -1324,7 +1355,10 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if not editor:
             return
 
-        max_line = editor.document().blockCount()
+        doc = editor.document()
+        if doc is None:
+            return
+        max_line = doc.blockCount()
         current_line = editor.textCursor().blockNumber() + 1
 
         line, ok = QInputDialog.getInt(

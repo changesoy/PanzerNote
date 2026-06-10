@@ -9,7 +9,7 @@
 """
 
 import re
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, cast
 
 from PyQt6.QtGui import QTextCursor, QTextDocument
 from PyQt6.QtCore import Qt
@@ -34,7 +34,7 @@ class SearchService:
 
     @property
     def _doc(self) -> QTextDocument:
-        return self._editor.document()
+        return cast(QTextDocument, self._editor.document())
 
     def find_all(
         self,
@@ -69,7 +69,7 @@ class SearchService:
         whole_word: bool,
     ) -> List[MatchPos]:
         matches: List[MatchPos] = []
-        flags = QTextDocument.FindFlags(0)
+        flags = QTextDocument.FindFlag(0)
         if case_sensitive:
             flags |= QTextDocument.FindFlag.FindCaseSensitively
         if whole_word:

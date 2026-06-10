@@ -11,6 +11,8 @@
 新增主题只需在 THEMES 字典中增加一个条目即可。
 """
 
+from typing import cast
+
 from PyQt6.QtGui import QTextCharFormat, QColor, QFont
 
 from ..utils.logger import get_logger
@@ -318,7 +320,7 @@ def highlight_code_html(code: str, language: str, theme_name=None) -> str:
             noclasses=True,   # 生成内联 style 而非 CSS class
             nowrap=True,      # 不包裹 <pre>/<div>，我们自己控制容器
         )
-        result = _pygments_highlight(code, lexer, formatter)
+        result = cast(str, _pygments_highlight(code, lexer, formatter))
         # 移除 Pygments 附加的尾部换行
         if result.endswith('\n'):
             result = result[:-1]

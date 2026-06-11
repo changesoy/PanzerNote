@@ -247,6 +247,7 @@ PanzerNote/
 │   ├── plugins/               # 插件系统
 │   │   ├── __init__.py        # 插件系统导出
 │   │   ├── plugin_base.py     # 插件基类与元数据定义（min_app_version引用集中版本）
+│   │   ├── plugin_api_views.py # 插件 API 只读视图（ReadOnlyConfigView 防止插件越权修改配置）
 │   │   ├── plugin_sandbox.py  # 插件包装器（线程隔离/超时/权限控制/PluginAPI含open_file/show_message/register_command/get_config，v1.6.6安全加固）
 │   │   ├── plugin_manager.py  # 插件管理器（扫描/加载/热加载）
 │   │   └── plugin_manager_dialog.py # 插件管理对话框

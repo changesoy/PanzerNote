@@ -498,7 +498,7 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         if is_enabled("markdown_incremental"):
             from .incremental_renderer import RenderCache
             self._render_cache = RenderCache(
-                self._render_markdown, cache_size=50
+                self._render_markdown_with_source_map, cache_size=50
             )
 
         self._init_ui()

@@ -59,10 +59,13 @@ from .highlight_themes import highlight_code_html
 #  正则 / 常量
 # ════════════════════════════════════════════════════════
 
-# 匹配 fenced_code 输出的 <pre><code> 块
+# 匹配 fenced_code 输出的 <pre><code> 块（支持 pre 标签上的属性）
 _CODEBLOCK_RE = re.compile(
-    r'<pre><code(?:\s+class="language-([^"]*)")?>(.*?)</code>\s*</pre>',
-    re.DOTALL,
+    r'<pre(?P<pre_attrs>[^>]*)>\s*'
+    r'<code(?P<code_attrs>[^>]*)>'
+    r'(?P<body>.*?)'
+    r'</code>\s*</pre>',
+    re.DOTALL | re.IGNORECASE,
 )
 
 # 匹配 <img src="..."> 标签中的 src 属性
@@ -78,6 +81,20 @@ _MK_E1 = "\u231E"  # ⌞
 _MK_E2 = "\u231F"  # ⌟
 
 from .secure_markdown_renderer import strip_dangerous_html as _strip_dangerous_html
+
+
+def _extract_language_from_code_attrs(attrs: str) -> str:
+    """从 code 标签的属性串中提取语言名称。"""
+    m = re.search(r'class="([^"]*)"', attrs or "")
+    if not m:
+        return ""
+    classes = m.group(1).split()
+    for cls in classes:
+        if cls.startswith("language-"):
+            return cls.removeprefix("language-")
+        if cls.startswith("lang-"):
+            return cls.removeprefix("lang-")
+    return ""
 
 # ════════════════════════════════════════════════════════
 #  HTML 模板
@@ -132,7 +149,7 @@ strong {{ font-weight: 700; }}
 em {{ font-style: italic; }}
 
 /* ========== 行内代码 ========== */
-code {{
+:not(pre) > code {{
     font-family: "JetBrains Mono", Consolas, "Courier New", "Microsoft YaHei", monospace;
     background: #f0f0f0;
     padding: 1px 5px;
@@ -207,6 +224,55 @@ li input[type="checkbox"] {{
 .toc li {{ margin: 2px 0; }}
 .toc a {{ color: #2470B3; text-decoration: none; }}
 .toc a:hover {{ text-decoration: underline; color: #1a5a96; }}
+
+/* ========== 代码块容器 ========== */
+.code-container {{
+    position: relative;
+    margin: 16px 0;
+    padding: 0;
+    border-radius: 6px;
+    background: #EDF3FA;
+    overflow: auto;
+}}
+.code-pre {{
+    margin: 0;
+    padding: 12px 14px;
+    background: transparent;
+    overflow-x: auto;
+    white-space: pre;
+}}
+.code-block {{
+    display: block;
+    margin: 0;
+    padding: 0 !important;
+    background: transparent !important;
+    border-radius: 0 !important;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 14px;
+    line-height: 1.55;
+    white-space: pre;
+}}
+.code-line {{
+    display: block;
+    min-height: 1.55em;
+    white-space: pre;
+    background: transparent !important;
+}}
+.code-marker {{
+    font-size: 1px;
+    color: transparent;
+    user-select: none;
+    pointer-events: none;
+}}
+pre code,
+.code-block,
+.code-block code,
+.code-line {{
+    background: transparent !important;
+    padding: 0 !important;
+    border-radius: 0 !important;
+    border: none !important;
+}}
 </style>
 </head>
 <body>
@@ -214,7 +280,9 @@ li input[type="checkbox"] {{
 {content}
 </div>
 <script>
-window.scrollToSourceLine = function(line) {{
+window.scrollToSourceLine = function(line, viewportRatio) {{
+    viewportRatio = typeof viewportRatio === "number" ? viewportRatio : 0.35;
+
     var nodes = Array.from(document.querySelectorAll("[data-source-line]"))
         .map(function(el) {{
             return {{
@@ -224,9 +292,18 @@ window.scrollToSourceLine = function(line) {{
             }};
         }})
         .filter(function(x) {{ return !Number.isNaN(x.line); }})
-        .sort(function(a, b) {{ return a.line - b.line; }});
+        .sort(function(a, b) {{
+            if (a.line !== b.line) {{
+                return a.line - b.line;
+            }}
+            return a.top - b.top;
+        }});
 
     if (!nodes.length) {{
+        window.__panzerSyncDebug = {{
+            inputLine: line,
+            error: "no data-source-line nodes"
+        }};
         return;
     }}
 
@@ -245,17 +322,29 @@ window.scrollToSourceLine = function(line) {{
     var targetTop = prev.top;
 
     if (next && next.line > prev.line) {{
-        var ratio = Math.max(
-            0,
-            Math.min(1, (line - prev.line) / (next.line - prev.line))
-        );
-        targetTop = prev.top + (next.top - prev.top) * ratio;
+        var t = Math.max(0, Math.min(1, (line - prev.line) / (next.line - prev.line)));
+        targetTop = prev.top + (next.top - prev.top) * t;
     }}
 
+    var viewportOffset = window.innerHeight * viewportRatio;
+    var finalTop = Math.max(0, targetTop - viewportOffset);
+
     window.scrollTo({{
-        top: Math.max(0, targetTop - 8),
+        top: finalTop,
         behavior: "auto"
     }});
+
+    window.__panzerSyncDebug = {{
+        inputLine: line,
+        prevLine: prev.line,
+        nextLine: next ? next.line : null,
+        prevTag: prev.el.tagName,
+        prevClass: prev.el.className,
+        targetTop: targetTop,
+        viewportRatio: viewportRatio,
+        finalTop: finalTop,
+        nodeCount: nodes.length
+    }};
 }};
 
 window.resyncAfterImagesLoaded = function() {{
@@ -264,16 +353,18 @@ window.resyncAfterImagesLoaded = function() {{
             return;
         }}
         img.__panzerNoteSyncBound = true;
-        img.addEventListener("load", function() {{
+
+        var resync = function() {{
             if (window.__lastSourceLine && window.scrollToSourceLine) {{
-                window.scrollToSourceLine(window.__lastSourceLine);
+                window.scrollToSourceLine(
+                    window.__lastSourceLine,
+                    window.__lastSourceRatio || 0.35
+                );
             }}
-        }});
-        img.addEventListener("error", function() {{
-            if (window.__lastSourceLine && window.scrollToSourceLine) {{
-                window.scrollToSourceLine(window.__lastSourceLine);
-            }}
-        }});
+        }};
+
+        img.addEventListener("load", resync);
+        img.addEventListener("error", resync);
     }});
 }};
 </script>
@@ -489,6 +580,7 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self._md_parser = self._create_md_parser()
         self._html_template_loaded = False
         self._last_sync_line: int = 1
+        self._last_sync_ratio: float = 0.35
 
         if is_enabled("async_highlight"):
             from .async_highlight import AsyncHighlightRenderer
@@ -607,7 +699,9 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             js = (
                 f"document.getElementById('content').innerHTML = {escaped};"
                 "if (window.resyncAfterImagesLoaded) { window.resyncAfterImagesLoaded(); }"
-                "if (window.__lastSourceLine && window.scrollToSourceLine) { window.scrollToSourceLine(window.__lastSourceLine); }"
+                "if (window.__lastSourceLine && window.scrollToSourceLine) {"
+                "  window.scrollToSourceLine(window.__lastSourceLine, window.__lastSourceRatio || 0.35);"
+                "}"
             )
             page = self.preview.page()
             if page is not None:
@@ -755,8 +849,9 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         theme = self.config.get_editor_setting("code_highlight_theme", None)
 
         def _replace(m):
-            lang = m.group(1) or ""
-            raw = html_module.unescape(m.group(2))
+            code_attrs = m.group("code_attrs") or ""
+            lang = _extract_language_from_code_attrs(code_attrs)
+            raw = html_module.unescape(m.group("body"))
             if raw.endswith("\n"):
                 raw = raw[:-1]
 
@@ -784,8 +879,9 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             self._pending_async_task = None
 
         def _replace(m):
-            lang = m.group(1) or ""
-            raw = html_module.unescape(m.group(2))
+            code_attrs = m.group("code_attrs") or ""
+            lang = _extract_language_from_code_attrs(code_attrs)
+            raw = html_module.unescape(m.group("body"))
             if raw.endswith("\n"):
                 raw = raw[:-1]
 
@@ -832,8 +928,9 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         block_idx = [0]
 
         def _replace_sync(m):
-            lang = m.group(1) or ""
-            raw = html_module.unescape(m.group(2))
+            code_attrs = m.group("code_attrs") or ""
+            lang = _extract_language_from_code_attrs(code_attrs)
+            raw = html_module.unescape(m.group("body"))
             if raw.endswith("\n"):
                 raw = raw[:-1]
 
@@ -876,8 +973,33 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         pass
 
     @staticmethod
+    def _wrap_code_lines_with_source_map(
+        code_html: str,
+        source_line: Optional[int],
+    ) -> str:
+        """给代码块内部每一行 HTML 增加 data-source-line 锚点。
+
+        code_html 应为高亮后的代码内部片段（不含外层 <pre>/<code>）。
+        """
+        if source_line is None:
+            return code_html
+
+        lines = code_html.split("\n")
+        wrapped: list[str] = []
+
+        for offset, line_html in enumerate(lines):
+            line_no = source_line + offset
+            if line_html == "":
+                line_html = " "
+            wrapped.append(
+                f'<span class="code-line src-line" data-source-line="{line_no}">{line_html}</span>'
+            )
+
+        return "\n".join(wrapped)
+
+    @staticmethod
     def _build_container(index: int, code_html: str, source_line: Optional[int] = None) -> str:
-        """构建代码块 HTML 容器：浅蓝背景 + 首尾不可见标记
+        """构建代码块 HTML 容器：浅蓝背景 + 首尾不可见标记 + 逐行锚点。
 
         标记用于 PreviewBrowser 在 QTextDocument 中定位代码块的
         垂直范围，从而在正确位置显示浮动复制按钮。
@@ -885,30 +1007,19 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         sm = f"{_MK_S1}{index}{_MK_S2}"
         em = f"{_MK_E1}{index}{_MK_E2}"
         line_attr = ""
-        src_line_class = ""
         if source_line is not None:
             line_attr = f' data-source-line="{source_line}"'
-            src_line_class = " src-line"
+
+        code_html = MarkdownPreviewWidget._wrap_code_lines_with_source_map(
+            code_html, source_line
+        )
+
         return (
-            '<table cellpadding="0" cellspacing="0" border="0" width="100%"'
-            f' style="margin-top:8px; margin-bottom:8px;"{line_attr}>'
-            '<tr>'
-            f'<td bgcolor="#EDF3FA" class="code-container{src_line_class}" style="padding:4px 12px 6px 12px;"{line_attr}>'
-            # 起始标记（1px、同色，视觉不可见）
-            f'<span style="font-size:1px; color:#EDF3FA;">{sm}</span>'
-            # 代码区
-            f'<pre id="code-block-{index}"'
-            ' style="margin:0; padding:0;'
-            ' background-color:transparent; background:transparent;'
-            ' border:none;'
-            " font-family:Consolas, 'Courier New', 'Microsoft YaHei', monospace;"
-            ' font-size:12px; line-height:1.45; color:#2b2b2b;'
-            f' white-space:pre; overflow-x:auto;">{code_html}</pre>'
-            # 结束标记
-            f'<span style="font-size:1px; color:#EDF3FA;">{em}</span>'
-            '</td>'
-            '</tr>'
-            '</table>'
+            f'<div class="code-container src-line"{line_attr}>'
+            f'<span class="code-marker">{sm}</span>'
+            f'<pre class="code-pre"><code class="code-block">{code_html}</code></pre>'
+            f'<span class="code-marker">{em}</span>'
+            f'</div>'
         )
 
     # ──────────── 基础渲染（无 markdown 库回退） ────────────
@@ -962,21 +1073,30 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
 
     # ──────────── 同步滚动 ────────────
 
-    def _current_editor_top_line(self) -> int:
-        """获取编辑器当前视口顶部对应的源码行号（1-based）。"""
+    def _current_editor_reference_line(self) -> tuple[int, float]:
+        """获取编辑器视口 35% 位置对应的源码行号（1-based）。
+
+        返回 (行号, 参考比例)，参考比例固定为 0.35。
+        """
+        ratio = 0.35
         try:
-            cursor = self.editor.cursorForPosition(QPoint(0, 0))
-            return int(cursor.block().blockNumber()) + 1
+            viewport = self.editor.viewport()
+            if viewport is not None:
+                y = int(viewport.height() * ratio)
+                cursor = self.editor.cursorForPosition(QPoint(0, y))
+                return int(cursor.block().blockNumber()) + 1, ratio
         except Exception:
-            cursor = self.editor.textCursor()
-            return int(cursor.block().blockNumber()) + 1
+            pass
+        cursor = self.editor.textCursor()
+        return int(cursor.block().blockNumber()) + 1, ratio
 
     def _sync_scroll(self, value):
         if not self._preview_visible:
             return
 
-        line = self._current_editor_top_line()
+        line, ratio = self._current_editor_reference_line()
         self._last_sync_line = line
+        self._last_sync_ratio = ratio
 
         if HAS_WEBENGINE and isinstance(self.preview, QWebEngineView):
             page = self.preview.page()
@@ -984,8 +1104,9 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
                 return
             js = f"""
             window.__lastSourceLine = {line};
+            window.__lastSourceRatio = {ratio};
             if (window.scrollToSourceLine) {{
-                window.scrollToSourceLine({line});
+                window.scrollToSourceLine({line}, {ratio});
             }}
             """
             page.runJavaScript(js)
@@ -996,14 +1117,26 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             bar = self.editor.verticalScrollBar()
             pb = self.preview.verticalScrollBar()
             if bar is not None and pb is not None and bar.maximum() > 0:
-                ratio = value / bar.maximum()
-                pb.setValue(int(ratio * pb.maximum()))
+                ratio_fallback = value / bar.maximum()
+                pb.setValue(int(ratio_fallback * pb.maximum()))
         except Exception:
             get_logger(__name__).debug(
                 "Markdown preview fallback scroll sync failed", exc_info=True
             )
 
     # ──────────── 预览显隐 ────────────
+
+    def debug_sync_state(self) -> None:
+        """打印运行时同步调试信息到日志。"""
+        if HAS_WEBENGINE and isinstance(self.preview, QWebEngineView):
+            page = self.preview.page()
+            if page is not None:
+                page.runJavaScript(
+                    "JSON.stringify(window.__panzerSyncDebug || {})",
+                    lambda result: get_logger(__name__).debug(
+                        "Markdown sync debug: %s", result
+                    ),
+                )
 
     def toggle_preview(self):
         self._preview_visible = not self._preview_visible

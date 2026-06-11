@@ -627,6 +627,10 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         else:
             self.preview = PreviewBrowser(self)
             self.preview.setFont(QFont("Microsoft YaHei", 11))
+            get_logger(__name__).warning(
+                "QWebEngineView unavailable; Markdown preview source-line scroll sync is disabled."
+                " QTextBrowser fallback will not sync scroll position."
+            )
 
         self.splitter.addWidget(self.preview)
         self.splitter.setSizes([500, 500])
@@ -1112,17 +1116,11 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             page.runJavaScript(js)
             return
 
-        # QTextBrowser fallback：保留旧百分比同步
-        try:
-            bar = self.editor.verticalScrollBar()
-            pb = self.preview.verticalScrollBar()
-            if bar is not None and pb is not None and bar.maximum() > 0:
-                ratio_fallback = value / bar.maximum()
-                pb.setValue(int(ratio_fallback * pb.maximum()))
-        except Exception:
-            get_logger(__name__).debug(
-                "Markdown preview fallback scroll sync failed", exc_info=True
-            )
+        # QTextBrowser fallback：不支持源码行同步，直接跳过
+        get_logger(__name__).debug(
+            "Markdown preview is using QTextBrowser fallback; source-line scroll sync is unavailable."
+        )
+        return
 
     # ──────────── 预览显隐 ────────────
 

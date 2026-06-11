@@ -1,4 +1,4 @@
-# PanzerNote v1.6.6
+# PanzerNote v1.7.0
 
 一款以《战车少女》为主题的笔记工具。通过书写获取资源，建造收集角色，点亮完整图鉴。
 
@@ -218,7 +218,7 @@ PanzerNote/
 │   │   ├── incremental_renderer.py # Markdown渲染缓存（全文 hash 缓存，非 block 级增量渲染）
 │   │   ├── syntax_highlighter.py # 语法高亮
 │   │   ├── highlight_themes.py # 代码高亮主题管理
-│   │   ├── markdown_preview.py # Markdown分屏预览（v1.6.6：MarkdownIt实例复用/JS增量更新/主题修复）
+│   │   ├── markdown_preview.py # Markdown分屏预览（v1.7.0：源码行号同步替代百分比同步/图片加载重同步）
 │   │   ├── minimap.py         # 代码缩略图（v1.6.6：块级缓存增量失效）
 │   │   ├── find_replace.py    # 增强型查找替换栏
 │   │   ├── search_service.py  # 搜索服务（QTextDocument.find 权威光标 + 从后向前逐匹配替换）
@@ -422,6 +422,17 @@ pytest tests/ -v
 新增主题：在 `src/highlight_themes.py` 的 `THEMES` 字典中添加条目即可。
 
 ## 更新日志
+
+### v1.7.0
+
+**Markdown 预览滚动同步改造**
+
+- **源码行号同步替代百分比同步**：将 Markdown 预览同步方式从"滚动条百分比同步"改为"源码行号到预览 DOM 锚点同步"。编辑器滚动时获取当前顶部源码行号，通过 JS 查找预览 HTML 中最接近的 `data-source-line` 节点并滚动到对应位置
+- **源码行号注入渲染**：新增 `_render_markdown_with_source_map()` 方法，使用 markdown-it-py 的 `token.map` 给块级 HTML 节点注入 `data-source-line` 属性，覆盖标题、段落、引用、列表、表格、代码块、分割线等 token 类型
+- **代码块源码行号保留**：`_build_container()` 和 `_process_code_blocks()` 支持传入 `source_line` 参数，代码块外层容器携带 `data-source-line` 属性，确保代码块区域也能精准同步
+- **JS 插值同步算法**：HTML 模板注入 `scrollToSourceLine()` 函数，在相邻两个锚点节点之间做线性插值，改善长表格、长列表、长代码块的同步体验
+- **图片加载后重同步**：HTML 模板注入 `resyncAfterImagesLoaded()` 函数，图片加载完成或失败后自动重新同步预览位置，避免图片撑开页面导致错位
+- **QTextBrowser fallback 保留**：QWebEngineView 使用源码行号同步，QTextBrowser 继续使用旧百分比同步（无 DOM 查询能力）
 
 ### v1.6.6
 

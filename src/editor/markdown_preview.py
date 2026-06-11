@@ -213,6 +213,70 @@ li input[type="checkbox"] {{
 <div id="content">
 {content}
 </div>
+<script>
+window.scrollToSourceLine = function(line) {{
+    var nodes = Array.from(document.querySelectorAll("[data-source-line]"))
+        .map(function(el) {{
+            return {{
+                el: el,
+                line: Number(el.getAttribute("data-source-line")),
+                top: el.getBoundingClientRect().top + window.scrollY
+            }};
+        }})
+        .filter(function(x) {{ return !Number.isNaN(x.line); }})
+        .sort(function(a, b) {{ return a.line - b.line; }});
+
+    if (!nodes.length) {{
+        return;
+    }}
+
+    var prev = nodes[0];
+    var next = null;
+
+    for (var i = 0; i < nodes.length; i++) {{
+        if (nodes[i].line <= line) {{
+            prev = nodes[i];
+        }} else {{
+            next = nodes[i];
+            break;
+        }}
+    }}
+
+    var targetTop = prev.top;
+
+    if (next && next.line > prev.line) {{
+        var ratio = Math.max(
+            0,
+            Math.min(1, (line - prev.line) / (next.line - prev.line))
+        );
+        targetTop = prev.top + (next.top - prev.top) * ratio;
+    }}
+
+    window.scrollTo({{
+        top: Math.max(0, targetTop - 8),
+        behavior: "auto"
+    }});
+}};
+
+window.resyncAfterImagesLoaded = function() {{
+    document.querySelectorAll("img").forEach(function(img) {{
+        if (img.__panzerNoteSyncBound) {{
+            return;
+        }}
+        img.__panzerNoteSyncBound = true;
+        img.addEventListener("load", function() {{
+            if (window.__lastSourceLine && window.scrollToSourceLine) {{
+                window.scrollToSourceLine(window.__lastSourceLine);
+            }}
+        }});
+        img.addEventListener("error", function() {{
+            if (window.__lastSourceLine && window.scrollToSourceLine) {{
+                window.scrollToSourceLine(window.__lastSourceLine);
+            }}
+        }});
+    }});
+}};
+</script>
 </body>
 </html>"""
 
@@ -424,6 +488,7 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self._render_cache = None
         self._md_parser = self._create_md_parser()
         self._html_template_loaded = False
+        self._last_sync_line: int = 1
 
         if is_enabled("async_highlight"):
             from .async_highlight import AsyncHighlightRenderer
@@ -522,7 +587,7 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         if self._render_cache and is_enabled("markdown_incremental"):
             html_content = self._render_cache.render(text)
         elif HAS_MARKDOWN_IT or HAS_MARKDOWN:
-            html_content = self._render_markdown(text)
+            html_content = self._render_markdown_with_source_map(text)
         else:
             html_content = self._basic_md_to_html(text)
 
@@ -538,7 +603,12 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
 
         if HAS_WEBENGINE and isinstance(self.preview, QWebEngineView) and self._html_template_loaded:
             import json
-            js = f"document.getElementById('content').innerHTML = {json.dumps(html_content)};"
+            escaped = json.dumps(html_content)
+            js = (
+                f"document.getElementById('content').innerHTML = {escaped};"
+                "if (window.resyncAfterImagesLoaded) { window.resyncAfterImagesLoaded(); }"
+                "if (window.__lastSourceLine && window.scrollToSourceLine) { window.scrollToSourceLine(window.__lastSourceLine); }"
+            )
             page = self.preview.page()
             if page is not None:
                 page.runJavaScript(js)
@@ -575,6 +645,67 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
 
         from .secure_markdown_renderer import render_markdown_to_safe_html
         return render_markdown_to_safe_html(text)
+
+    # ──────────── 源码行号注入渲染 ────────────
+
+    _SOURCE_LINE_TOKEN_TYPES = frozenset({
+        "heading_open",
+        "paragraph_open",
+        "blockquote_open",
+        "bullet_list_open",
+        "ordered_list_open",
+        "list_item_open",
+        "table_open",
+        "thead_open",
+        "tbody_open",
+        "tr_open",
+        "hr",
+        "fence",
+        "code_block",
+    })
+
+    def _render_markdown_with_source_map(self, text: str) -> str:
+        """使用 markdown-it-py 渲染 Markdown，并给主要块级节点注入 data-source-line。
+
+        用于实现编辑器源码行与预览 DOM 节点的同步。
+        """
+        if self._md_parser is None:
+            return self._render_markdown(text)
+
+        try:
+            tokens = self._md_parser.parse(text)
+
+            self._code_block_source_lines: list[int] = []
+
+            for token in tokens:
+                if token.type in ("fence", "code_block") and token.map:
+                    self._code_block_source_lines.append(token.map[0] + 1)
+
+                if not token.map:
+                    continue
+
+                if token.nesting == -1:
+                    continue
+
+                if token.type in self._SOURCE_LINE_TOKEN_TYPES:
+                    line_no = token.map[0] + 1
+                    token.attrSet("data-source-line", str(line_no))
+                    token.attrJoin("class", "src-line")
+
+            html = self._md_parser.renderer.render(
+                tokens,
+                self._md_parser.options,
+                {},
+            )
+
+            return _strip_dangerous_html(html)
+
+        except Exception:
+            get_logger(__name__).debug(
+                "Markdown source map render failed, fallback to normal render",
+                exc_info=True,
+            )
+            return self._render_markdown(text)
 
     # ──────────── 本地图片路径解析 ────────────
 
@@ -632,8 +763,13 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             idx = len(self._code_blocks)
             self._code_blocks.append(raw)
 
+            source_line = None
+            if hasattr(self, "_code_block_source_lines"):
+                if idx < len(self._code_block_source_lines):
+                    source_line = self._code_block_source_lines[idx]
+
             highlighted = highlight_code_html(raw, lang, theme)
-            return self._build_container(idx, highlighted)
+            return self._build_container(idx, highlighted, source_line)
 
         return _CODEBLOCK_RE.sub(_replace, html)
 
@@ -656,8 +792,13 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             idx = len(self._code_blocks)
             self._code_blocks.append(raw)
 
+            source_line = None
+            if hasattr(self, "_code_block_source_lines"):
+                if idx < len(self._code_block_source_lines):
+                    source_line = self._code_block_source_lines[idx]
+
             escaped = html_module.escape(raw)
-            return self._build_container(idx, escaped)
+            return self._build_container(idx, escaped, source_line)
 
         result = _CODEBLOCK_RE.sub(_replace, html)
 
@@ -683,7 +824,7 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
 
         text = self.editor.toPlainText()
         if HAS_MARKDOWN_IT or HAS_MARKDOWN:
-            html_content = self._render_markdown(text)
+            html_content = self._render_markdown_with_source_map(text)
         else:
             html_content = self._basic_md_to_html(text)
 
@@ -699,9 +840,14 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             idx = block_idx[0]
             self._code_blocks.append(raw)
 
+            source_line = None
+            if hasattr(self, "_code_block_source_lines"):
+                if idx < len(self._code_block_source_lines):
+                    source_line = self._code_block_source_lines[idx]
+
             if idx < len(highlighted_blocks):
-                return self._build_container(idx, highlighted_blocks[idx])
-            return self._build_container(idx, html_module.escape(raw))
+                return self._build_container(idx, highlighted_blocks[idx], source_line)
+            return self._build_container(idx, html_module.escape(raw), source_line)
 
         block_idx_ref = block_idx
 
@@ -730,7 +876,7 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         pass
 
     @staticmethod
-    def _build_container(index: int, code_html: str) -> str:
+    def _build_container(index: int, code_html: str, source_line: Optional[int] = None) -> str:
         """构建代码块 HTML 容器：浅蓝背景 + 首尾不可见标记
 
         标记用于 PreviewBrowser 在 QTextDocument 中定位代码块的
@@ -738,11 +884,16 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         """
         sm = f"{_MK_S1}{index}{_MK_S2}"
         em = f"{_MK_E1}{index}{_MK_E2}"
+        line_attr = ""
+        src_line_class = ""
+        if source_line is not None:
+            line_attr = f' data-source-line="{source_line}"'
+            src_line_class = " src-line"
         return (
             '<table cellpadding="0" cellspacing="0" border="0" width="100%"'
-            ' style="margin-top:8px; margin-bottom:8px;">'
+            f' style="margin-top:8px; margin-bottom:8px;"{line_attr}>'
             '<tr>'
-            '<td bgcolor="#EDF3FA" style="padding:4px 12px 6px 12px;">'
+            f'<td bgcolor="#EDF3FA" class="code-container{src_line_class}" style="padding:4px 12px 6px 12px;"{line_attr}>'
             # 起始标记（1px、同色，视觉不可见）
             f'<span style="font-size:1px; color:#EDF3FA;">{sm}</span>'
             # 代码区
@@ -811,22 +962,46 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
 
     # ──────────── 同步滚动 ────────────
 
+    def _current_editor_top_line(self) -> int:
+        """获取编辑器当前视口顶部对应的源码行号（1-based）。"""
+        try:
+            cursor = self.editor.cursorForPosition(QPoint(0, 0))
+            return int(cursor.block().blockNumber()) + 1
+        except Exception:
+            cursor = self.editor.textCursor()
+            return int(cursor.block().blockNumber()) + 1
+
     def _sync_scroll(self, value):
         if not self._preview_visible:
             return
-        bar = self.editor.verticalScrollBar()
-        if bar is None or bar.maximum() == 0:
-            return
-        ratio = value / bar.maximum() if bar.maximum() > 0 else 0
+
+        line = self._current_editor_top_line()
+        self._last_sync_line = line
+
         if HAS_WEBENGINE and isinstance(self.preview, QWebEngineView):
-            js = f"window.scrollTo(0, document.body.scrollHeight * {ratio});"
             page = self.preview.page()
-            if page is not None:
-                page.runJavaScript(js)
-        elif isinstance(self.preview, PreviewBrowser):
+            if page is None:
+                return
+            js = f"""
+            window.__lastSourceLine = {line};
+            if (window.scrollToSourceLine) {{
+                window.scrollToSourceLine({line});
+            }}
+            """
+            page.runJavaScript(js)
+            return
+
+        # QTextBrowser fallback：保留旧百分比同步
+        try:
+            bar = self.editor.verticalScrollBar()
             pb = self.preview.verticalScrollBar()
-            if pb is not None:
+            if bar is not None and pb is not None and bar.maximum() > 0:
+                ratio = value / bar.maximum()
                 pb.setValue(int(ratio * pb.maximum()))
+        except Exception:
+            get_logger(__name__).debug(
+                "Markdown preview fallback scroll sync failed", exc_info=True
+            )
 
     # ──────────── 预览显隐 ────────────
 

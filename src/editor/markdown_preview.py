@@ -20,6 +20,7 @@ v1.6.2 改动：
 
 import os
 import re
+import time
 import html as html_module
 from typing import Optional, Union
 
@@ -280,11 +281,37 @@ pre code,
 {content}
 </div>
 <script>
+// ========== 锚点缓存：仅在 content 子元素数量变化时重建 ==========
+var _nodesVersion = 0;
+var _cachedNodes = null;
+
 window.scrollToSourceLine = function(line, viewportRatio, totalLines) {{
     viewportRatio = typeof viewportRatio === "number" ? viewportRatio : 0.35;
 
-    // 用 offsetTop 遍历 offsetParent 链获取元素在文档中的绝对位置
-    // 比 getBoundingClientRect().top + scrollY 更稳定，不受当前滚动位置影响
+    // ========== 第 1 层：文档过短，无需滚动 ==========
+    var maxScroll = Math.max(0,
+        document.documentElement.scrollHeight - window.innerHeight);
+    if (maxScroll <= 0) {{
+        window.__panzerSyncDebug = {{ inputLine: line, boundary: "too-short" }};
+        return;
+    }}
+
+    // ========== 第 2 层：动态视口比例 ==========
+    // 前 15%：viewportRatio 线性过渡到 0（开头自然停住）
+    // 中间 70%：保持 viewportRatio 不变
+    // 后 15%：viewportRatio 线性过渡到 0.65（末尾内容压入视口）
+    var dynamicRatio = viewportRatio;
+    if (typeof totalLines === "number" && totalLines > 0) {{
+        var progress = line / totalLines;
+        if (progress < 0.15) {{
+            dynamicRatio = viewportRatio * (progress / 0.15);
+        }} else if (progress > 0.85) {{
+            var t = (progress - 0.85) / 0.15;
+            dynamicRatio = viewportRatio + (0.65 - viewportRatio) * t;
+        }}
+    }}
+
+    // ========== 锚点收集（缓存：仅在 content 更新后重建）==========
     function getDocTop(el) {{
         var top = 0;
         while (el) {{
@@ -294,28 +321,38 @@ window.scrollToSourceLine = function(line, viewportRatio, totalLines) {{
         return top;
     }}
 
-    var nodes = Array.from(document.querySelectorAll("[data-source-line]"))
-        .map(function(el) {{
-            return {{
-                el: el,
-                line: Number(el.getAttribute("data-source-line")),
-                top: getDocTop(el)
-            }};
-        }})
-        .filter(function(x) {{ return !Number.isNaN(x.line); }})
-        .sort(function(a, b) {{
-            if (a.line !== b.line) {{
-                return a.line - b.line;
-            }}
-            return a.top - b.top;
-        }});
+    var contentEl = document.getElementById("content");
+    var currentVersion = contentEl ? contentEl.childElementCount : 0;
+    if (_nodesVersion !== currentVersion || !_cachedNodes) {{
+        _nodesVersion = currentVersion;
+        _cachedNodes = Array.from(document.querySelectorAll("[data-source-line]"))
+            .map(function(el) {{
+                return {{
+                    el: el,
+                    line: Number(el.getAttribute("data-source-line")),
+                    top: getDocTop(el)
+                }};
+            }})
+            .filter(function(x) {{ return !Number.isNaN(x.line); }})
+            .sort(function(a, b) {{
+                if (a.line !== b.line) {{
+                    return a.line - b.line;
+                }}
+                return a.top - b.top;
+            }});
+    }}
 
+    var nodes = _cachedNodes;
+
+    // ========== 无锚点兜底 ==========
     if (!nodes.length) {{
-        // 无 source-line 节点时兜底：按行号比例滚动
-        if (typeof totalLines === "number" && totalLines > 0 && document.body.scrollHeight > 0) {{
+        if (typeof totalLines === "number" && totalLines > 0
+            && document.body.scrollHeight > 0) {{
             var fallbackRatio = Math.max(0, Math.min(1, line / totalLines));
-            var fallbackTop = Math.max(0, fallbackRatio * document.body.scrollHeight - window.innerHeight * viewportRatio);
-            window.scrollTo({{top: fallbackTop, behavior: "auto"}});
+            var fallbackTop = Math.max(0,
+                fallbackRatio * document.body.scrollHeight
+                - window.innerHeight * dynamicRatio);
+            window.scrollTo({{top: Math.min(fallbackTop, maxScroll), behavior: "auto"}});
         }}
         window.__panzerSyncDebug = {{
             inputLine: line,
@@ -325,6 +362,7 @@ window.scrollToSourceLine = function(line, viewportRatio, totalLines) {{
         return;
     }}
 
+    // ========== 锚点插值 ==========
     var prev = nodes[0];
     var next = null;
 
@@ -344,23 +382,25 @@ window.scrollToSourceLine = function(line, viewportRatio, totalLines) {{
         targetTop = prev.top + (next.top - prev.top) * t;
     }}
 
-    var viewportOffset = window.innerHeight * viewportRatio;
+    var viewportOffset = window.innerHeight * dynamicRatio;
     var finalTop = Math.max(0, targetTop - viewportOffset);
+
+    // ========== 第 3 层：安全钳位，绝不超出文档范围 ==========
+    finalTop = Math.min(finalTop, maxScroll);
 
     window.scrollTo({{
         top: finalTop,
-        behavior: "auto"
+        behavior: "smooth"
     }});
 
     window.__panzerSyncDebug = {{
         inputLine: line,
         prevLine: prev.line,
         nextLine: next ? next.line : null,
-        prevTag: prev.el.tagName,
-        prevClass: prev.el.className,
+        dynamicRatio: dynamicRatio,
         targetTop: targetTop,
-        viewportRatio: viewportRatio,
         finalTop: finalTop,
+        maxScroll: maxScroll,
         nodeCount: nodes.length
     }};
 }};
@@ -1133,6 +1173,12 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
     def _sync_scroll(self, value):
         if not self._preview_visible:
             return
+
+        # 节流：50ms 内只执行一次，避免高频率 runJavaScript 浪费资源
+        now = time.monotonic()
+        if hasattr(self, "_last_sync_time") and now - self._last_sync_time < 0.05:
+            return
+        self._last_sync_time = now
 
         line, ratio = self._current_editor_reference_line()
         self._last_sync_line = line

@@ -280,15 +280,26 @@ pre code,
 {content}
 </div>
 <script>
-window.scrollToSourceLine = function(line, viewportRatio) {{
+window.scrollToSourceLine = function(line, viewportRatio, totalLines) {{
     viewportRatio = typeof viewportRatio === "number" ? viewportRatio : 0.35;
+
+    // 用 offsetTop 遍历 offsetParent 链获取元素在文档中的绝对位置
+    // 比 getBoundingClientRect().top + scrollY 更稳定，不受当前滚动位置影响
+    function getDocTop(el) {{
+        var top = 0;
+        while (el) {{
+            top += el.offsetTop;
+            el = el.offsetParent;
+        }}
+        return top;
+    }}
 
     var nodes = Array.from(document.querySelectorAll("[data-source-line]"))
         .map(function(el) {{
             return {{
                 el: el,
                 line: Number(el.getAttribute("data-source-line")),
-                top: el.getBoundingClientRect().top + window.scrollY
+                top: getDocTop(el)
             }};
         }})
         .filter(function(x) {{ return !Number.isNaN(x.line); }})
@@ -300,9 +311,16 @@ window.scrollToSourceLine = function(line, viewportRatio) {{
         }});
 
     if (!nodes.length) {{
+        // 无 source-line 节点时兜底：按行号比例滚动
+        if (typeof totalLines === "number" && totalLines > 0 && document.body.scrollHeight > 0) {{
+            var fallbackRatio = Math.max(0, Math.min(1, line / totalLines));
+            var fallbackTop = Math.max(0, fallbackRatio * document.body.scrollHeight - window.innerHeight * viewportRatio);
+            window.scrollTo({{top: fallbackTop, behavior: "auto"}});
+        }}
         window.__panzerSyncDebug = {{
             inputLine: line,
-            error: "no data-source-line nodes"
+            error: "no data-source-line nodes",
+            fallbackUsed: typeof totalLines === "number" && totalLines > 0
         }};
         return;
     }}
@@ -358,7 +376,8 @@ window.resyncAfterImagesLoaded = function() {{
             if (window.__lastSourceLine && window.scrollToSourceLine) {{
                 window.scrollToSourceLine(
                     window.__lastSourceLine,
-                    window.__lastSourceRatio || 0.35
+                    window.__lastSourceRatio || 0.35,
+                    window.__lastTotalLines || 0
                 );
             }}
         }};
@@ -703,9 +722,12 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             js = (
                 f"document.getElementById('content').innerHTML = {escaped};"
                 "if (window.resyncAfterImagesLoaded) { window.resyncAfterImagesLoaded(); }"
-                "if (window.__lastSourceLine && window.scrollToSourceLine) {"
-                "  window.scrollToSourceLine(window.__lastSourceLine, window.__lastSourceRatio || 0.35);"
-                "}"
+                "requestAnimationFrame(function() {"
+                "  if (window.__lastSourceLine && window.scrollToSourceLine) {"
+                "    window.scrollToSourceLine(window.__lastSourceLine, window.__lastSourceRatio || 0.35,"
+                f"    {self.editor.document().blockCount()});"
+                "  }"
+                "});"
             )
             page = self.preview.page()
             if page is not None:
@@ -1078,19 +1100,33 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
     # ──────────── 同步滚动 ────────────
 
     def _current_editor_reference_line(self) -> tuple[int, float]:
-        """获取编辑器视口 35% 位置对应的源码行号（1-based）。
+        """获取编辑器当前滚动位置对应的源码行号（1-based）。
 
         返回 (行号, 参考比例)，参考比例固定为 0.35。
         """
         ratio = 0.35
         try:
             viewport = self.editor.viewport()
-            if viewport is not None:
+            if viewport is not None and viewport.height() > 0:
                 y = int(viewport.height() * ratio)
                 cursor = self.editor.cursorForPosition(QPoint(0, y))
-                return int(cursor.block().blockNumber()) + 1, ratio
+                line = int(cursor.block().blockNumber()) + 1
+                if line > 0:
+                    return line, ratio
         except Exception:
             pass
+
+        try:
+            bar = self.editor.verticalScrollBar()
+            if bar is not None and bar.maximum() > 0:
+                total_lines = self.editor.document().blockCount()
+                if total_lines > 0:
+                    scroll_ratio = bar.value() / bar.maximum()
+                    line = int(scroll_ratio * total_lines) + 1
+                    return max(1, min(line, total_lines)), ratio
+        except Exception:
+            pass
+
         cursor = self.editor.textCursor()
         return int(cursor.block().blockNumber()) + 1, ratio
 
@@ -1106,21 +1142,28 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             page = self.preview.page()
             if page is None:
                 return
+            total_lines = self.editor.document().blockCount()
             js = f"""
             window.__lastSourceLine = {line};
             window.__lastSourceRatio = {ratio};
+            window.__lastTotalLines = {total_lines};
             if (window.scrollToSourceLine) {{
-                window.scrollToSourceLine({line}, {ratio});
+                window.scrollToSourceLine({line}, {ratio}, {total_lines});
             }}
             """
             page.runJavaScript(js)
             return
 
-        # QTextBrowser fallback：不支持源码行同步，直接跳过
-        get_logger(__name__).debug(
-            "Markdown preview is using QTextBrowser fallback; source-line scroll sync is unavailable."
-        )
-        return
+        # QTextBrowser fallback：按源码行号比例滚动（非滚动条比例）
+        total_lines = self.editor.document().blockCount()
+        if total_lines > 0:
+            line_ratio = min(line / total_lines, 1.0)
+            try:
+                pb = self.preview.verticalScrollBar()
+                if pb is not None:
+                    pb.setValue(int(line_ratio * pb.maximum()))
+            except Exception:
+                pass
 
     # ──────────── 预览显隐 ────────────
 
@@ -1130,7 +1173,11 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             page = self.preview.page()
             if page is not None:
                 page.runJavaScript(
-                    "JSON.stringify(window.__panzerSyncDebug || {})",
+                    "var nodes = document.querySelectorAll('[data-source-line]'); "
+                    "var sample = Array.from(nodes).slice(0, 15).map(function(el) {"
+                    "  return { line: el.getAttribute('data-source-line'), tag: el.tagName, cls: el.className };"
+                    "});"
+                    "JSON.stringify({ nodeCount: nodes.length, sample: sample, debug: window.__panzerSyncDebug || {} })",
                     lambda result: get_logger(__name__).debug(
                         "Markdown sync debug: %s", result
                     ),

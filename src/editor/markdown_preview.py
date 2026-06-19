@@ -28,7 +28,7 @@ from PyQt6.QtWidgets import (
     QWidget, QSplitter, QVBoxLayout, QTextBrowser, QApplication, QPushButton
 )
 from PyQt6.QtCore import Qt, QTimer, QUrl, QPoint, QEvent
-from PyQt6.QtGui import QFont, QDesktopServices, QCursor
+from PyQt6.QtGui import QFont, QDesktopServices, QCursor, QTextCursor
 
 try:
     from markdown_it import MarkdownIt as _MarkdownIt
@@ -285,14 +285,23 @@ pre code,
 {content}
 </div>
 <script>
-// ========== 锚点缓存：仅在 content 子元素数量变化时重建 ==========
-var _nodesVersion = -1;
+// ========== 锚点缓存：layout 变化(内容/高度/宽度)即重建 ==========
+var _nodesVersion = null;
 var _cachedNodes = null;
 
-// 收集 [data-source-line] 锚点：{{line, top}}，top 为相对文档顶部的绝对像素。
+// 编辑器→预览 驱动滚动时的回声锁：在此时间戳前，预览自身的 scroll 事件
+// 视为回声，不回传给编辑器，避免双向同步形成回授环。
+var _previewScrollLock = 0;
+var _previewSyncNonce = 0;
+var _pvScrollTimer = null;
+
+// 收集 [data-source-line] 锚点：{{line, top}}(相对文档顶部的绝对像素)。
+// 缓存键含 scrollHeight + innerWidth：任何重排(改宽度/缩放/图片加载/内容变更)
+// 都会改变其一从而自动失效，避免拖动分隔条后锚点 top 变陈旧。
 function _collectAnchors() {{
     var contentEl = document.getElementById("content");
-    var ver = contentEl ? contentEl.childElementCount : 0;
+    var ver = (contentEl ? contentEl.childElementCount : 0) + "|"
+            + document.documentElement.scrollHeight + "|" + window.innerWidth;
     if (_nodesVersion === ver && _cachedNodes) {{ return _cachedNodes; }}
     _nodesVersion = ver;
     var scrollTop = window.pageYOffset || document.documentElement.scrollTop || 0;
@@ -308,14 +317,20 @@ function _collectAnchors() {{
     return _cachedNodes;
 }}
 
-// 核心：把"编辑器顶部的源码行(可带小数)"对齐到"预览视口顶部"。
-//   · 顶行对齐(top-to-top)：编辑器顶端显示第 N 行 -> 预览也让第 N 行贴顶。
-//     这是 VSCode markdown 预览采用的模型，与两侧高度比无关，窄预览同样成立。
-//   · EOF 哨兵：末尾追加一个 {{line: 总行数+1, top: 文档总高}} 的虚拟锚点，
-//     使"最后一个块很高"(窄预览下的长表格/长段落)也能按源码行比例平滑滚到底，
-//     而不是卡在该块顶部 —— 这正是"左边到底、右边没过半"的根因。
-//   · 硬端点：编辑器真正到顶/到底(atTop/atBottom)时，预览直接赋值贴 0 / maxScroll，
-//     保证首行/末行一定完整可见，且不依赖任何动画。
+// 末尾追加 EOF 哨兵锚点，使末块很高时也能插值到底。
+function _anchorsWithSentinel(nodes, totalLines) {{
+    var docH = document.documentElement.scrollHeight;
+    var lastReal = nodes[nodes.length - 1];
+    var sentinelLine = (typeof totalLines === "number" && totalLines > lastReal.line)
+        ? (totalLines + 1) : (lastReal.line + 1);
+    return nodes.concat([{{ line: sentinelLine, top: docH }}]);
+}}
+
+// === 编辑器 -> 预览 ===
+// 把"编辑器顶部源码行(可带小数)"对齐到"预览视口顶部"(top-to-top)。
+//   · 顶行对齐：与两侧高度比无关，窄预览同样成立(VSCode markdown 预览模型)。
+//   · EOF 哨兵：末块很高(窄预览下长表格/长段落)也能按源码行比例平滑滚到底。
+//   · 硬端点：编辑器真正到顶/到底时，预览直接赋值贴 0 / maxScroll。
 window.scrollToSourceLine = function(fracLine, totalLines, atTop, atBottom) {{
     try {{
         if (typeof fracLine !== "number" || !isFinite(fracLine)) {{ fracLine = 1; }}
@@ -326,6 +341,9 @@ window.scrollToSourceLine = function(fracLine, totalLines, atTop, atBottom) {{
             window.__panzerSyncDebug = {{ fracLine: fracLine, boundary: "too-short" }};
             return;
         }}
+
+        // 本次是编辑器驱动的滚动，给预览自身 scroll 事件上回声锁
+        _previewScrollLock = performance.now() + 220;
 
         if (atTop === true) {{
             document.documentElement.scrollTop = 0;
@@ -351,21 +369,14 @@ window.scrollToSourceLine = function(fracLine, totalLines, atTop, atBottom) {{
             return;
         }}
 
-        // 追加 EOF 哨兵锚点
-        var docH = document.documentElement.scrollHeight;
-        var lastReal = nodes[nodes.length - 1];
-        var sentinelLine = (typeof totalLines === "number" && totalLines > lastReal.line)
-            ? (totalLines + 1) : (lastReal.line + 1);
-        var anchors = nodes.concat([{{ line: sentinelLine, top: docH }}]);
+        var anchors = _anchorsWithSentinel(nodes, totalLines);
 
-        // fracLine 在首锚点之前：贴顶
         if (fracLine <= anchors[0].line) {{
             window.scrollTo({{ top: 0, behavior: "auto" }});
             window.__panzerSyncDebug = {{ fracLine: fracLine, boundary: "before-first" }};
             return;
         }}
 
-        // 找到包住 fracLine 的相邻锚点 [prev, next)
         var prev = anchors[0], next = anchors[anchors.length - 1];
         for (var i = 0; i < anchors.length - 1; i++) {{
             if (anchors[i].line <= fracLine && fracLine < anchors[i + 1].line) {{
@@ -375,7 +386,6 @@ window.scrollToSourceLine = function(fracLine, totalLines, atTop, atBottom) {{
             }}
         }}
 
-        // 顶行对齐：targetTop = "prev 行贴顶"的 scrollTop，按源码行号线性插值到 next
         var targetTop = prev.top;
         if (next.line > prev.line) {{
             var t = (fracLine - prev.line) / (next.line - prev.line);
@@ -384,8 +394,6 @@ window.scrollToSourceLine = function(fracLine, totalLines, atTop, atBottom) {{
         }}
 
         var finalTop = Math.max(0, Math.min(targetTop, maxScroll));
-        // auto(瞬时)而非 smooth：连续滚动时预览 1:1 跟手，且不会出现平滑动画
-        // 被下一次调用打断而停在中途的问题。
         window.scrollTo({{ top: finalTop, behavior: "auto" }});
 
         window.__panzerSyncDebug = {{
@@ -399,13 +407,54 @@ window.scrollToSourceLine = function(fracLine, totalLines, atTop, atBottom) {{
     }}
 }};
 
+// === 预览 -> 编辑器 ===
+// 预览视口顶部像素 -> 源码行(可带小数)，是 scrollToSourceLine 的逆映射。
+function _previewTopToLine() {{
+    var nodes = _collectAnchors();
+    if (!nodes.length) {{ return null; }}
+    var anchors = _anchorsWithSentinel(nodes, window.__lastTotalLines || 0);
+    var top = window.pageYOffset || document.documentElement.scrollTop || 0;
+    if (top <= anchors[0].top) {{ return anchors[0].line; }}
+    var prev = anchors[0], next = anchors[anchors.length - 1];
+    for (var i = 0; i < anchors.length - 1; i++) {{
+        if (anchors[i].top <= top && top < anchors[i + 1].top) {{
+            prev = anchors[i];
+            next = anchors[i + 1];
+            break;
+        }}
+    }}
+    var line = prev.line;
+    if (next.top > prev.top) {{
+        var t = (top - prev.top) / (next.top - prev.top);
+        line = prev.line + (next.line - prev.line) * t;
+    }}
+    return line;
+}}
+
+// 预览滚动时把顶部源码行经 document.title 轻量回传给 Python(无需 QWebChannel)。
+// performance.now() 早于 _previewScrollLock 说明是编辑器驱动的回声，跳过。
+function _reportPreviewScroll() {{
+    if (performance.now() < _previewScrollLock) {{ return; }}
+    var line = _previewTopToLine();
+    if (line == null) {{ return; }}
+    document.title = "__pzsync__:" + line.toFixed(3) + ":" + (_previewSyncNonce++);
+}}
+function _schedulePreviewScrollReport() {{
+    if (_pvScrollTimer) {{ return; }}
+    _pvScrollTimer = setTimeout(function() {{
+        _pvScrollTimer = null;
+        _reportPreviewScroll();
+    }}, 60);
+}}
+window.addEventListener("scroll", _schedulePreviewScrollReport, {{ passive: true }});
+
 window.resyncAfterImagesLoaded = function() {{
     document.querySelectorAll("img").forEach(function(img) {{
         if (img.__panzerNoteSyncBound) {{ return; }}
         img.__panzerNoteSyncBound = true;
 
         var resync = function() {{
-            _nodesVersion = -1;
+            _nodesVersion = null;
             _cachedNodes = null;
             if (window.scrollToSourceLine) {{
                 window.scrollToSourceLine(
@@ -640,6 +689,11 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self._sync_trailing_timer = QTimer(self)
         self._sync_trailing_timer.setSingleShot(True)
         self._sync_trailing_timer.timeout.connect(self._on_sync_trailing)
+        self._suppress_editor_sync: bool = False
+        self._resync_timer = QTimer(self)
+        self._resync_timer.setSingleShot(True)
+        self._resync_timer.setInterval(120)
+        self._resync_timer.timeout.connect(self._do_sync)
 
         if is_enabled("async_highlight"):
             from .async_highlight import AsyncHighlightRenderer
@@ -706,6 +760,13 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
 
         if HAS_WEBENGINE and isinstance(self.preview, QWebEngineView):
             self.preview.loadFinished.connect(self._on_load_finished)
+            page = self.preview.page()
+            if page is not None:
+                # 预览 -> 编辑器：JS 经 document.title 回传顶部源码行
+                page.titleChanged.connect(self._on_preview_title)
+
+        # 拖动分隔条改变预览宽度后，锚点像素位置整体变化，需重新同步
+        self.splitter.splitterMoved.connect(lambda *_: self._schedule_resync())
 
         if self._theme_engine:
             self._init_theme(self._theme_engine)
@@ -735,6 +796,16 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
     def _on_text_changed(self):
         self._preview_timer.start()
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # 窗口/分栏尺寸变化 -> 预览重排 -> 锚点位置变化 -> 防抖后重新同步
+        self._schedule_resync()
+
+    def _schedule_resync(self):
+        # 防御：resizeEvent 可能在 _init_ui 完成前(属性尚未就绪)触发
+        if getattr(self, "_preview_visible", False) and hasattr(self, "_resync_timer"):
+            self._resync_timer.start(120)
+
     # ──────────── 核心渲染 ────────────
 
     def _update_preview(self):
@@ -754,6 +825,15 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
 
         html_content = self._resolve_local_images(html_content)
 
+        self._push_to_preview(html_content)
+
+    def _push_to_preview(self, html_content: str):
+        """把渲染好的 HTML 推送到预览，供 _update_preview / _on_async_highlight_done 共用。
+
+        - QWebEngine 且模板已加载：仅更新 #content 的 innerHTML 并重同步(不重建整页 DOM，
+          因此保留滚动位置)；
+        - 否则：整页 setHtml(首次加载 / QTextBrowser)。
+        """
         if isinstance(self.preview, PreviewBrowser):
             self.preview.set_code_blocks(self._code_blocks)
 
@@ -766,7 +846,7 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             ab = "true" if getattr(self, '_last_at_bottom', False) else "false"
             js = (
                 f"document.getElementById('content').innerHTML = {escaped};"
-                "_nodesVersion = -1; _cachedNodes = null;"
+                "_nodesVersion = null; _cachedNodes = null;"
                 f"window.__lastFracLine={frac:.4f};"
                 f"window.__lastTotalLines={total_lines};"
                 f"window.__lastAtTop={at};"
@@ -1036,19 +1116,7 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
 
         html_content = _CODEBLOCK_RE.sub(_replace_and_count, html_content)
         html_content = self._resolve_local_images(html_content)
-        full_html = PREVIEW_HTML_TEMPLATE.format(content=html_content)
-
-        if isinstance(self.preview, PreviewBrowser):
-            self.preview.set_code_blocks(self._code_blocks)
-
-        if HAS_WEBENGINE and isinstance(self.preview, QWebEngineView):
-            if self._base_path:
-                base_url = QUrl.fromLocalFile(self._base_path + '/')
-                self.preview.setHtml(full_html, base_url)
-            else:
-                self.preview.setHtml(full_html)
-        elif isinstance(self.preview, PreviewBrowser):
-            self.preview.setHtml(full_html)
+        self._push_to_preview(html_content)
 
     def _on_async_highlight_ready(self, task_id: str, html: str, language: str):
         pass
@@ -1170,13 +1238,22 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         frac_line = 1.0
         try:
             cursor = ed.cursorForPosition(QPoint(0, 0))
-            line = int(cursor.block().blockNumber()) + 1
-            rect = ed.cursorRect(cursor)
-            lh = rect.height() or ed.fontMetrics().height()
+            block = cursor.block()
+            line = int(block.blockNumber()) + 1
+            # 用块的起始/结束两处 cursorRect 求块的完整高度(含软换行的多显示行)，
+            # 使长段落/换行块内滚动也能得到 [0,1) 平滑子行偏移，而非很快饱和到 0.999。
+            start_cur = QTextCursor(block)
+            end_cur = QTextCursor(block)
+            end_cur.movePosition(QTextCursor.MoveOperation.EndOfBlock)
+            top = ed.cursorRect(start_cur).top()
+            bottom = ed.cursorRect(end_cur).bottom()
+            block_h = bottom - top
+            if block_h <= 0:
+                block_h = ed.cursorRect(cursor).height() or ed.fontMetrics().height()
             sub = 0.0
-            if lh > 0:
-                # rect.top() <= 0：顶部行已被向上滚出视口的比例
-                sub = min(max(-rect.top() / lh, 0.0), 0.999)
+            if block_h > 0:
+                # top <= 0：该块已被向上滚出视口的比例
+                sub = min(max(-top / block_h, 0.0), 0.999)
             frac_line = line + sub
         except Exception:
             get_logger(__name__).debug("顶部参考行计算失败，回退到光标行", exc_info=True)
@@ -1187,6 +1264,9 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
 
     def _sync_scroll(self, value):
         if not self._preview_visible:
+            return
+        # 若本次编辑器滚动由"预览->编辑器"反向同步触发，跳过，避免回授环
+        if self._suppress_editor_sync:
             return
 
         bar = self.editor.verticalScrollBar()
@@ -1244,6 +1324,49 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
                     pb.setValue(int(line_ratio * pb.maximum()))
             except Exception:
                 get_logger(__name__).debug("QTextBrowser 同步失败", exc_info=True)
+
+    # ──────────── 预览 -> 编辑器 反向同步 ────────────
+
+    def _on_preview_title(self, title: str):
+        """JS 经 document.title 回传 "__pzsync__:<行号>:<nonce>"，据此滚动编辑器。"""
+        if not title or not title.startswith("__pzsync__:"):
+            return
+        parts = title.split(":")
+        if len(parts) < 2:
+            return
+        try:
+            frac_line = float(parts[1])
+        except ValueError:
+            return
+        self._scroll_editor_to_line(frac_line)
+
+    def _scroll_editor_to_line(self, frac_line: float):
+        """把源码行 frac_line 滚到编辑器视口顶部(不移动光标)。
+
+        QPlainTextEdit 的竖直滚动条在"不换行"模式下以源码行(block)为步进，
+        value == 顶部 block 序号，可直接 setValue(line-1)；"限制行宽"模式下滚动条
+        按显示行计数，无法 1:1 映射，退化为按行号比例近似。
+        全程置 _suppress_editor_sync，避免触发反向回授。
+        """
+        ed = self.editor
+        bar = ed.verticalScrollBar()
+        if bar is None:
+            return
+        total = ed.document().blockCount()
+        line = max(1, min(int(round(frac_line)), total))
+
+        self._suppress_editor_sync = True
+        try:
+            if ed.get_wrap_mode() == "no_wrap":
+                bar.setValue(line - 1)
+            elif total > 1:
+                bar.setValue(int((line - 1) / (total - 1) * bar.maximum()))
+        finally:
+            # setValue 同步触发的 valueChanged 已被抑制，下一轮事件循环再解除
+            QTimer.singleShot(0, self._clear_suppress)
+
+    def _clear_suppress(self):
+        self._suppress_editor_sync = False
 
     # ──────────── 预览显隐 ────────────
 
@@ -1318,9 +1441,11 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
 
     def zoomIn(self, n=1):
         self.editor.zoomIn(n)
+        self._schedule_resync()
 
     def zoomOut(self, n=1):
         self.editor.zoomOut(n)
+        self._schedule_resync()
 
     def font(self):
         return self.editor.font()

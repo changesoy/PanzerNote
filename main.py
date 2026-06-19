@@ -77,6 +77,15 @@ def _verify_version_consistency(logger):
 def main():
     profiler = get_startup_profiler()
 
+    # ── 关键：必须在创建 QApplication 之前设置 ──────────────────────────────
+    # MainWindow（及其依赖 markdown_preview）是延迟导入的（见下方 PHASE_WINDOW_CREATE），
+    # 此时 QApplication 已存在。若不预先设置 AA_ShareOpenGLContexts，
+    # markdown_preview 里的 `from PyQt6.QtWebEngineWidgets import QWebEngineView`
+    # 会抛 ImportError（"must be set before a QCoreApplication instance is created"），
+    # 被 except 静默吞掉 → HAS_WEBENGINE=False → 预览回退到 QTextBrowser，
+    # 源码行号同步代码全部失效。设置此属性即可让稍后的 WebEngine 导入成功。
+    QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
+
     app = QApplication(sys.argv)
     app.setApplicationName("PanzerNote")
     app.setApplicationVersion(__version__)

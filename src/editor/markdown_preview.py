@@ -45,8 +45,12 @@ except ImportError:
 try:
     from PyQt6.QtWebEngineWidgets import QWebEngineView
     HAS_WEBENGINE = True
-except ImportError:
+    _WEBENGINE_IMPORT_ERROR = ""
+except ImportError as _exc:
+    # 常见原因并非"未安装"，而是导入时机过晚：QtWebEngineWidgets 必须在
+    # QApplication 创建前导入，或在创建前设置 AA_ShareOpenGLContexts（见 main.py）。
     HAS_WEBENGINE = False
+    _WEBENGINE_IMPORT_ERROR = str(_exc)
 
 from ..core.config import Config
 from ..editor.editor import Editor
@@ -282,142 +286,133 @@ pre code,
 </div>
 <script>
 // ========== 锚点缓存：仅在 content 子元素数量变化时重建 ==========
-var _nodesVersion = 0;
+var _nodesVersion = -1;
 var _cachedNodes = null;
 
-window.scrollToSourceLine = function(line, viewportRatio, totalLines) {{
-    viewportRatio = typeof viewportRatio === "number" ? viewportRatio : 0.35;
-
-    // ========== 第 1 层：文档过短，无需滚动 ==========
-    var maxScroll = Math.max(0,
-        document.documentElement.scrollHeight - window.innerHeight);
-    if (maxScroll <= 0) {{
-        window.__panzerSyncDebug = {{ inputLine: line, boundary: "too-short" }};
-        return;
-    }}
-
-    // ========== 第 2 层：动态视口比例 ==========
-    // 前 15%：viewportRatio 线性过渡到 0（开头自然停住）
-    // 中间 70%：保持 viewportRatio 不变
-    // 后 15%：viewportRatio 线性过渡到 0.65（末尾内容压入视口）
-    var dynamicRatio = viewportRatio;
-    if (typeof totalLines === "number" && totalLines > 0) {{
-        var progress = line / totalLines;
-        if (progress < 0.15) {{
-            dynamicRatio = viewportRatio * (progress / 0.15);
-        }} else if (progress > 0.85) {{
-            var t = (progress - 0.85) / 0.15;
-            dynamicRatio = viewportRatio + (0.65 - viewportRatio) * t;
-        }}
-    }}
-
-    // ========== 锚点收集（缓存：仅在 content 更新后重建）==========
-    function getDocTop(el) {{
-        var top = 0;
-        while (el) {{
-            top += el.offsetTop;
-            el = el.offsetParent;
-        }}
-        return top;
-    }}
-
+// 收集 [data-source-line] 锚点：{{line, top}}，top 为相对文档顶部的绝对像素。
+function _collectAnchors() {{
     var contentEl = document.getElementById("content");
-    var currentVersion = contentEl ? contentEl.childElementCount : 0;
-    if (_nodesVersion !== currentVersion || !_cachedNodes) {{
-        _nodesVersion = currentVersion;
-        _cachedNodes = Array.from(document.querySelectorAll("[data-source-line]"))
-            .map(function(el) {{
-                return {{
-                    el: el,
-                    line: Number(el.getAttribute("data-source-line")),
-                    top: getDocTop(el)
-                }};
-            }})
-            .filter(function(x) {{ return !Number.isNaN(x.line); }})
-            .sort(function(a, b) {{
-                if (a.line !== b.line) {{
-                    return a.line - b.line;
-                }}
-                return a.top - b.top;
-            }});
-    }}
+    var ver = contentEl ? contentEl.childElementCount : 0;
+    if (_nodesVersion === ver && _cachedNodes) {{ return _cachedNodes; }}
+    _nodesVersion = ver;
+    var scrollTop = window.pageYOffset || document.documentElement.scrollTop || 0;
+    _cachedNodes = Array.prototype.slice
+        .call(document.querySelectorAll("[data-source-line]"))
+        .map(function(el) {{
+            var r = el.getBoundingClientRect();
+            return {{ line: Number(el.getAttribute("data-source-line")),
+                     top: r.top + scrollTop }};
+        }})
+        .filter(function(x) {{ return !Number.isNaN(x.line); }})
+        .sort(function(a, b) {{ return (a.line - b.line) || (a.top - b.top); }});
+    return _cachedNodes;
+}}
 
-    var nodes = _cachedNodes;
+// 核心：把"编辑器顶部的源码行(可带小数)"对齐到"预览视口顶部"。
+//   · 顶行对齐(top-to-top)：编辑器顶端显示第 N 行 -> 预览也让第 N 行贴顶。
+//     这是 VSCode markdown 预览采用的模型，与两侧高度比无关，窄预览同样成立。
+//   · EOF 哨兵：末尾追加一个 {{line: 总行数+1, top: 文档总高}} 的虚拟锚点，
+//     使"最后一个块很高"(窄预览下的长表格/长段落)也能按源码行比例平滑滚到底，
+//     而不是卡在该块顶部 —— 这正是"左边到底、右边没过半"的根因。
+//   · 硬端点：编辑器真正到顶/到底(atTop/atBottom)时，预览直接赋值贴 0 / maxScroll，
+//     保证首行/末行一定完整可见，且不依赖任何动画。
+window.scrollToSourceLine = function(fracLine, totalLines, atTop, atBottom) {{
+    try {{
+        if (typeof fracLine !== "number" || !isFinite(fracLine)) {{ fracLine = 1; }}
 
-    // ========== 无锚点兜底 ==========
-    if (!nodes.length) {{
-        if (typeof totalLines === "number" && totalLines > 0
-            && document.body.scrollHeight > 0) {{
-            var fallbackRatio = Math.max(0, Math.min(1, line / totalLines));
-            var fallbackTop = Math.max(0,
-                fallbackRatio * document.body.scrollHeight
-                - window.innerHeight * dynamicRatio);
-            window.scrollTo({{top: Math.min(fallbackTop, maxScroll), behavior: "auto"}});
+        var maxScroll = Math.max(0,
+            document.documentElement.scrollHeight - window.innerHeight);
+        if (maxScroll <= 0) {{
+            window.__panzerSyncDebug = {{ fracLine: fracLine, boundary: "too-short" }};
+            return;
         }}
+
+        if (atTop === true) {{
+            document.documentElement.scrollTop = 0;
+            document.body.scrollTop = 0;
+            window.__panzerSyncDebug = {{ fracLine: fracLine, boundary: "top-snap" }};
+            return;
+        }}
+        if (atBottom === true) {{
+            document.documentElement.scrollTop = maxScroll;
+            document.body.scrollTop = maxScroll;
+            window.__panzerSyncDebug = {{ fracLine: fracLine, boundary: "bottom-snap" }};
+            return;
+        }}
+
+        var nodes = _collectAnchors();
+
+        if (!nodes.length) {{
+            if (typeof totalLines === "number" && totalLines > 0) {{
+                var fr = Math.max(0, Math.min(1, fracLine / totalLines));
+                window.scrollTo({{ top: fr * maxScroll, behavior: "auto" }});
+            }}
+            window.__panzerSyncDebug = {{ fracLine: fracLine, error: "no anchors" }};
+            return;
+        }}
+
+        // 追加 EOF 哨兵锚点
+        var docH = document.documentElement.scrollHeight;
+        var lastReal = nodes[nodes.length - 1];
+        var sentinelLine = (typeof totalLines === "number" && totalLines > lastReal.line)
+            ? (totalLines + 1) : (lastReal.line + 1);
+        var anchors = nodes.concat([{{ line: sentinelLine, top: docH }}]);
+
+        // fracLine 在首锚点之前：贴顶
+        if (fracLine <= anchors[0].line) {{
+            window.scrollTo({{ top: 0, behavior: "auto" }});
+            window.__panzerSyncDebug = {{ fracLine: fracLine, boundary: "before-first" }};
+            return;
+        }}
+
+        // 找到包住 fracLine 的相邻锚点 [prev, next)
+        var prev = anchors[0], next = anchors[anchors.length - 1];
+        for (var i = 0; i < anchors.length - 1; i++) {{
+            if (anchors[i].line <= fracLine && fracLine < anchors[i + 1].line) {{
+                prev = anchors[i];
+                next = anchors[i + 1];
+                break;
+            }}
+        }}
+
+        // 顶行对齐：targetTop = "prev 行贴顶"的 scrollTop，按源码行号线性插值到 next
+        var targetTop = prev.top;
+        if (next.line > prev.line) {{
+            var t = (fracLine - prev.line) / (next.line - prev.line);
+            t = Math.max(0, Math.min(1, t));
+            targetTop = prev.top + (next.top - prev.top) * t;
+        }}
+
+        var finalTop = Math.max(0, Math.min(targetTop, maxScroll));
+        // auto(瞬时)而非 smooth：连续滚动时预览 1:1 跟手，且不会出现平滑动画
+        // 被下一次调用打断而停在中途的问题。
+        window.scrollTo({{ top: finalTop, behavior: "auto" }});
+
         window.__panzerSyncDebug = {{
-            inputLine: line,
-            error: "no data-source-line nodes",
-            fallbackUsed: typeof totalLines === "number" && totalLines > 0
+            fracLine: fracLine, prevLine: prev.line, nextLine: next.line,
+            targetTop: targetTop, finalTop: finalTop, maxScroll: maxScroll,
+            nodeCount: nodes.length
         }};
-        return;
+    }} catch (e) {{
+        console.error('[SYNC-JS] scrollToSourceLine error:', e);
+        window.__panzerSyncDebug = {{ error: e.message, stack: e.stack }};
     }}
-
-    // ========== 锚点插值 ==========
-    var prev = nodes[0];
-    var next = null;
-
-    for (var i = 0; i < nodes.length; i++) {{
-        if (nodes[i].line <= line) {{
-            prev = nodes[i];
-        }} else {{
-            next = nodes[i];
-            break;
-        }}
-    }}
-
-    var targetTop = prev.top;
-
-    if (next && next.line > prev.line) {{
-        var t = Math.max(0, Math.min(1, (line - prev.line) / (next.line - prev.line)));
-        targetTop = prev.top + (next.top - prev.top) * t;
-    }}
-
-    var viewportOffset = window.innerHeight * dynamicRatio;
-    var finalTop = Math.max(0, targetTop - viewportOffset);
-
-    // ========== 第 3 层：安全钳位，绝不超出文档范围 ==========
-    finalTop = Math.min(finalTop, maxScroll);
-
-    window.scrollTo({{
-        top: finalTop,
-        behavior: "smooth"
-    }});
-
-    window.__panzerSyncDebug = {{
-        inputLine: line,
-        prevLine: prev.line,
-        nextLine: next ? next.line : null,
-        dynamicRatio: dynamicRatio,
-        targetTop: targetTop,
-        finalTop: finalTop,
-        maxScroll: maxScroll,
-        nodeCount: nodes.length
-    }};
 }};
 
 window.resyncAfterImagesLoaded = function() {{
     document.querySelectorAll("img").forEach(function(img) {{
-        if (img.__panzerNoteSyncBound) {{
-            return;
-        }}
+        if (img.__panzerNoteSyncBound) {{ return; }}
         img.__panzerNoteSyncBound = true;
 
         var resync = function() {{
-            if (window.__lastSourceLine && window.scrollToSourceLine) {{
+            _nodesVersion = -1;
+            _cachedNodes = null;
+            if (window.scrollToSourceLine) {{
                 window.scrollToSourceLine(
-                    window.__lastSourceLine,
-                    window.__lastSourceRatio || 0.35,
-                    window.__lastTotalLines || 0
+                    typeof window.__lastFracLine === "number" ? window.__lastFracLine : 1,
+                    window.__lastTotalLines || 0,
+                    window.__lastAtTop === true,
+                    window.__lastAtBottom === true
                 );
             }}
         }};
@@ -638,8 +633,13 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self._render_cache = None
         self._md_parser = self._create_md_parser()
         self._html_template_loaded = False
-        self._last_sync_line: int = 1
-        self._last_sync_ratio: float = 0.35
+        self._last_sync_frac: float = 1.0
+        self._last_at_top: bool = True
+        self._last_at_bottom: bool = False
+        self._last_sync_time: float = 0.0
+        self._sync_trailing_timer = QTimer(self)
+        self._sync_trailing_timer.setSingleShot(True)
+        self._sync_trailing_timer.timeout.connect(self._on_sync_trailing)
 
         if is_enabled("async_highlight"):
             from .async_highlight import AsyncHighlightRenderer
@@ -687,8 +687,9 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             self.preview = PreviewBrowser(self)
             self.preview.setFont(QFont("Microsoft YaHei", 11))
             get_logger(__name__).warning(
-                "QWebEngineView unavailable; Markdown preview source-line scroll sync is disabled."
-                " QTextBrowser fallback will not sync scroll position."
+                "QWebEngineView 导入失败，预览回退到 QTextBrowser（源码行号同步不可用）。"
+                " 真实原因: %s",
+                _WEBENGINE_IMPORT_ERROR or "未知（HAS_WEBENGINE=False 但无异常信息）",
             )
 
         self.splitter.addWidget(self.preview)
@@ -759,13 +760,21 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         if HAS_WEBENGINE and isinstance(self.preview, QWebEngineView) and self._html_template_loaded:
             import json
             escaped = json.dumps(html_content)
+            total_lines = self.editor.document().blockCount()
+            frac = getattr(self, '_last_sync_frac', 1.0)
+            at = "true" if getattr(self, '_last_at_top', True) else "false"
+            ab = "true" if getattr(self, '_last_at_bottom', False) else "false"
             js = (
                 f"document.getElementById('content').innerHTML = {escaped};"
+                "_nodesVersion = -1; _cachedNodes = null;"
+                f"window.__lastFracLine={frac:.4f};"
+                f"window.__lastTotalLines={total_lines};"
+                f"window.__lastAtTop={at};"
+                f"window.__lastAtBottom={ab};"
                 "if (window.resyncAfterImagesLoaded) { window.resyncAfterImagesLoaded(); }"
                 "requestAnimationFrame(function() {"
-                "  if (window.__lastSourceLine && window.scrollToSourceLine) {"
-                "    window.scrollToSourceLine(window.__lastSourceLine, window.__lastSourceRatio || 0.35,"
-                f"    {self.editor.document().blockCount()});"
+                "  if (window.scrollToSourceLine) {"
+                f"    window.scrollToSourceLine({frac:.4f}, {total_lines}, {at}, {ab});"
                 "  }"
                 "});"
             )
@@ -836,6 +845,7 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             tokens = self._md_parser.parse(text)
 
             self._code_block_source_lines: list[int] = []
+            injected_count = 0
 
             for token in tokens:
                 if token.type in ("fence", "code_block") and token.map:
@@ -851,6 +861,7 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
                     line_no = token.map[0] + 1
                     token.attrSet("data-source-line", str(line_no))
                     token.attrJoin("class", "src-line")
+                    injected_count += 1
 
             html = self._md_parser.renderer.render(
                 tokens,
@@ -858,11 +869,15 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
                 {},
             )
 
+            get_logger(__name__).debug(
+                "Markdown source map: injected %d data-source-line attrs", injected_count
+            )
             return _strip_dangerous_html(html)
 
-        except Exception:
-            get_logger(__name__).debug(
-                "Markdown source map render failed, fallback to normal render",
+        except Exception as e:
+            get_logger(__name__).error(
+                "Markdown source map render failed: %s, fallback to normal render",
+                str(e),
                 exc_info=True,
             )
             return self._render_markdown(text)
@@ -1139,77 +1154,96 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
 
     # ──────────── 同步滚动 ────────────
 
-    def _current_editor_reference_line(self) -> tuple[int, float]:
-        """获取编辑器当前滚动位置对应的源码行号（1-based）。
+    def _editor_top_fractional_line(self) -> tuple[float, bool, bool]:
+        """返回 (顶部源码行(可含小数), 编辑器是否到顶, 编辑器是否到底)。
 
-        返回 (行号, 参考比例)，参考比例固定为 0.35。
+        顶部行 = 编辑器视口最上方那一行；小数部分表示该行已被向上滚出视口的比例，
+        用于子行级平滑。两侧统一采用"顶行对齐"模型，不再有视口比例偏移。
+        端点 (到顶/到底) 单独返回，交由预览侧硬贴 0 / maxScroll。
         """
-        ratio = 0.35
-        try:
-            viewport = self.editor.viewport()
-            if viewport is not None and viewport.height() > 0:
-                y = int(viewport.height() * ratio)
-                cursor = self.editor.cursorForPosition(QPoint(0, y))
-                line = int(cursor.block().blockNumber()) + 1
-                if line > 0:
-                    return line, ratio
-        except Exception:
-            pass
+        ed = self.editor
+        bar = ed.verticalScrollBar()
+        at_top = bar is None or bar.value() <= bar.minimum()
+        at_bottom = (bar is not None and bar.maximum() > 0
+                     and bar.value() >= bar.maximum())
 
+        frac_line = 1.0
         try:
-            bar = self.editor.verticalScrollBar()
-            if bar is not None and bar.maximum() > 0:
-                total_lines = self.editor.document().blockCount()
-                if total_lines > 0:
-                    scroll_ratio = bar.value() / bar.maximum()
-                    line = int(scroll_ratio * total_lines) + 1
-                    return max(1, min(line, total_lines)), ratio
+            cursor = ed.cursorForPosition(QPoint(0, 0))
+            line = int(cursor.block().blockNumber()) + 1
+            rect = ed.cursorRect(cursor)
+            lh = rect.height() or ed.fontMetrics().height()
+            sub = 0.0
+            if lh > 0:
+                # rect.top() <= 0：顶部行已被向上滚出视口的比例
+                sub = min(max(-rect.top() / lh, 0.0), 0.999)
+            frac_line = line + sub
         except Exception:
-            pass
+            get_logger(__name__).debug("顶部参考行计算失败，回退到光标行", exc_info=True)
+            cursor = ed.textCursor()
+            frac_line = float(int(cursor.block().blockNumber()) + 1)
 
-        cursor = self.editor.textCursor()
-        return int(cursor.block().blockNumber()) + 1, ratio
+        return max(1.0, frac_line), at_top, at_bottom
 
     def _sync_scroll(self, value):
         if not self._preview_visible:
             return
 
-        # 节流：50ms 内只执行一次，避免高频率 runJavaScript 浪费资源
-        now = time.monotonic()
-        if hasattr(self, "_last_sync_time") and now - self._last_sync_time < 0.05:
-            return
-        self._last_sync_time = now
+        bar = self.editor.verticalScrollBar()
+        at_edge = bar is not None and (
+            bar.value() <= bar.minimum()
+            or (bar.maximum() > 0 and bar.value() >= bar.maximum())
+        )
 
-        line, ratio = self._current_editor_reference_line()
-        self._last_sync_line = line
-        self._last_sync_ratio = ratio
+        # 带后沿的节流：50ms 内最多一次 leading 同步，避免高频 runJavaScript；
+        # 端点(到顶/到底)绕过节流立即同步，确保 value=0 / value=max 的收尾事件
+        # 不被丢弃；其余收尾事件由 trailing 定时器补发。
+        now = time.monotonic()
+        elapsed = now - self._last_sync_time
+        if at_edge or elapsed >= 0.05:
+            self._last_sync_time = now
+            self._do_sync()
+        elif not self._sync_trailing_timer.isActive():
+            self._sync_trailing_timer.start(int((0.05 - elapsed) * 1000) + 1)
+
+    def _on_sync_trailing(self):
+        """节流窗口结束后补一次同步，确保收尾位置不被丢弃。"""
+        self._last_sync_time = time.monotonic()
+        self._do_sync()
+
+    def _do_sync(self):
+        frac_line, at_top, at_bottom = self._editor_top_fractional_line()
+        total_lines = self.editor.document().blockCount()
+        self._last_sync_frac = frac_line
+        self._last_at_top = at_top
+        self._last_at_bottom = at_bottom
 
         if HAS_WEBENGINE and isinstance(self.preview, QWebEngineView):
             page = self.preview.page()
             if page is None:
                 return
-            total_lines = self.editor.document().blockCount()
-            js = f"""
-            window.__lastSourceLine = {line};
-            window.__lastSourceRatio = {ratio};
-            window.__lastTotalLines = {total_lines};
-            if (window.scrollToSourceLine) {{
-                window.scrollToSourceLine({line}, {ratio}, {total_lines});
-            }}
-            """
+            at = "true" if at_top else "false"
+            ab = "true" if at_bottom else "false"
+            js = (
+                f"window.__lastFracLine={frac_line:.4f};"
+                f"window.__lastTotalLines={total_lines};"
+                f"window.__lastAtTop={at};"
+                f"window.__lastAtBottom={ab};"
+                f"if(window.scrollToSourceLine){{"
+                f"window.scrollToSourceLine({frac_line:.4f},{total_lines},{at},{ab});}}"
+            )
             page.runJavaScript(js)
             return
 
-        # QTextBrowser fallback：按源码行号比例滚动（非滚动条比例）
-        total_lines = self.editor.document().blockCount()
+        # QTextBrowser fallback：按源码行号比例滚动
         if total_lines > 0:
-            line_ratio = min(line / total_lines, 1.0)
+            line_ratio = min(frac_line / total_lines, 1.0)
             try:
                 pb = self.preview.verticalScrollBar()
                 if pb is not None:
                     pb.setValue(int(line_ratio * pb.maximum()))
             except Exception:
-                pass
+                get_logger(__name__).debug("QTextBrowser 同步失败", exc_info=True)
 
     # ──────────── 预览显隐 ────────────
 

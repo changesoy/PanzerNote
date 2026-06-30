@@ -5,12 +5,14 @@
 """
 
 from PyQt6.QtWidgets import QStatusBar, QLabel, QFrame, QHBoxLayout, QWidget
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal, QEvent
 
 from ..themes.theme_aware_mixin import ThemeAwareMixin
 
 
 class StatusBarWidget(ThemeAwareMixin, QStatusBar):
+
+    eol_toggled = pyqtSignal(str)
 
     def __init__(self, theme_engine=None, parent=None):
         super().__init__(parent)
@@ -62,6 +64,19 @@ class StatusBarWidget(ThemeAwareMixin, QStatusBar):
         self.addPermanentWidget(sep2)
         self._sep2 = sep2
 
+        self.eol_label = QLabel("LF")
+        self.eol_label.setMinimumWidth(40)
+        self.eol_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.eol_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.eol_label.setToolTip("点击切换行尾类型（LF ↔ CRLF）")
+        self.eol_label.installEventFilter(self)
+        self.addPermanentWidget(self.eol_label)
+
+        sep3 = QFrame()
+        sep3.setFrameShape(QFrame.Shape.VLine)
+        self.addPermanentWidget(sep3)
+        self._sep3 = sep3
+
         self.file_type_label = QLabel("纯文本")
         self.file_type_label.setMinimumWidth(70)
         self.file_type_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -89,16 +104,27 @@ class StatusBarWidget(ThemeAwareMixin, QStatusBar):
             }}
         """
         self._separator_style = sep_style
-        for sep in (self._sep1, self._sep1b, self._sep2):
+        for sep in (self._sep1, self._sep1b, self._sep2, self._sep3):
             sep.setStyleSheet(sep_style)
+
+    def eventFilter(self, obj, event):
+        """拦截 EOL 标签的鼠标释放事件进行切换"""
+        if obj is self.eol_label and event.type() == QEvent.Type.MouseButtonRelease:
+            current = self.eol_label.text()
+            new_eol = "CRLF" if current in ("LF", "Mixed") else "LF"
+            self.eol_label.setText(new_eol)
+            self.eol_toggled.emit(new_eol)
+            return True
+        return super().eventFilter(obj, event)
 
     def update_stats(self, char_count: int, line: int, column: int,
                      encoding: str = "UTF-8", file_type: str = "纯文本",
-                     word_count: int = 0):
+                     word_count: int = 0, eol: str = "LF"):
         self.position_label.setText(f"行 {line}, 列 {column}")
         self.char_count_label.setText(f"{char_count} 个字符")
         self.word_count_label.setText(f"{word_count} 个词")
         self.encoding_label.setText(encoding.upper())
+        self.eol_label.setText(eol)
         self.file_type_label.setText(file_type)
 
     def set_encoding(self, encoding: str):

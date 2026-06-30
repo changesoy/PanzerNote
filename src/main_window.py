@@ -222,6 +222,7 @@ class MainWindow(QMainWindow):
     def _init_statusbar(self):
         """初始化状态栏"""
         self.status_bar_widget = StatusBarWidget(theme_engine=self.theme_engine)
+        self.status_bar_widget.eol_toggled.connect(self._on_eol_toggled)
         self.setStatusBar(self.status_bar_widget)
 
     def _init_timers(self):
@@ -1372,9 +1373,10 @@ class MainWindow(QMainWindow):
             col = editor.get_current_column()
             file_type = editor.get_file_type()
             encoding = self.editor_tabs.get_current_encoding()
+            eol = self.editor_tabs.get_current_eol()
 
             self.status_bar_widget.update_stats(
-                char_count, line, col, encoding, file_type, word_count
+                char_count, line, col, encoding, file_type, word_count, eol
             )
 
         today_chars = self.config.get_today_chars_typed()
@@ -1387,6 +1389,11 @@ class MainWindow(QMainWindow):
 
     def _on_content_modified(self):
         """内容修改"""
+        self._update_stats()
+
+    def _on_eol_toggled(self, new_eol: str):
+        """状态栏 EOL 标签点击切换"""
+        self.editor_tabs.set_current_eol(new_eol)
         self._update_stats()
 
     def _on_chars_typed(self, delta: int):

@@ -35,6 +35,7 @@ from .markdown_preview import MarkdownPreviewWidget
 from .find_replace import FindReplaceBar
 from .save_task_manager import SaveTaskManager, SaveState
 from .temp_session_manager import TempSessionManager
+from .eol_utils import detect_eol_from_bytes
 
 
 # ════════════════════════════════════════════════════════
@@ -326,6 +327,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             "is_new": True,
             "untitled_number": num,
             "encoding": "UTF-8",
+            "eol": self.config.get_editor_setting("line_ending", "LF"),
             "last_saved_content": "",
             "last_saved_chars": 0,
             "last_text_length": 0,
@@ -356,9 +358,21 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                     return i
 
         # 读取文件内容，检测编码
-        content = ""
-        detected_encoding = "UTF-8"
         file_guard = self.config.get_file_guard()
+
+        # 先用原始字节探测行尾（safe_read 使用 universal newline 会丢失行尾信息）
+        eol_label = "LF"
+        eol_char = "\n"
+        try:
+            raw_sample = file_guard.safe_read_bytes(
+                filepath, context=FileAccessContext.USER_DOCUMENT_READ
+            )
+            eol_label, eol_char = detect_eol_from_bytes(raw_sample)
+        except Exception:
+            pass  # 探测失败使用默认 LF
+
+        detected_encoding = "UTF-8"
+        content = ""
 
         try:
             content = file_guard.safe_read(filepath, encoding='utf-8',
@@ -422,6 +436,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             "is_modified": False,
             "is_new": False,
             "encoding": detected_encoding,
+            "eol": eol_label,
             "last_saved_content": content,
             "last_saved_chars": len(content),
             "last_text_length": len(content),
@@ -520,6 +535,13 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
         info = self._tab_info.get(tab_id, {})
         last_chars = info.get("last_saved_chars", 0)
+
+        # EOL 规范化：将编辑器内部的 \n 替换为文档目标行尾
+        current_eol_label = info.get("eol", "LF")
+        target_eol = {"LF": "\n", "CRLF": "\r\n", "CR": "\r"}.get(current_eol_label, "\n")
+        from .eol_utils import normalize_eol
+        content = normalize_eol(content, target_eol)
+
         new_chars = max(0, len(content) - last_chars)
 
         info["encoding"] = encoding
@@ -531,6 +553,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
         from PyQt6.QtCore import QThreadPool
         from .save_task import SaveTask
+        from .eol_utils import normalize_eol
 
         task = SaveTask(self.config.get_file_guard(), filepath, content, encoding.lower())
         self._save_manager.submit_task(tab_id, task)
@@ -1061,6 +1084,35 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             info = self._tab_info.get(widget.tab_id, {})
             return str(info.get("encoding", "UTF-8"))
         return "UTF-8"
+
+    def get_current_eol(self) -> str:
+        """获取当前文档的行尾类型（LF / CRLF / CR / Mixed）"""
+        widget = self.currentWidget()
+        if widget and hasattr(widget, 'tab_id'):
+            info = self._tab_info.get(widget.tab_id, {})
+            return str(info.get("eol", "LF"))
+        return "LF"
+
+    def set_current_eol(self, eol: str) -> None:
+        """切换当前文档的行尾类型，并标记为已修改"""
+        widget = self.currentWidget()
+        if widget and hasattr(widget, 'tab_id'):
+            info = self._tab_info.get(widget.tab_id, {})
+            info["eol"] = eol
+            info["is_modified"] = True
+            editor = self._get_editor_from_widget(widget)
+            if editor:
+                doc = editor.document()
+                if doc is not None:
+                    doc.setModified(True)
+            # 更新标签页标题（加 * 标记）
+            for i in range(self.count()):
+                w = self.widget(i)
+                if getattr(w, 'tab_id', None) == widget.tab_id:
+                    base = self._strip_tab_suffix(self.tabText(i))
+                    if not base.endswith(" *"):
+                        self.setTabText(i, base + " *")
+                    break
 
     def get_unsaved_files(self) -> List[str]:
         unsaved = []

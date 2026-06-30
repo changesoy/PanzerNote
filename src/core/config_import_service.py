@@ -77,6 +77,8 @@ class ConfigImportService:
             "show_minimap": ((bool,), None),
             "auto_minimap": ((bool,), None),
             "auto_pair_brackets": ((bool,), None),
+            "indent_size": ((int,), (1, 8)),
+            "use_tabs": ((bool,), None),
         },
         "game": {
             "typing_reward_rate": ((int, float), (0, None)),

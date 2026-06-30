@@ -1165,6 +1165,14 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         for editor in self._iter_editors():
             editor.set_editor_font(family, size)
 
+    def update_indent_settings_all(self):
+        """缩进配置变更后，更新所有已打开编辑器的 Tab 显示宽度"""
+        from .indentation import get_indent_width
+        for editor in self._iter_editors():
+            font_metrics = editor.fontMetrics()
+            tab_width = font_metrics.horizontalAdvance(' ') * get_indent_width(editor.config)
+            editor.setTabStopDistance(tab_width)
+
     # === 查找替换 ===
 
     def show_find_dialog(self):

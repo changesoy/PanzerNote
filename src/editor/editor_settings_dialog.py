@@ -70,6 +70,22 @@ class EditorSettingsDialog(QDialog):
         self.auto_pair_brackets_cb.setToolTip("输入 (、[、{、\"、' 时自动补全对应的右括号/引号")
         editor_layout.addRow("括号/引号自动配对:", self.auto_pair_brackets_cb)
 
+        # 缩进大小
+        self.indent_size_spin = QSpinBox()
+        self.indent_size_spin.setRange(1, 8)
+        self.indent_size_spin.setSuffix(" 空格")
+        self.indent_size_spin.setToolTip("一级缩进的空格数（1-8）")
+        editor_layout.addRow("缩进大小:", self.indent_size_spin)
+
+        # 使用 Tab 缩进
+        self.use_tabs_cb = QCheckBox()
+        self.use_tabs_cb.setToolTip(
+            "勾选后按 Tab 插入制表符（\\t）而非空格，\n"
+            "其显示宽度由上方缩进大小决定。\n"
+            "每次退格删除一个 Tab 字符。"
+        )
+        editor_layout.addRow("使用 Tab 缩进:", self.use_tabs_cb)
+
         # 字体选择（使用本地字体库）
         self.font_family_combo = QFontComboBox()
         self.font_family_combo.setMinimumWidth(200)
@@ -152,6 +168,12 @@ class EditorSettingsDialog(QDialog):
         self.auto_pair_brackets_cb.setChecked(
             self.config.get_editor_setting("auto_pair_brackets", True)
         )
+        self.indent_size_spin.setValue(
+            self.config.get_editor_setting("indent_size", 4)
+        )
+        self.use_tabs_cb.setChecked(
+            self.config.get_editor_setting("use_tabs", False)
+        )
 
         # 字体
         font_family = self.config.get_editor_setting("font_family", "Microsoft YaHei")
@@ -197,6 +219,8 @@ class EditorSettingsDialog(QDialog):
                 "wrap_mode": self.wrap_mode_combo.currentData(),
                 "auto_save_interval": self.autosave_spin.value(),
                 "auto_pair_brackets": self.auto_pair_brackets_cb.isChecked(),
+                "indent_size": self.indent_size_spin.value(),
+                "use_tabs": self.use_tabs_cb.isChecked(),
             },
             "secretary": {
                 "show_secretary": self.show_secretary_cb.isChecked(),

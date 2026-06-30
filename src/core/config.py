@@ -54,6 +54,8 @@ class Config:
             "show_minimap": True,
             "auto_minimap": False,
             "auto_pair_brackets": True,
+            "indent_size": 4,
+            "use_tabs": False,
         },
         "game": {
             "typing_reward_rate": 1.0,

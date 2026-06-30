@@ -1206,6 +1206,9 @@ class MainWindow(QMainWindow):
             # 自动缩略图
             self.editor_tabs.apply_auto_minimap_all()
 
+            # 缩进配置
+            self.editor_tabs.update_indent_settings_all()
+
             # 自动保存间隔
             self.timer_manager.update_auto_save_interval(editor["auto_save_interval"])
 

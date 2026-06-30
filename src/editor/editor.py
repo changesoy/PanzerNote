@@ -37,6 +37,7 @@ from .editor_actions import EditorActionsMixin
 from .auto_pair_handler import AutoPairHandlerMixin
 from .virtual_scroll import LazyHighlightManager
 from .extra_selection_manager import ExtraSelectionManager
+from .indentation import get_indent_width, get_indent_unit
 from ..themes.theme_aware_mixin import ThemeAwareMixin
 
 
@@ -150,8 +151,8 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         font = QFont(font_family, font_size)
         self.setFont(font)
 
-        # 设置Tab宽度（4个空格）
-        self.setTabStopDistance(self.fontMetrics().horizontalAdvance(' ') * 4)
+        # 设置Tab宽度（按缩进配置）
+        self.setTabStopDistance(self.fontMetrics().horizontalAdvance(' ') * get_indent_width(self.config))
 
         # 设置换行模式
         wrap_mode = self.config.get_editor_setting("wrap_mode", "no_wrap")
@@ -541,13 +542,13 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             self._handle_enter()
             return
 
-        # Tab键: 插入4个空格（而非真Tab）
+        # Tab键: 插入缩进
         if key == Qt.Key.Key_Tab and not modifiers:
             cursor = self.textCursor()
             if cursor.hasSelection():
                 self._indent_selection(cursor, indent=True)
             else:
-                cursor.insertText("    ")
+                cursor.insertText(get_indent_unit(self.config))
             return
 
         # Shift+Tab: 减少缩进
@@ -608,7 +609,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         triggers = self.INDENT_TRIGGERS.get(self._file_type, [])
         for trigger in triggers:
             if stripped.endswith(trigger):
-                extra_indent = "    "
+                extra_indent = get_indent_unit(self.config)
                 break
 
         cursor.insertText('\n' + indent + extra_indent)
@@ -622,10 +623,11 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         text = block.text()
 
         if text.strip() == '':
-            if text.startswith("    "):
+            indent_unit = get_indent_unit(self.config)
+            if text.startswith(indent_unit):
                 cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock, QTextCursor.MoveMode.MoveAnchor)
                 cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
-                new_text = text[4:] + '}'
+                new_text = text[len(indent_unit):] + '}'
                 cursor.insertText(new_text)
                 self.setTextCursor(cursor)
                 return
@@ -635,6 +637,8 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
 
     def _indent_selection(self, cursor, indent: bool = True):
         """缩进/反缩进选中的行"""
+        indent_unit = get_indent_unit(self.config)
+
         if not cursor.hasSelection():
             block = cursor.block()
             text = block.text()
@@ -643,10 +647,10 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
 
             if indent:
-                cursor.insertText("    " + text)
+                cursor.insertText(indent_unit + text)
             else:
-                if text.startswith("    "):
-                    cursor.insertText(text[4:])
+                if text.startswith(indent_unit):
+                    cursor.insertText(text[len(indent_unit):])
                 elif text.startswith("\t"):
                     cursor.insertText(text[1:])
             return
@@ -668,11 +672,11 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             cursor.setPosition(block.position())
 
             if indent:
-                cursor.insertText("    ")
+                cursor.insertText(indent_unit)
             else:
                 text = block.text()
-                if text.startswith("    "):
-                    cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor, 4)
+                if text.startswith(indent_unit):
+                    cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor, len(indent_unit))
                     cursor.removeSelectedText()
                 elif text.startswith("\t"):
                     cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor, 1)
@@ -707,7 +711,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         font = QFont(family, size)
         self.setFont(font)
         # 更新 Tab 宽度
-        self.setTabStopDistance(self.fontMetrics().horizontalAdvance(' ') * 4)
+        self.setTabStopDistance(self.fontMetrics().horizontalAdvance(' ') * get_indent_width(self.config))
         # 更新行号区域宽度（字体变化后数字宽度可能不同）
         self._update_line_number_area_width(0)
         self._update_child_geometries()

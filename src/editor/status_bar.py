@@ -12,10 +12,11 @@ from ..themes.theme_aware_mixin import ThemeAwareMixin
 
 class StatusBarWidget(ThemeAwareMixin, QStatusBar):
 
-    def __init__(self, theme_engine, parent=None):
+    def __init__(self, theme_engine=None, parent=None):
         super().__init__(parent)
         self._init_ui()
-        self._init_theme(theme_engine)
+        if theme_engine:
+            self._init_theme(theme_engine)
 
     def _init_ui(self):
         self._separator_style = ""

@@ -38,6 +38,7 @@ from .auto_pair_handler import AutoPairHandlerMixin
 from .virtual_scroll import LazyHighlightManager
 from .extra_selection_manager import ExtraSelectionManager
 from .indentation import get_indent_width, get_indent_unit
+from .text_stats import count_mixed_words
 from ..themes.theme_aware_mixin import ThemeAwareMixin
 
 
@@ -727,11 +728,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         return max(0, doc.characterCount() - 1)
 
     def get_word_count(self) -> int:
-        import re
-        text = self.toPlainText()
-        if not text.strip():
-            return 0
-        return len(re.findall(r'\b\w+\b', text))
+        return count_mixed_words(self.toPlainText())
 
     def get_debounced_word_count(self) -> int:
         if self._word_count_dirty:
@@ -743,12 +740,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self._word_count_timer.start(800)
 
     def _recompute_word_count(self):
-        import re
-        text = self.toPlainText()
-        if not text.strip():
-            self._cached_word_count = 0
-        else:
-            self._cached_word_count = len(re.findall(r'\b\w+\b', text))
+        self._cached_word_count = count_mixed_words(self.toPlainText())
         self._word_count_dirty = False
         self.word_count_recomputed.emit()
 

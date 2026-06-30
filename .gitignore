@@ -6,6 +6,7 @@
 PanzerNote v1.6.6 技术审阅报告.md
 PanzerNote v1.6.6 详细修改规划.md
 PanzerNote v1.6.6 性能优化报告.md
+PanzerNote_Editor_Implementation_Plan_Revised.md
 
 # --- Python ---
 __pycache__/
@@ -102,4 +103,3 @@ user_data_path.txt
 # --- 打包工具 ---
 *.pyz
 *.pyzw
-PanzerNote_Editor_Implementation_Plan_Revised.md

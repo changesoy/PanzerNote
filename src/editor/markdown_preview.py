@@ -840,7 +840,9 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         if HAS_WEBENGINE and isinstance(self.preview, QWebEngineView) and self._html_template_loaded:
             import json
             escaped = json.dumps(html_content)
-            total_lines = self.editor.document().blockCount()
+            doc = self.editor.document()
+            assert doc is not None
+            total_lines = doc.blockCount()
             frac = getattr(self, '_last_sync_frac', 1.0)
             at = "true" if getattr(self, '_last_at_top', True) else "false"
             ab = "true" if getattr(self, '_last_at_bottom', False) else "false"
@@ -1293,7 +1295,9 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
 
     def _do_sync(self):
         frac_line, at_top, at_bottom = self._editor_top_fractional_line()
-        total_lines = self.editor.document().blockCount()
+        doc = self.editor.document()
+        assert doc is not None
+        total_lines = doc.blockCount()
         self._last_sync_frac = frac_line
         self._last_at_top = at_top
         self._last_at_bottom = at_bottom
@@ -1319,6 +1323,7 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         if total_lines > 0:
             line_ratio = min(frac_line / total_lines, 1.0)
             try:
+                assert isinstance(self.preview, PreviewBrowser)
                 pb = self.preview.verticalScrollBar()
                 if pb is not None:
                     pb.setValue(int(line_ratio * pb.maximum()))
@@ -1352,7 +1357,9 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         bar = ed.verticalScrollBar()
         if bar is None:
             return
-        total = ed.document().blockCount()
+        doc = ed.document()
+        assert doc is not None
+        total = doc.blockCount()
         line = max(1, min(int(round(frac_line)), total))
 
         self._suppress_editor_sync = True

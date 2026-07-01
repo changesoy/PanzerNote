@@ -45,6 +45,9 @@ class ThemeColorScheme:
     editor_line_number: str = "#BDBDBD"
     editor_current_line: str = "#FFF9C4"
     editor_selection: str = "#BBDEFB"
+    editor_bracket_match_bg: str = "#E6F2E6"
+    editor_bracket_match_fg: str = "#1A1A1A"
+    editor_bracket_unmatched: str = "#E06C75"
     minimap_bg: str = "#F5F5F5"
     minimap_viewport: str = "#E0E0E0"
     statusbar_bg: str = "#F5F5F5"
@@ -187,6 +190,9 @@ class ThemeEngine(QObject):
                 editor_line_number="#616161",
                 editor_current_line="#2D2D2D",
                 editor_selection="#264F78",
+                editor_bracket_match_bg="#1A3A3A",
+                editor_bracket_match_fg="#E0E0E0",
+                editor_bracket_unmatched="#F44747",
                 minimap_bg="#1E1E1E",
                 minimap_viewport="#3C3C3C",
                 statusbar_bg="#1E1E1E",

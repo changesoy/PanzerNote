@@ -116,23 +116,30 @@ class ThemePreviewWidget(QWidget):
         colors_layout = QVBoxLayout()
 
         c = theme.colors
-        color_items = [
+
+        # ── 通用颜色 ──
+        general_group = QGroupBox("通用颜色")
+        general_layout = QVBoxLayout()
+        general_items = [
             ("主色 (Primary)", c.primary),
+            ("主色深色 (Primary Dark)", c.primary_dark),
+            ("主色浅色 (Primary Light)", c.primary_light),
             ("强调色 (Accent)", c.accent),
             ("背景色 (Background)", c.background),
             ("表面色 (Surface)", c.surface),
             ("卡片色 (Card)", c.card),
             ("主文本 (Text)", c.text_primary),
             ("次文本 (Text Secondary)", c.text_secondary),
+            ("禁用文本 (Text Disabled)", c.text_disabled),
             ("边框色 (Border)", c.border),
+            ("分割线 (Divider)", c.divider),
             ("错误色 (Error)", c.error),
+            ("警告色 (Warning)", c.warning),
             ("成功色 (Success)", c.success),
-            ("编辑器背景", c.editor_bg),
-            ("侧边栏背景", c.sidebar_bg),
-            ("状态栏背景", c.statusbar_bg),
+            ("信息色 (Info)", c.info),
         ]
 
-        for label_text, color_hex in color_items:
+        for label_text, color_hex in general_items:
             row = QHBoxLayout()
             label = QLabel(label_text)
             swatch = QLabel()
@@ -147,7 +154,74 @@ class ThemePreviewWidget(QWidget):
             row.addWidget(label)
             row.addStretch()
             row.addWidget(hex_label)
-            colors_layout.addLayout(row)
+            general_layout.addLayout(row)
+        general_group.setLayout(general_layout)
+        colors_layout.addWidget(general_group)
+
+        # ── 编辑器颜色 ──
+        editor_group = QGroupBox("编辑器颜色")
+        editor_layout = QVBoxLayout()
+        editor_items = [
+            ("编辑器背景", c.editor_bg),
+            ("行号颜色", c.editor_line_number),
+            ("当前行高亮", c.editor_current_line),
+            ("文本选中", c.editor_selection),
+            ("括号匹配背景", c.editor_bracket_match_bg),
+            ("括号匹配前景", c.editor_bracket_match_fg),
+            ("未匹配括号", c.editor_bracket_unmatched),
+        ]
+
+        for label_text, color_hex in editor_items:
+            row = QHBoxLayout()
+            label = QLabel(label_text)
+            swatch = QLabel()
+            swatch.setFixedSize(40, 20)
+            swatch.setStyleSheet(
+                f"background-color: {color_hex}; "
+                f"border: 1px solid #999; border-radius: 2px;"
+            )
+            hex_label = QLabel(color_hex)
+            hex_label.setFont(QFont("Consolas", 9))
+            row.addWidget(swatch)
+            row.addWidget(label)
+            row.addStretch()
+            row.addWidget(hex_label)
+            editor_layout.addLayout(row)
+        editor_group.setLayout(editor_layout)
+        colors_layout.addWidget(editor_group)
+
+        # ── UI 区域颜色 ──
+        ui_group = QGroupBox("UI 区域颜色")
+        ui_layout = QVBoxLayout()
+        ui_items = [
+            ("侧边栏背景", c.sidebar_bg),
+            ("状态栏背景", c.statusbar_bg),
+            ("菜单栏背景", c.menubar_bg),
+            ("对话框背景", c.dialog_bg),
+            ("缩略图背景", c.minimap_bg),
+            ("缩略图视口", c.minimap_viewport),
+            ("小秘书气泡背景", c.secretary_bubble_bg),
+            ("小秘书气泡边框", c.secretary_bubble_border),
+        ]
+
+        for label_text, color_hex in ui_items:
+            row = QHBoxLayout()
+            label = QLabel(label_text)
+            swatch = QLabel()
+            swatch.setFixedSize(40, 20)
+            swatch.setStyleSheet(
+                f"background-color: {color_hex}; "
+                f"border: 1px solid #999; border-radius: 2px;"
+            )
+            hex_label = QLabel(color_hex)
+            hex_label.setFont(QFont("Consolas", 9))
+            row.addWidget(swatch)
+            row.addWidget(label)
+            row.addStretch()
+            row.addWidget(hex_label)
+            ui_layout.addLayout(row)
+        ui_group.setLayout(ui_layout)
+        colors_layout.addWidget(ui_group)
 
         colors_group.setLayout(colors_layout)
         self._preview_layout.addWidget(colors_group)

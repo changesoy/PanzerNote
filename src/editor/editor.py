@@ -39,6 +39,7 @@ from .virtual_scroll import LazyHighlightManager
 from .extra_selection_manager import ExtraSelectionManager
 from .indentation import get_indent_width, get_indent_unit
 from .text_stats import count_mixed_words
+from .bracket_matcher import find_matching_bracket
 from ..themes.theme_aware_mixin import ThemeAwareMixin
 
 
@@ -175,6 +176,9 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         if self.config.get_editor_setting("highlight_current_line", True):
             self.cursorPositionChanged.connect(self._highlight_current_line)
             self._highlight_current_line()
+
+        # 括号匹配高亮
+        self.cursorPositionChanged.connect(self._highlight_bracket_match)
 
         # 禁用默认右键菜单，使用自定义的
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -397,6 +401,68 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             selection.cursor = self.textCursor()
             selection.cursor.clearSelection()
             self._selection_manager.set_layer("current_line", [selection])
+        self._selection_manager.refresh()
+
+    def _highlight_bracket_match(self):
+        """高亮光标位置的配对括号"""
+        cursor = self.textCursor()
+        pos = cursor.position()
+        text = self.toPlainText()
+
+        self._selection_manager.clear_layer("bracket_match")
+
+        bracket_pos, match_pos = find_matching_bracket(text, pos)
+        if bracket_pos is None:
+            self._selection_manager.refresh()
+            return
+
+        # 从主题取颜色（带回退）
+        colors = self._theme_engine.get_active_theme().colors if self._theme_engine else None
+        match_bg = colors.editor_bracket_match_bg if colors else "#E6F2E6"
+        match_fg = colors.editor_bracket_match_fg if colors else "#1A1A1A"
+        unmatched = colors.editor_bracket_unmatched if colors else "#E06C75"
+
+        selections: list[QTextEdit.ExtraSelection] = []
+
+        if match_pos is None:
+            # 未匹配：仅高亮 bracket 本身，用红色下划线
+            fmt = QTextCharFormat()
+            fmt.setUnderlineStyle(QTextCharFormat.UnderlineStyle.SpellCheckUnderline)
+            fmt.setUnderlineColor(QColor(unmatched))
+            sel = QTextEdit.ExtraSelection()
+            sel.format = fmt
+            sel.cursor = QTextCursor(cursor)
+            sel.cursor.setPosition(bracket_pos)
+            sel.cursor.setPosition(bracket_pos + 1, QTextCursor.MoveMode.KeepAnchor)
+            selections.append(sel)
+            self._selection_manager.set_layer("bracket_match", selections)
+            self._selection_manager.refresh()
+            return
+
+        # 已匹配 → 同时高亮 bracket 本身与配对括号
+        _bracket_pos: int = bracket_pos
+        _match_pos: int = match_pos
+
+        bracket_sel = QTextEdit.ExtraSelection()
+        bracket_fmt = QTextCharFormat()
+        bracket_fmt.setBackground(QColor(match_bg))
+        bracket_sel.format = bracket_fmt
+        bracket_sel.cursor = QTextCursor(cursor)
+        bracket_sel.cursor.setPosition(_bracket_pos)
+        bracket_sel.cursor.setPosition(_bracket_pos + 1, QTextCursor.MoveMode.KeepAnchor)
+        selections.append(bracket_sel)
+
+        match_sel = QTextEdit.ExtraSelection()
+        match_fmt = QTextCharFormat()
+        match_fmt.setBackground(QColor(match_bg))
+        match_fmt.setForeground(QColor(match_fg))
+        match_sel.format = match_fmt
+        match_sel.cursor = QTextCursor(cursor)
+        match_sel.cursor.setPosition(_match_pos)
+        match_sel.cursor.setPosition(_match_pos + 1, QTextCursor.MoveMode.KeepAnchor)
+        selections.append(match_sel)
+
+        self._selection_manager.set_layer("bracket_match", selections)
         self._selection_manager.refresh()
 
     # ═══════════════════ 缩略图（Minimap） ═══════════════════

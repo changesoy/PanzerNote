@@ -43,7 +43,8 @@ class ExtraSelectionManager:
         """合并所有层并应用到编辑器"""
         merged = []
         for name in ("current_line", "bookmarks", "diagnostics",
-                     "search_matches", "current_search_match", "temporary_marks"):
+                     "search_matches", "current_search_match", "bracket_match",
+                     "temporary_marks"):
             layer = self._layers.get(name)
             if layer:
                 merged.extend(layer)

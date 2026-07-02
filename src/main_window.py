@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
     QToolButton, QFrame, QSizePolicy, QApplication, QDialog,
     QLineEdit
 )
-from PyQt6.QtCore import Qt, QTimer, QEvent, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, QEvent, pyqtSignal, QPoint
 from PyQt6.QtGui import QIcon, QCloseEvent, QAction, QTextCursor
 from typing import List, Optional
 
@@ -43,6 +43,7 @@ from .editor.file_open_service import FileOpenService, FileOpenSource, FileOpenS
 from .plugins.plugin_manager import PluginManager
 from .themes.theme_engine import ThemeEngine
 from .themes.theme_preview import ThemePreviewDialog
+from .ui.command_palette import CommandPalette
 from .utils.logger import get_logger
 from .utils.error_handler import ErrorHandler, ErrorCategory
 from .utils.feature_flags import is_enabled
@@ -72,6 +73,7 @@ class MainWindow(QMainWindow):
         self.timer_manager = TimerManager(config, self)
         self.event_bus = EventBus(config, self)
         self.shortcut_manager = ShortcutManager(config)
+        self._cmd_palette: Optional[CommandPalette] = None
         self.theme_engine = ThemeEngine(config)
         self.theme_engine.load_external_themes()
         self.theme_engine.initialize_active_theme()
@@ -87,6 +89,7 @@ class MainWindow(QMainWindow):
         self._init_menubar()
         self._init_statusbar()
         self._init_timers()
+        self._register_command_palette()
         self._restore_state()
         self._connect_signals()
         self._apply_theme()
@@ -741,6 +744,9 @@ class MainWindow(QMainWindow):
         if event.key() == Qt.Key.Key_Escape and self._current_view != "editor":
             self._switch_view("editor")
             return
+        if event.key() == Qt.Key.Key_F1:
+            self._show_command_palette()
+            return
         super().keyPressEvent(event)
 
     # === 文件操作 ===
@@ -1116,6 +1122,59 @@ class MainWindow(QMainWindow):
         """快捷键编辑回调"""
         from .utils.logger import get_logger
         get_logger(__name__).info("快捷键已更新: %s -> %s", action_id, new_shortcut)
+
+    # === 命令面板 ===
+
+    def _register_command_palette(self):
+        """注册命令面板快捷键。"""
+        action = self.shortcut_manager.register(
+            "command_palette", "命令面板", "Ctrl+Shift+P",
+            self._show_command_palette, "帮助"
+        )
+        if action:
+            self.addAction(action)
+
+    def _show_command_palette(self):
+        """切换命令面板。已打开则关闭，未打开则打开。"""
+        if self._cmd_palette is not None and self._cmd_palette.isVisible():
+            self._cmd_palette.close()
+            return
+
+        all_shortcuts = self.shortcut_manager.get_all_shortcuts()
+        commands = []
+        for _category, cmds in all_shortcuts.items():
+            for action_id, info in cmds.items():
+                commands.append((info["name"], info["shortcut"], action_id))
+
+        actual_shortcut = self.shortcut_manager.get_shortcut("command_palette") or "Ctrl+Shift+P"
+
+        palette = CommandPalette(commands, shortcut=actual_shortcut, parent=self)
+        palette.command_triggered.connect(self._dispatch_command)
+        palette.destroyed.connect(self._on_palette_closed)
+
+        if CommandPalette._last_known_pos is not None:
+            palette.move(CommandPalette._last_known_pos)
+        else:
+            tabs_pos = self.editor_tabs.mapToGlobal(QPoint(0, 0))
+            palette.move(
+                tabs_pos.x() + (self.editor_tabs.width() - palette.width()) // 2,
+                tabs_pos.y(),
+            )
+
+        palette.show()
+        self._cmd_palette = palette
+
+    def _on_palette_closed(self):
+        """面板关闭后清理引用。"""
+        self._cmd_palette = None
+
+    def _dispatch_command(self, action_id: str) -> None:
+        """执行命令面板选中的命令。"""
+        action = self.shortcut_manager.get_action(action_id)
+        if action:
+            action.trigger()
+        else:
+            get_logger(__name__).warning("未找到命令注册: %s", action_id)
 
     def _toggle_fullscreen(self):
         """切换全屏"""

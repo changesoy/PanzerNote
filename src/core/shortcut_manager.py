@@ -93,7 +93,7 @@ _DEFAULT_SHORTCUTS = {
     "view.construction": ("切换到建造", "Ctrl+2", "视图"),
     "view.garage": ("切换到车库", "Ctrl+3", "视图"),
     "view.collection": ("切换到图鉴", "Ctrl+4", "视图"),
-    "view.md_preview": ("切换Markdown预览", "Ctrl+Shift+P", "视图"),
+    "view.md_preview": ("切换Markdown预览", "Ctrl+Shift+M", "视图"),
     "view.minimap": ("显示/隐藏代码缩略图", "Ctrl+M", "视图"),
     "view.file_tree": ("折叠/展开文件树", "Ctrl+B", "视图"),
     "view.fullscreen": ("全屏模式", "F11", "视图"),
@@ -101,6 +101,7 @@ _DEFAULT_SHORTCUTS = {
     "view.zoom_out": ("缩小", "Ctrl+-", "视图"),
     "view.zoom_reset": ("重置缩放", "Ctrl+0", "视图"),
     "shortcut_panel": ("快捷键提示面板", "Ctrl+/", "帮助"),
+    "command_palette": ("命令面板", "Ctrl+Shift+P", "帮助"),
 }
 
 

@@ -13,12 +13,13 @@ from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QEvent
 from PyQt6.QtGui import QFont, QKeyEvent, QColor, QMouseEvent, QKeySequence
 
 from ..utils.dpi_helper import scale
+from ..themes.theme_aware_mixin import ThemeAwareMixin
 
 # (display_name, shortcut_display, action_id)
 CommandEntry = Tuple[str, str, str]
 
 
-class CommandPalette(QDialog):
+class CommandPalette(ThemeAwareMixin, QDialog):
     """命令面板弹出窗口。
 
     类似 VS Code Ctrl+Shift+P：输入关键字过滤命令列表，
@@ -31,7 +32,7 @@ class CommandPalette(QDialog):
     _last_known_pos: Optional[QPoint] = None
 
     def __init__(self, commands: List[CommandEntry], shortcut: str = "",
-                 parent: Optional[QWidget] = None):
+                 theme_engine=None, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
@@ -73,14 +74,42 @@ class CommandPalette(QDialog):
             ks = self._close_key.toString()
             if ks:
                 close_keys += f"/{ks}"
-        hint = QLabel(f"↑↓ 导航  Enter 执行  {close_keys} 关闭  拖拽搜索栏移动")
-        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hint.setFont(QFont("Microsoft YaHei", 8))
-        hint.setStyleSheet("color: #999; padding: 4px;")
-        layout.addWidget(hint)
+        self._hint_label = QLabel(f"↑↓ 导航  Enter 执行  {close_keys} 关闭  拖拽搜索栏移动")
+        self._hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._hint_label.setFont(QFont("Microsoft YaHei", 8))
+        self._hint_label.setStyleSheet("color: #999; padding: 4px;")
+        layout.addWidget(self._hint_label)
 
         self._populate()
         self._search.setFocus()
+
+        if theme_engine:
+            self._init_theme(theme_engine)
+
+    def _apply_theme_colors(self, colors):
+        self.setStyleSheet(f"""
+            CommandPalette {{
+                background-color: {colors.surface};
+            }}
+            QLineEdit {{
+                border: none;
+                border-bottom: 1px solid {colors.border};
+                padding: 8px 12px;
+                background: {colors.card};
+                color: {colors.text_primary};
+                font-size: 13px;
+            }}
+            QListWidget {{
+                background: {colors.surface};
+                color: {colors.text_primary};
+                border: none;
+            }}
+            QListWidget::item:selected {{
+                background: {colors.primary_light};
+            }}
+        """)
+        self._hint_label.setStyleSheet(f"color: {colors.text_secondary}; padding: 4px;")
+        self._border_color = colors.border
 
     # --- 快捷键关闭键 ---
 
@@ -193,6 +222,7 @@ class CommandPalette(QDialog):
         super().paintEvent(event)
         from PyQt6.QtGui import QPainter, QPen
         painter = QPainter(self)
-        painter.setPen(QPen(QColor("#C0C0C0"), 1))
+        border_color = getattr(self, '_border_color', '#C0C0C0')
+        painter.setPen(QPen(QColor(border_color), 1))
         painter.drawRect(self.rect().adjusted(0, 0, -1, -1))
         painter.end()

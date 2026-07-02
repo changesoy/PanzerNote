@@ -122,10 +122,10 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self.resource_bar)
 
         # 分隔线
-        line1 = QFrame()
-        line1.setFrameShape(QFrame.Shape.HLine)
-        line1.setFrameShadow(QFrame.Shadow.Sunken)
-        main_layout.addWidget(line1)
+        self.line1 = QFrame()
+        self.line1.setFrameShape(QFrame.Shape.NoFrame)
+        self.line1.setFixedHeight(1)
+        main_layout.addWidget(self.line1)
 
         # 内容区域
         content_layout = QHBoxLayout()
@@ -139,10 +139,10 @@ class MainWindow(QMainWindow):
         content_layout.addWidget(self.game_sidebar)
 
         # 分隔线
-        line2 = QFrame()
-        line2.setFrameShape(QFrame.Shape.VLine)
-        line2.setFrameShadow(QFrame.Shadow.Sunken)
-        content_layout.addWidget(line2)
+        self.line2 = QFrame()
+        self.line2.setFrameShape(QFrame.Shape.NoFrame)
+        self.line2.setFixedWidth(1)
+        content_layout.addWidget(self.line2)
 
         # 分割器
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -166,6 +166,7 @@ class MainWindow(QMainWindow):
             self.config.get_notebooks_path,
             get_open_files=lambda: self.editor_tabs.get_open_filepaths(),
                 get_recent_files=lambda: self.config.get_recent_files(),
+            theme_engine=self.theme_engine,
         )
         self.find_in_files_panel.result_clicked.connect(self._on_find_in_files_result)
         self.side_panel_host.register_panel("search", self.find_in_files_panel, "🔍", "跨文件搜索")
@@ -1188,7 +1189,7 @@ class MainWindow(QMainWindow):
 
         actual_shortcut = self.shortcut_manager.get_shortcut("command_palette") or "Ctrl+Shift+P"
 
-        palette = CommandPalette(commands, shortcut=actual_shortcut, parent=self)
+        palette = CommandPalette(commands, shortcut=actual_shortcut, theme_engine=self.theme_engine, parent=self)
         palette.command_triggered.connect(self._dispatch_command)
         palette.destroyed.connect(self._on_palette_closed)
 
@@ -1613,8 +1614,36 @@ class MainWindow(QMainWindow):
     def _apply_theme(self):
         stylesheet = self.theme_engine.generate_stylesheet()
         self.setStyleSheet(stylesheet)
-        colors = self.theme_engine.get_active_theme().colors
+        theme = self.theme_engine.get_active_theme()
+        colors = theme.colors
         self._game_placeholder.setStyleSheet(f"color: {colors.text_disabled}; font-size: 18px;")
+        self.line1.setStyleSheet(f"background-color: {colors.border};")
+        self.line2.setStyleSheet(f"background-color: {colors.border};")
+
+        # Windows 下设置标题栏暗色模式（DWM API）
+        self._update_title_bar_theme(theme.is_dark)
+
+    def _update_title_bar_theme(self, is_dark: bool):
+        """Windows 下通过 DWM API 设置标题栏暗色模式"""
+        import sys
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+            hwnd = int(self.winId())
+
+            value = ctypes.c_int(1 if is_dark else 0)
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_USE_IMMERSIVE_DARK_MODE,
+                ctypes.byref(value),
+                ctypes.sizeof(value),
+            )
+        except Exception:
+            pass
 
     def _show_theme_dialog(self):
         dialog = ThemePreviewDialog(self.theme_engine, self)

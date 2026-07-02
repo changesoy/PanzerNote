@@ -126,6 +126,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self.tab_id: Optional[int] = None
         self._highlighter = None
         self._file_type = "纯文本"
+        self._filepath_or_ext: str = ""
         self._wrap_mode = "no_wrap"
         self._programmatic_modify = False
         self._is_pasting = False
@@ -230,6 +231,15 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
                 color: {colors.text_primary};
             }}
         """)
+        # 更新高亮器的主题
+        if self._highlighter and self._filepath_or_ext:
+            is_dark = self._theme_engine.get_active_theme().is_dark if self._theme_engine else False
+            if hasattr(self._highlighter, 'set_dark_mode'):
+                # Markdown 高亮器
+                self._highlighter.set_dark_mode(is_dark)
+            else:
+                # Pygments 高亮器：重新设置文件类型以切换主题
+                self.set_file_type(self._filepath_or_ext)
         self._highlight_current_line()
 
     def _show_context_menu(self, position):
@@ -613,10 +623,17 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             self._highlighter.setDocument(None)
             self._highlighter = None
 
+        self._filepath_or_ext = filepath_or_ext
         doc = self.document()
         assert doc is not None
+        is_dark = False
+        theme_name = None
+        if self._theme_engine:
+            is_dark = self._theme_engine.get_active_theme().is_dark
+            # 根据明/暗主题自动选择代码高亮主题
+            theme_name = "vscode_dark" if is_dark else "pycharm_light"
         self._highlighter, self._file_type = get_highlighter_for_file(
-            doc, filepath_or_ext
+            doc, filepath_or_ext, theme_name=theme_name, is_dark=is_dark
         )
 
         self._lazy_highlight.set_highlighter(self._highlighter)

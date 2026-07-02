@@ -26,9 +26,10 @@ from PyQt6.QtWidgets import (
 )
 
 from .find_in_files_service import FindInFilesWorker
+from ..themes.theme_aware_mixin import ThemeAwareMixin
 
 
-class FindInFilesPanel(QWidget):
+class FindInFilesPanel(ThemeAwareMixin, QWidget):
     """跨文件搜索面板。
 
     result_clicked(filepath, line_number) — 用户双击结果时发出。
@@ -45,6 +46,7 @@ class FindInFilesPanel(QWidget):
         get_workspace_root: Callable[[], str],
         get_open_files: Callable[[], list[str]] | None = None,
         get_recent_files: Callable[[], list[str]] | None = None,
+        theme_engine=None,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
@@ -70,9 +72,9 @@ class FindInFilesPanel(QWidget):
 
         # --- 范围选择 ---
         scope_layout = QHBoxLayout()
-        scope_label = QLabel("范围:")
-        scope_label.setStyleSheet("font-size: 11px; color: #888;")
-        scope_layout.addWidget(scope_label)
+        self._scope_label = QLabel("范围:")
+        self._scope_label.setStyleSheet("font-size: 11px; color: #888;")
+        scope_layout.addWidget(self._scope_label)
 
         self._scope_combo = QComboBox()
         self._scope_combo.addItem("工作区文件")
@@ -122,6 +124,13 @@ class FindInFilesPanel(QWidget):
         layout.addWidget(self._status_label)
 
         self.setMinimumWidth(180)
+
+        if theme_engine:
+            self._init_theme(theme_engine)
+
+    def _apply_theme_colors(self, colors):
+        self._scope_label.setStyleSheet(f"font-size: 11px; color: {colors.text_secondary};")
+        self._status_label.setStyleSheet(f"color: {colors.text_secondary}; font-size: 11px;")
 
     # ------------------------------------------------------------------
     # 搜索

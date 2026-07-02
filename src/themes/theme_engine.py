@@ -171,14 +171,14 @@ class ThemeEngine(QObject):
             colors=ThemeColorScheme(
                 primary="#BB86FC",
                 primary_dark="#985EFF",
-                primary_light="#3700B3",
+                primary_light="#264F78",
                 accent="#03DAC6",
-                background="#121212",
+                background="#1E1E1E",
                 surface="#1E1E1E",
                 card="#2D2D2D",
                 text_primary="#E0E0E0",
                 text_secondary="#A0A0A0",
-                text_disabled="#616161",
+                text_disabled="#7A7A7A",
                 border="#3C3C3C",
                 divider="#2D2D2D",
                 error="#CF6679",
@@ -187,8 +187,8 @@ class ThemeEngine(QObject):
                 info="#64B5F6",
                 sidebar_bg="#1E1E1E",
                 editor_bg="#1E1E1E",
-                editor_line_number="#616161",
-                editor_current_line="#2D2D2D",
+                editor_line_number="#858585",
+                editor_current_line="#2A2D2E",
                 editor_selection="#264F78",
                 editor_bracket_match_bg="#1A3A3A",
                 editor_bracket_match_fg="#E0E0E0",
@@ -403,17 +403,55 @@ QMessageBox {{
 QSplitter::handle {{
     background-color: {c.border};
 }}
+QFrame[frameShape="4"] {{
+    background-color: {c.border};
+    border: none;
+    max-height: 1px;
+}}
+QFrame[frameShape="5"] {{
+    background-color: {c.border};
+    border: none;
+    max-width: 1px;
+}}
 QScrollBar:vertical {{
     background-color: {c.surface};
-    width: 10px;
+    width: 12px;
+    margin: 0;
 }}
 QScrollBar::handle:vertical {{
     background-color: {c.border};
-    border-radius: 5px;
+    border-radius: 6px;
     min-height: 20px;
+    margin: 2px;
+}}
+QScrollBar::handle:vertical:hover {{
+    background-color: {c.text_disabled};
+}}
+QScrollBar::handle:vertical:pressed {{
+    background-color: {c.text_secondary};
 }}
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
     height: 0;
+}}
+QScrollBar:horizontal {{
+    background-color: {c.surface};
+    height: 12px;
+    margin: 0;
+}}
+QScrollBar::handle:horizontal {{
+    background-color: {c.border};
+    border-radius: 6px;
+    min-width: 20px;
+    margin: 2px;
+}}
+QScrollBar::handle:horizontal:hover {{
+    background-color: {c.text_disabled};
+}}
+QScrollBar::handle:horizontal:pressed {{
+    background-color: {c.text_secondary};
+}}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+    width: 0;
 }}
 """)
 

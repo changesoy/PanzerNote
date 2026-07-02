@@ -34,6 +34,95 @@ except ImportError:
 
 if HAS_PYGMENTS:
     THEMES = {
+        # ────── VSCode Dark+ ──────
+        "vscode_dark": {
+            "name": "VSCode Dark+",
+            "description": "仿 VSCode Dark+ 暗色主题",
+            "styles": {
+                # ── 关键字 ── 紫色
+                Token.Keyword:                  {"color": "#C586C0"},
+                Token.Keyword.Constant:         {"color": "#C586C0"},
+                Token.Keyword.Declaration:      {"color": "#C586C0"},
+                Token.Keyword.Namespace:        {"color": "#C586C0"},
+                Token.Keyword.Pseudo:           {"color": "#C586C0"},
+                Token.Keyword.Reserved:         {"color": "#C586C0"},
+                Token.Keyword.Type:             {"color": "#4EC9B0"},
+
+                # ── 名称 ──
+                Token.Name.Builtin:             {"color": "#DCDCAA"},
+                Token.Name.Builtin.Pseudo:      {"color": "#DCDCAA"},
+                Token.Name.Class:               {"color": "#4EC9B0", "bold": True},
+                Token.Name.Function:            {"color": "#DCDCAA"},
+                Token.Name.Function.Magic:      {"color": "#DCDCAA"},
+                Token.Name.Decorator:           {"color": "#DCDCAA"},
+                Token.Name.Exception:           {"color": "#4EC9B0", "bold": True},
+                Token.Name.Tag:                 {"color": "#569CD6"},
+                Token.Name.Attribute:           {"color": "#9CDCFE"},
+                Token.Name.Namespace:           {"color": "#D4D4D4"},
+                Token.Name.Variable:            {"color": "#9CDCFE"},
+                Token.Name.Variable.Class:      {"color": "#9CDCFE"},
+                Token.Name.Variable.Global:     {"color": "#9CDCFE"},
+                Token.Name.Variable.Instance:   {"color": "#9CDCFE"},
+                Token.Name.Constant:            {"color": "#9CDCFE", "italic": True},
+                Token.Name.Label:               {"color": "#D4D4D4"},
+                Token.Name.Entity:              {"color": "#9CDCFE"},
+
+                # ── 字面量：字符串 ── 橙红色
+                Token.Literal.String:           {"color": "#CE9178"},
+                Token.Literal.String.Affix:     {"color": "#C586C0"},
+                Token.Literal.String.Backtick:  {"color": "#CE9178"},
+                Token.Literal.String.Char:      {"color": "#CE9178"},
+                Token.Literal.String.Delimiter: {"color": "#CE9178"},
+                Token.Literal.String.Doc:       {"color": "#6A9955", "italic": True},
+                Token.Literal.String.Double:    {"color": "#CE9178"},
+                Token.Literal.String.Escape:    {"color": "#D7BA7D"},
+                Token.Literal.String.Heredoc:   {"color": "#CE9178"},
+                Token.Literal.String.Interpol:  {"color": "#C586C0"},
+                Token.Literal.String.Other:     {"color": "#CE9178"},
+                Token.Literal.String.Regex:     {"color": "#CE9178"},
+                Token.Literal.String.Single:    {"color": "#CE9178"},
+                Token.Literal.String.Symbol:    {"color": "#CE9178"},
+
+                # ── 字面量：数字 ── 浅绿色
+                Token.Literal.Number:           {"color": "#B5CEA8"},
+                Token.Literal.Number.Bin:       {"color": "#B5CEA8"},
+                Token.Literal.Number.Float:     {"color": "#B5CEA8"},
+                Token.Literal.Number.Hex:       {"color": "#B5CEA8"},
+                Token.Literal.Number.Integer:   {"color": "#B5CEA8"},
+                Token.Literal.Number.Integer.Long: {"color": "#B5CEA8"},
+                Token.Literal.Number.Oct:       {"color": "#B5CEA8"},
+
+                # ── 注释 ── 绿色
+                Token.Comment:                  {"color": "#6A9955", "italic": True},
+                Token.Comment.Hashbang:         {"color": "#6A9955", "italic": True},
+                Token.Comment.Multiline:        {"color": "#6A9955", "italic": True},
+                Token.Comment.Preproc:          {"color": "#6A9955", "italic": True},
+                Token.Comment.PreprocFile:      {"color": "#6A9955", "italic": True},
+                Token.Comment.Single:           {"color": "#6A9955", "italic": True},
+                Token.Comment.Special:          {"color": "#6A9955", "italic": True, "bold": True},
+
+                # ── 运算符 / 标点 ──
+                Token.Operator:                 {"color": "#D4D4D4"},
+                Token.Operator.Word:            {"color": "#C586C0"},
+                Token.Punctuation:              {"color": "#D4D4D4"},
+
+                # ── 泛型 ──
+                Token.Generic.Heading:          {"color": "#D4D4D4", "bold": True},
+                Token.Generic.Subheading:       {"color": "#D4D4D4", "bold": True},
+                Token.Generic.Emph:             {"italic": True},
+                Token.Generic.Strong:           {"bold": True},
+                Token.Generic.Deleted:          {"color": "#F44747"},
+                Token.Generic.Inserted:         {"color": "#6A9955"},
+                Token.Generic.Error:            {"color": "#F44747"},
+                Token.Generic.Traceback:        {"color": "#F44747"},
+                Token.Generic.Output:           {"color": "#D4D4D4"},
+                Token.Generic.Prompt:           {"color": "#D4D4D4", "bold": True},
+
+                # ── 其他 ──
+                Token.Text:                     {"color": "#D4D4D4"},
+                Token.Error:                    {"color": "#F44747"},
+            }
+        },
         # ────── PyCharm / IntelliJ Light ──────
         "pycharm_light": {
             "name": "PyCharm Light",

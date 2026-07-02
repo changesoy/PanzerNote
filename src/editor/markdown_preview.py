@@ -256,6 +256,7 @@ li input[type="checkbox"] {{
     font-size: 14px;
     line-height: 1.55;
     white-space: pre;
+    color: #2b2b2b;
 }}
 .code-line {{
     display: block;
@@ -286,6 +287,26 @@ section[data-fold-heading] {{
 }}
 section[data-fold-heading].folded {{
     display: none;
+}}
+
+/* ========== 滚动条（与编辑器样式一致，暗色模式下自适应） ========== */
+::-webkit-scrollbar {{
+    width: 12px;
+    height: 12px;
+}}
+::-webkit-scrollbar-track {{
+    background: #f0f0f0;
+}}
+::-webkit-scrollbar-thumb {{
+    background: #e0e0e0;
+    border-radius: 6px;
+    border: 2px solid #f0f0f0;
+}}
+::-webkit-scrollbar-thumb:hover {{
+    background: #bababa;
+}}
+::-webkit-scrollbar-corner {{
+    background: #f0f0f0;
 }}
 </style>
 </head>
@@ -499,6 +520,46 @@ window.updateFoldVisibility = function(collapsedLinesJson) {{
 </script>
 </body>
 </html>"""
+
+
+# ════════════════════════════════════════════════════════
+#  暗色预览模板（基于浅色模板做颜色替换，带缓存）
+# ════════════════════════════════════════════════════════
+
+_DARK_COLOR_MAP = {
+    "#EDF3FA": "#1E1E1E",
+    "#2470B3": "#569CD6",
+    "#1a5a96": "#6CB6FF",
+    "#f2f6fc": "#252526",
+    "#2b2b2b": "#D4D4D4",
+    "#d0d0d0": "#444444",
+    "#d9d9d9": "#444444",
+    "#656565": "#9E9E9E",
+    "#f0f0f0": "#333333",
+    "#e0e0e0": "#555555",
+    "#bababa": "#666666",
+    "#f9f9f9": "#2A2A2A",
+    "#fafafa": "#252525",
+    "#fff": "#1E1E1E",
+    "#555": "#B0B0B0",
+}
+
+_DARK_TEMPLATE_CACHE: Optional[str] = None
+
+
+def _get_dark_preview_template() -> str:
+    global _DARK_TEMPLATE_CACHE
+    if _DARK_TEMPLATE_CACHE is None:
+        template = PREVIEW_HTML_TEMPLATE
+        for light, dark in _DARK_COLOR_MAP.items():
+            # 用正则确保颜色值后不跟十六进制字符，避免 #555 破坏 #555555 等子串问题
+            template = re.sub(
+                re.escape(light) + r'(?![0-9a-fA-F])',
+                dark,
+                template
+            )
+        _DARK_TEMPLATE_CACHE = template
+    return _DARK_TEMPLATE_CACHE
 
 
 # ════════════════════════════════════════════════════════
@@ -812,6 +873,10 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
                 f"  border-color: {colors.text_disabled};"
                 f"}}"
             )
+        # 主题变更时重建预览以应用新 CSS（重置标志让 _push_to_preview 走 setHtml 路径）
+        self._html_template_loaded = False
+        if getattr(self, 'editor', None) is not None:
+            self._update_preview()
 
     def _connect_signals(self) -> None:
         self.editor.textChanged.connect(self._on_text_changed)
@@ -897,7 +962,10 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             if page is not None:
                 page.runJavaScript(js)
         else:
-            full_html = PREVIEW_HTML_TEMPLATE.format(content=html_content)
+            theme_engine = getattr(self, '_theme_engine', None)
+            is_dark = bool(theme_engine and theme_engine.get_active_theme().is_dark)
+            template = _get_dark_preview_template() if is_dark else PREVIEW_HTML_TEMPLATE
+            full_html = template.format(content=html_content)
             if HAS_WEBENGINE and isinstance(self.preview, QWebEngineView):
                 if self._base_path:
                     base_url = QUrl.fromLocalFile(self._base_path + '/')
@@ -1124,10 +1192,20 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
 
     # ──────────── 代码块后处理 ────────────
 
+    def _get_code_highlight_theme(self) -> Optional[str]:
+        """根据当前明/暗主题自动选择代码高亮主题。
+        若用户在配置中显式指定了主题，则优先使用用户配置。"""
+        user_theme = self.config.get_editor_setting("code_highlight_theme", None)
+        if user_theme:
+            return str(user_theme)
+        # 根据明/暗主题自动选择
+        is_dark = bool(self._theme_engine and self._theme_engine.get_active_theme().is_dark)
+        return "vscode_dark" if is_dark else "pycharm_light"
+
     def _process_code_blocks(self, html: str) -> str:
         """替换所有 <pre><code> 块：语法高亮 + 浅蓝容器 + 嵌入位置标记"""
         self._code_blocks = []
-        theme = self.config.get_editor_setting("code_highlight_theme", None)
+        theme = self._get_code_highlight_theme()
 
         def _replace(m):
             code_attrs = m.group("code_attrs") or ""
@@ -1152,7 +1230,7 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
     def _process_code_blocks_async(self, html: str) -> str:
         """异步版本的代码块处理：先渲染占位符，再异步替换高亮结果"""
         self._code_blocks = []
-        theme = self.config.get_editor_setting("code_highlight_theme", None)
+        theme = self._get_code_highlight_theme()
 
         if self._pending_async_task:
             if self._async_renderer is not None:

@@ -22,12 +22,6 @@ from .search_service import SearchService
 
 
 
-# 高亮颜色
-_MATCH_BG = QColor("#FFEE58")       # 所有匹配：淡黄色
-_CURRENT_BG = QColor("#FF9800")     # 当前匹配：橙色
-_CURRENT_FG = QColor("#FFFFFF")
-
-
 class FindReplaceBar(ThemeAwareMixin, QWidget):
     """嵌入式查找替换栏
 
@@ -42,6 +36,11 @@ class FindReplaceBar(ThemeAwareMixin, QWidget):
         self._matches = []
         self._current_idx = -1
         self._replace_visible = False
+
+        # 高亮颜色（由 _apply_theme_colors 按主题更新）
+        self._match_bg = QColor("#FFEE58")
+        self._current_bg = QColor("#FF9800")
+        self._current_fg = QColor("#FFFFFF")
 
         self._init_ui()
         self._connect_signals()
@@ -327,6 +326,20 @@ class FindReplaceBar(ThemeAwareMixin, QWidget):
             QLabel {{ font-size: 12px; color: {colors.text_primary}; }}
         """)
         self._update_match_label()
+        # 按主题更新高亮颜色
+        is_dark = False
+        te = getattr(self, '_theme_engine', None)
+        if te:
+            is_dark = te.get_active_theme().is_dark
+        if is_dark:
+            self._match_bg = QColor("#6B6B00")
+            self._current_bg = QColor("#B47800")
+        else:
+            self._match_bg = QColor("#FFEE58")
+            self._current_bg = QColor("#FF9800")
+        self._current_fg = QColor("#FFFFFF")
+        if self._matches and self.isVisible():
+            self._apply_highlights()
 
     def _update_match_label(self):
         """更新匹配计数标签"""
@@ -364,10 +377,10 @@ class FindReplaceBar(ThemeAwareMixin, QWidget):
             extra = QTextEdit.ExtraSelection()
 
             if i == self._current_idx:
-                extra.format.setBackground(_CURRENT_BG)
-                extra.format.setForeground(_CURRENT_FG)
+                extra.format.setBackground(self._current_bg)
+                extra.format.setForeground(self._current_fg)
             else:
-                extra.format.setBackground(_MATCH_BG)
+                extra.format.setBackground(self._match_bg)
 
             cursor = self._editor.textCursor()
             cursor.setPosition(start)

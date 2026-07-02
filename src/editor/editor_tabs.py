@@ -447,6 +447,12 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
         self.setCurrentIndex(index)
         self.tab_count_changed.emit(self.count())
+
+        # 恢复书签
+        saved_bookmarks = self.config.get_bookmarks(filepath)
+        if saved_bookmarks:
+            self._restore_bookmarks(widget, filepath, saved_bookmarks)
+
         return int(index)
 
     def save_current(self) -> Tuple[bool, int]:
@@ -1458,3 +1464,29 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         editor = self.current_editor()
         if editor:
             editor.format_document()
+
+    # === 书签持久化 ===
+
+    def _restore_bookmarks(self, widget, filepath: str, lines: list) -> None:
+        """恢复已保存的书签到编辑器。"""
+        editor = self._get_editor_from_widget(widget)
+        if editor is not None:
+            editor.set_bookmarks(set(lines))
+
+    def save_all_bookmarks(self) -> None:
+        """保存所有已打开标签页的书签到 config。"""
+        for i in range(self.count()):
+            widget = self.widget(i)
+            if widget is None:
+                continue
+            tab_id = getattr(widget, 'tab_id', None)
+            if tab_id is None:
+                continue
+            info = self._tab_info.get(tab_id, {})
+            filepath = info.get("filepath")
+            if not filepath:
+                continue
+            editor = self._get_editor_from_widget(widget)
+            if editor is not None:
+                bookmarks = editor.get_bookmarks()
+                self.config.set_bookmarks(filepath, list(bookmarks) if bookmarks else [])

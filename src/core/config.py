@@ -99,6 +99,7 @@ class Config:
                 "expanded_folders": []
             }
         },
+        "bookmarks": {},
         "recent_files": [],
         "external_files": []
     }
@@ -382,6 +383,18 @@ class Config:
 
     def get_current_view(self) -> str:
         return str(self._workspace.get("last_session", {}).get("current_view", "editor"))
+
+    def get_bookmarks(self, filepath: str) -> list:
+        """获取指定文件的书签行号列表。"""
+        return list(self._workspace.get("bookmarks", {}).get(filepath, []))
+
+    def set_bookmarks(self, filepath: str, lines: list) -> None:
+        """设置指定文件的书签行号列表。"""
+        bookmarks = self._workspace.setdefault("bookmarks", {})
+        if lines:
+            bookmarks[filepath] = sorted(lines)
+        else:
+            bookmarks.pop(filepath, None)
 
     def add_recent_file(self, filepath: str) -> None:
         recent = self._workspace.get("recent_files", [])

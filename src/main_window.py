@@ -400,6 +400,9 @@ class MainWindow(QMainWindow):
 
         self.side_panel_host.save_state(self.config)
 
+        # 书签持久化
+        self.editor_tabs.save_all_bookmarks()
+
         self.config.update_last_login()
 
         self.config.save_settings()

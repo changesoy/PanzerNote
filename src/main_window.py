@@ -1315,6 +1315,9 @@ class MainWindow(QMainWindow):
             # 自动保存间隔
             self.timer_manager.update_auto_save_interval(editor["auto_save_interval"])
 
+            # 自动补全
+            self.editor_tabs.set_completion_enabled_all(editor.get("enable_completion", False))
+
             # 小秘书设置
             if secretary["show_secretary"]:
                 self.secretary.show()

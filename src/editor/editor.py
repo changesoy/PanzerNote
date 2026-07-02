@@ -38,6 +38,7 @@ from .auto_pair_handler import AutoPairHandlerMixin
 from .virtual_scroll import LazyHighlightManager
 from .extra_selection_manager import ExtraSelectionManager
 from .indentation import get_indent_width, get_indent_unit
+from .completion import CompletionPopup, CompletionProvider
 from .text_stats import count_mixed_words
 from .bracket_matcher import find_matching_bracket
 from ..themes.theme_aware_mixin import ThemeAwareMixin
@@ -116,6 +117,17 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self._wrap_mode = "no_wrap"
         self._programmatic_modify = False
         self._is_pasting = False
+        self._composing = False  # IME 输入法组字中
+
+        # 自动补全（timer 须在 _init_ui 前创建，因 textChanged 信号会引用它）
+        self._completion_timer = QTimer(self)
+        self._completion_timer.setSingleShot(True)
+        self._completion_timer.setInterval(500)
+        self._completion_timer.timeout.connect(self._rebuild_completion_words)
+
+        self._completion_provider = CompletionProvider()
+        self._completion_popup = CompletionPopup(None)  # 无父窗口，避免被 viewport 裁剪
+        self._completion_popup.item_selected.connect(self._apply_completion)
 
         self._selection_manager = ExtraSelectionManager(self)
 
@@ -132,6 +144,9 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self._word_count_timer.setSingleShot(True)
         self._word_count_timer.setInterval(800)
         self._word_count_timer.timeout.connect(self._recompute_word_count)
+
+        # 自动补全
+        self.cursorPositionChanged.connect(self._trigger_completion)
 
     @property
     def is_programmatic_modify(self) -> bool:
@@ -179,6 +194,9 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
 
         # 括号匹配高亮
         self.cursorPositionChanged.connect(self._highlight_bracket_match)
+
+        # 文本变更时触发补全词集刷新（500ms 防抖）
+        self.textChanged.connect(self._completion_timer.start)
 
         # 禁用默认右键菜单，使用自定义的
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -564,6 +582,12 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         """
         if event is None:
             return
+
+        # 自动补全弹框键盘导航
+        if self._completion_popup.visible:
+            if self._completion_popup.key_press_event(event):
+                return
+
         modifiers = event.modifiers()
         key = event.key()
 
@@ -621,6 +645,10 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         - 英文键盘直接输入通常会走 keyPressEvent
         - 中文输入法（含中文标点）往往通过 inputMethodEvent 提交 commitString
         """
+        # 跟踪 IME 组字状态
+        preedit = event.preeditString()
+        self._composing = bool(preedit)
+
         if self._handle_auto_pair_ime(event):
             return None
 
@@ -806,6 +834,8 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         """加载文本内容，大文件自动启用延迟高亮"""
         if not self._lazy_highlight.load_content(content):
             self.setPlainText(content)
+        # 重建补全词集
+        self._completion_provider.rebuild_from_text(self.toPlainText())
 
     def goto_line(self, line: int):
         """跳转到指定行"""
@@ -854,3 +884,63 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
     def set_bookmarks(self, bookmarks: Set[int]):
         self._bookmarks = bookmarks.copy()
         self.line_number_area.update()
+
+    # === 自动补全 ===
+
+    def _trigger_completion(self) -> None:
+        """光标位置改变时触发补全检查。"""
+        if self._completion_popup.visible:
+            self._completion_popup.hide()
+    
+        if not self.config.get_editor_setting("enable_completion", False):
+            return
+        if self._composing:
+            return
+
+        prefix = self._completion_prefix()
+        min_chars = self.config.get_editor_setting("completion_min_chars", 2)
+        if len(prefix) < min_chars:
+            return
+
+        candidates = self._completion_provider.candidates_for_prefix(prefix)
+        if not candidates:
+            return
+
+        self._completion_popup.set_candidates(candidates)
+        # 弹框定位到光标下方
+        cr = self.cursorRect()
+        pos = self.viewport().mapToGlobal(cr.bottomLeft())
+        self._completion_popup.show_at(pos)
+
+    def _rebuild_completion_words(self) -> None:
+        """从文档全文重建补全词集。"""
+        if self.config.get_editor_setting("enable_completion", False):
+            self._completion_provider.rebuild_from_text(self.toPlainText())
+
+    def _completion_prefix(self) -> str:
+        """获取光标前的词语前缀（字母/数字/下划线/中文）。"""
+        cursor = self.textCursor()
+        block = cursor.block()
+        line = block.text()
+        col = cursor.positionInBlock()
+        line_prefix = line[:col]
+        import re
+        match = re.search(r'[a-zA-Z0-9_\u4e00-\u9fff]+$', line_prefix)
+        return match.group() if match else ''
+
+    def _apply_completion(self, text: str) -> None:
+        """用补全候选替换光标前缀。"""
+        cursor = self.textCursor()
+        prefix = self._completion_prefix()
+        suffix = text[len(prefix):]
+        cursor.insertText(suffix)
+
+    def set_completion_enabled(self, enabled: bool) -> None:
+        """动态开关自动补全。"""
+        # 开关在 cursorPositionChanged slot 中读取，无需额外操作
+        if not enabled:
+            self._completion_popup.hide()
+
+    def hide_completion(self) -> None:
+        """隐藏补全弹框。"""
+        self._completion_popup.hide()

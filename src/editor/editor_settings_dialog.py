@@ -106,6 +106,16 @@ class EditorSettingsDialog(QDialog):
         self.autosave_spin.setSuffix(" 秒")
         editor_layout.addRow("自动保存间隔:", self.autosave_spin)
 
+        # 自动补全
+        self.enable_completion_cb = QCheckBox()
+        self.enable_completion_cb.setToolTip("输入时根据文档已有词语弹出补全建议")
+        editor_layout.addRow("自动补全:", self.enable_completion_cb)
+
+        self.completion_min_chars_spin = QSpinBox()
+        self.completion_min_chars_spin.setRange(1, 6)
+        self.completion_min_chars_spin.setToolTip("输入多少字符后触发补全提示")
+        editor_layout.addRow("补全最少字符数:", self.completion_min_chars_spin)
+
         layout.addWidget(editor_group)
 
         # ── 小秘书选项 ──
@@ -193,6 +203,13 @@ class EditorSettingsDialog(QDialog):
             self.config.get_editor_setting("auto_save_interval", 30)
         )
 
+        self.enable_completion_cb.setChecked(
+            self.config.get_editor_setting("enable_completion", False)
+        )
+        self.completion_min_chars_spin.setValue(
+            self.config.get_editor_setting("completion_min_chars", 2)
+        )
+
         self.show_secretary_cb.setChecked(
             self.config.get_secretary_setting("show_secretary", True)
         )
@@ -221,6 +238,8 @@ class EditorSettingsDialog(QDialog):
                 "auto_pair_brackets": self.auto_pair_brackets_cb.isChecked(),
                 "indent_size": self.indent_size_spin.value(),
                 "use_tabs": self.use_tabs_cb.isChecked(),
+                "enable_completion": self.enable_completion_cb.isChecked(),
+                "completion_min_chars": self.completion_min_chars_spin.value(),
             },
             "secretary": {
                 "show_secretary": self.show_secretary_cb.isChecked(),

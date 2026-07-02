@@ -1235,6 +1235,11 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         for editor in self._iter_editors():
             editor.set_highlight_current_line(enabled)
 
+    def set_completion_enabled_all(self, enabled: bool) -> None:
+        """对所有已打开编辑器应用补全开关。"""
+        for editor in self._iter_editors():
+            editor.set_completion_enabled(enabled)
+
     def set_font_all(self, family: str, size: int):
         for editor in self._iter_editors():
             editor.set_editor_font(family, size)

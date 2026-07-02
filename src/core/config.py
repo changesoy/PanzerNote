@@ -56,6 +56,8 @@ class Config:
             "auto_pair_brackets": True,
             "indent_size": 4,
             "use_tabs": False,
+            "enable_completion": False,
+            "completion_min_chars": 2,
         },
         "game": {
             "typing_reward_rate": 1.0,

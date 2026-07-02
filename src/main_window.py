@@ -45,6 +45,7 @@ from .plugins.plugin_manager import PluginManager
 from .themes.theme_engine import ThemeEngine
 from .themes.theme_preview import ThemePreviewDialog
 from .ui.command_palette import CommandPalette
+from .editor.find_in_files_panel import FindInFilesPanel
 from .utils.logger import get_logger
 from .utils.error_handler import ErrorHandler, ErrorCategory
 from .utils.feature_flags import is_enabled
@@ -75,6 +76,7 @@ class MainWindow(QMainWindow):
         self.event_bus = EventBus(config, self)
         self.shortcut_manager = ShortcutManager(config)
         self._cmd_palette: Optional[CommandPalette] = None
+        self.editor_tabs: EditorTabWidget  # 在 _init_ui 中初始化
         self.theme_engine = ThemeEngine(config)
         self.theme_engine.load_external_themes()
         self.theme_engine.initialize_active_theme()
@@ -158,6 +160,15 @@ class MainWindow(QMainWindow):
         self.outline_panel = OutlinePanel()
         self.outline_panel.heading_clicked.connect(self._on_outline_heading_clicked)
         self.side_panel_host.register_panel("outline", self.outline_panel, "§", "大纲")
+
+        # 跨文件搜索面板注册到宿主
+        self.find_in_files_panel = FindInFilesPanel(
+            self.config.get_notebooks_path,
+            get_open_files=lambda: self.editor_tabs.get_open_filepaths(),
+                get_recent_files=lambda: self.config.get_recent_files(),
+        )
+        self.find_in_files_panel.result_clicked.connect(self._on_find_in_files_result)
+        self.side_panel_host.register_panel("search", self.find_in_files_panel, "🔍", "跨文件搜索")
 
         self.side_panel_host.setMinimumWidth(scale(100))
         self.splitter.addWidget(self.side_panel_host)
@@ -1508,6 +1519,44 @@ class MainWindow(QMainWindow):
         editor = self.editor_tabs.current_editor()
         if editor is not None and editor.get_file_type() == "Markdown":
             editor.goto_line(line_num)
+
+    def _show_find_in_files(self):
+        """显示/切换跨文件搜索面板。"""
+        self.side_panel_host.show_panel("search")
+        self.find_in_files_panel.focus_search()
+
+    def _on_find_in_files_result(self, filepath: str, line_num: int):
+        """跨文件搜索结果双击 → 打开文件并跳转到行"""
+        # 如果已在标签页中打开，直接跳转
+        editor = self.editor_tabs.current_editor()
+        if editor is not None:
+            current_path = editor.filepath() if hasattr(editor, "filepath") else ""
+            if current_path and os.path.normpath(current_path) == os.path.normpath(filepath):
+                editor.goto_line(line_num)
+                return
+
+        # 尝试打开文件
+        try:
+            validated = self._file_open_service.validate_open_request(
+                filepath, FileOpenSource.USER_DIALOG
+            )
+        except FileOpenSecurityError:
+            QMessageBox.warning(self, "无法打开文件", f"文件不在允许的范围内:\n{filepath}")
+            return
+
+        notebook_path = os.path.normpath(self.config.get_notebooks_path())
+        if not _is_inside_root(os.path.normpath(validated), notebook_path):
+            self.config.add_external_file(validated)
+            self.file_tree.refresh_external_files()
+
+        self.editor_tabs.open_file(validated)
+        self.config.add_recent_file(validated)
+        self._update_recent_menu()
+
+        # 跳转到行
+        e = self.editor_tabs.current_editor()
+        if e is not None:
+            e.goto_line(line_num)
 
     def _on_content_modified(self):
         """内容修改"""

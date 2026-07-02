@@ -332,7 +332,7 @@ class EditorActionsMixin:
         elif self._file_type == 'TOML':
             try:
                 import tomli_w
-                import tomli
+                import tomli  # type: ignore[import-not-found]
                 parsed = tomli.loads(content)
                 formatted = tomli_w.dumps(parsed)
                 with self.programmatic_modify():

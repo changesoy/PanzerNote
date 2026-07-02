@@ -82,6 +82,7 @@ class MenuBuilder:
         menu.addSeparator()
         self._add_action(menu, "查找", QKeySequence.StandardKey.Find, mw._find, "edit.find", "编辑")
         self._add_action(menu, "替换", QKeySequence("Ctrl+H"), mw._replace, "edit.replace", "编辑")
+        self._add_action(menu, "跨文件搜索", QKeySequence("Ctrl+Shift+F"), mw._show_find_in_files, "search.find_in_files", "搜索")
         menu.addSeparator()
 
         line_menu = menu.addMenu("行操作")

@@ -1410,7 +1410,7 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
     # ══════════════════════════════════════════════════
 
     def toPlainText(self) -> str:
-        return self.editor.toPlainText()
+        return str(self.editor.toPlainText())
 
     def setPlainText(self, text: str):
         self.editor.setPlainText(text)

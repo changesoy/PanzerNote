@@ -90,6 +90,7 @@ _DEFAULT_SHORTCUTS = {
     "edit.paste_line": ("粘贴为新行", "Ctrl+Shift+V", "编辑"),
     "edit.goto_line": ("转到行", "Ctrl+G", "编辑"),
     "edit.toggle_case": ("切换大小写", "Ctrl+Shift+U", "编辑"),
+    "search.find_in_files": ("跨文件搜索", "", "搜索"),
     "view.editor": ("切换到记事本", "Ctrl+1", "视图"),
     "view.construction": ("切换到建造", "Ctrl+2", "视图"),
     "view.garage": ("切换到车库", "Ctrl+3", "视图"),

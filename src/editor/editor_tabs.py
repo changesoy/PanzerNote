@@ -338,7 +338,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
         self.setCurrentIndex(index)
         self.tab_count_changed.emit(self.count())
-        return index
+        return int(index)
 
     def _is_markdown_file(self, filepath: str) -> bool:
         """判断是否为Markdown文件"""
@@ -447,7 +447,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
         self.setCurrentIndex(index)
         self.tab_count_changed.emit(self.count())
-        return index
+        return int(index)
 
     def save_current(self) -> Tuple[bool, int]:
         """保存当前文件"""
@@ -1076,6 +1076,22 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         """获取当前编辑器"""
         widget = self.currentWidget()
         return self._get_editor_from_widget(widget)
+
+    def get_open_filepaths(self) -> list:
+        """返回所有已打开文件的路径列表（不含未保存的新文件）。"""
+        paths = []
+        for i in range(self.count()):
+            widget = self.widget(i)
+            if widget is None:
+                continue
+            tab_id = getattr(widget, 'tab_id', None)
+            if tab_id is None:
+                continue
+            info = self._tab_info.get(tab_id, {})
+            fp = info.get("filepath")
+            if fp and not info.get("is_new"):
+                paths.append(fp)
+        return paths
 
     def get_current_encoding(self) -> str:
         """获取当前文件的编码"""

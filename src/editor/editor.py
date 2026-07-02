@@ -305,7 +305,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             digits += 1
 
         space = 10 + self.fontMetrics().horizontalAdvance('9') * digits
-        return space
+        return int(space)
 
     def _update_line_number_area_width(self, _):
         """更新行号区域宽度"""
@@ -770,7 +770,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         doc = self.document()
         if doc is None:
             return 0
-        return max(0, doc.characterCount() - 1)
+        return int(max(0, doc.characterCount() - 1))
 
     def get_word_count(self) -> int:
         return count_mixed_words(self.toPlainText())
@@ -790,10 +790,10 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self.word_count_recomputed.emit()
 
     def get_current_line(self) -> int:
-        return self.textCursor().blockNumber() + 1
+        return int(self.textCursor().blockNumber() + 1)
 
     def get_current_column(self) -> int:
-        return self.textCursor().columnNumber() + 1
+        return int(self.textCursor().columnNumber() + 1)
 
     def get_file_type(self) -> str:
         return self._file_type

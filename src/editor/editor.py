@@ -25,7 +25,7 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit, QWidget, QTextEdit, QVBoxLayout,
     QMenu, QMessageBox
 )
-from PyQt6.QtCore import Qt, QRect, QSize, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QRect, QSize, QTimer, QPointF, pyqtSignal
 from PyQt6.QtGui import (
     QFont, QColor, QPainter, QTextFormat, QTextCharFormat,
     QSyntaxHighlighter, QTextDocument, QTextCursor, QKeyEvent, QAction
@@ -41,6 +41,8 @@ from .indentation import get_indent_width, get_indent_unit
 from .completion import CompletionPopup, CompletionProvider
 from .text_stats import count_mixed_words
 from .bracket_matcher import find_matching_bracket
+from .completion import CompletionProvider, CompletionPopup
+from .folding import FoldingManager
 from ..themes.theme_aware_mixin import ThemeAwareMixin
 
 
@@ -56,6 +58,13 @@ class LineNumberArea(QWidget):
 
     def paintEvent(self, event):
         self.editor.line_number_area_paint_event(event)
+
+    def mousePressEvent(self, event) -> None:
+        """检测折叠标记点击。"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.editor._handle_fold_marker_click(event.pos().y())
+            return
+        super().mousePressEvent(event)
 
 
 class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTextEdit):
@@ -125,6 +134,11 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self._completion_timer.setInterval(500)
         self._completion_timer.timeout.connect(self._rebuild_completion_words)
 
+        self._fold_timer = QTimer(self)
+        self._fold_timer.setSingleShot(True)
+        self._fold_timer.setInterval(300)
+        self._fold_timer.timeout.connect(self._refresh_folding)
+
         self._completion_provider = CompletionProvider()
         self._completion_popup = CompletionPopup(None)  # 无父窗口，避免被 viewport 裁剪
         self._completion_popup.item_selected.connect(self._apply_completion)
@@ -137,6 +151,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self._init_minimap()
         self._lazy_highlight = LazyHighlightManager(self)
         self._bookmarks: Set[int] = set()
+        self._folding = FoldingManager(self)
 
         self._cached_word_count: int = 0
         self._word_count_dirty: bool = True
@@ -197,6 +212,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
 
         # 文本变更时触发补全词集刷新（500ms 防抖）
         self.textChanged.connect(self._completion_timer.start)
+        self.textChanged.connect(self._fold_timer.start)
 
         # 禁用默认右键菜单，使用自定义的
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -312,7 +328,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self.line_number_area.setVisible(show_line_numbers)
 
     def line_number_area_width(self) -> int:
-        """计算行号区域宽度"""
+        """计算行号区域宽度（含折叠标记列）"""
         if not self.line_number_area.isVisible():
             return 0
 
@@ -323,6 +339,9 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             digits += 1
 
         space = 10 + self.fontMetrics().horizontalAdvance('9') * digits
+        # 为折叠标记预留空间（Markdown 文件）
+        if self._file_type == 'Markdown':
+            space += self._folding.fold_marker_width
         return int(space)
 
     def _update_line_number_area_width(self, _):
@@ -369,12 +388,16 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self._update_line_number_area_width(0)
 
     def line_number_area_paint_event(self, event):
-        """绘制行号"""
+        """绘制行号 + 折叠标记"""
         painter = QPainter(self.line_number_area)
         bg_color = self._theme_engine.get_active_theme().colors.sidebar_bg if self._theme_engine else "#f5f5f5"
         text_color = self._theme_engine.get_active_theme().colors.editor_line_number if self._theme_engine else "#999999"
         bookmark_color = QColor("#FF9800") if not self._theme_engine else QColor(self._theme_engine.get_active_theme().colors.accent if hasattr(self._theme_engine.get_active_theme().colors, 'accent') else "#FF9800")
         painter.fillRect(event.rect(), QColor(bg_color))
+
+        is_markdown = self._file_type == 'Markdown'
+        marker_width = self._folding.fold_marker_width if is_markdown else 0
+        area_width = self.line_number_area.width()
 
         block = self.firstVisibleBlock()
         block_number = block.blockNumber()
@@ -383,23 +406,60 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
 
         while block.isValid() and top <= event.rect().bottom():
             if block.isVisible() and bottom >= event.rect().top():
+                # 书签背景
                 if block_number in self._bookmarks:
                     painter.fillRect(
                         0, top,
-                        self.line_number_area.width(),
+                        area_width,
                         self.fontMetrics().height(),
                         bookmark_color
                     )
                     painter.setPen(QColor("#FFFFFF"))
                 else:
                     painter.setPen(QColor(text_color))
-                number = str(block_number + 1)
+
+                # 行号右对齐（留出折叠标记空间）
+                number_width = area_width - marker_width - 5
                 painter.drawText(
                     0, top,
-                    self.line_number_area.width() - 5,
+                    number_width,
                     self.fontMetrics().height(),
-                    Qt.AlignmentFlag.AlignRight, number
+                    Qt.AlignmentFlag.AlignRight, str(block_number + 1)
                 )
+
+                # 折叠标记 — 手绘三角（大小一致，不受行高影响）
+                if is_markdown and self._folding.is_foldable(block_number):
+                    collapsed = (block_number + 1) in self._folding._collapsed_blocks
+                    # 绿色系：浅色主题用 Material Green，暗色主题用 Green 200/300
+                    bg_luminance = QColor(bg_color).lightness()
+                    if bg_luminance < 128:
+                        fold_color_expanded = QColor("#81C784")
+                        fold_color_collapsed = QColor("#A5D6A7")
+                    else:
+                        fold_color_expanded = QColor("#4CAF50")
+                        fold_color_collapsed = QColor("#66BB6A")
+                    painter.setBrush(fold_color_collapsed if collapsed else fold_color_expanded)
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    tri_size = 8  # 三角边长 px
+                    cx = float(area_width - marker_width // 2 - 2)  # 三角中心 x
+                    cy = float(top + self.fontMetrics().height() // 2)  # 三角中心 y
+                    if collapsed:
+                        # 向右三角 ▶
+                        points = [
+                            QPointF(cx - tri_size // 2, cy - tri_size // 2),
+                            QPointF(cx - tri_size // 2, cy + tri_size // 2),
+                            QPointF(cx + tri_size // 2, cy),
+                        ]
+                    else:
+                        # 向下三角 ▼
+                        points = [
+                            QPointF(cx - tri_size // 2, cy - tri_size // 2),
+                            QPointF(cx + tri_size // 2, cy - tri_size // 2),
+                            QPointF(cx, cy + tri_size // 2),
+                        ]
+                    painter.drawPolygon(points)
+                    painter.setPen(Qt.PenStyle.SolidLine)
+                    painter.setBrush(Qt.BrushStyle.NoBrush)
 
             block = block.next()
             top = bottom
@@ -848,9 +908,12 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             self.setPlainText(content)
         # 重建补全词集
         self._completion_provider.rebuild_from_text(self.toPlainText())
+        # 重建折叠区间
+        self._refresh_folding()
 
     def goto_line(self, line: int):
-        """跳转到指定行"""
+        """跳转到指定行（如果行在折叠区域内则自动展开）"""
+        self._folding.ensure_visible(line)
         doc = self.document()
         assert doc is not None
         block = doc.findBlockByNumber(line - 1)
@@ -896,6 +959,48 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
     def set_bookmarks(self, bookmarks: Set[int]):
         self._bookmarks = bookmarks.copy()
         self.line_number_area.update()
+
+    # === 折叠 ===
+
+    def _handle_fold_marker_click(self, y: int) -> None:
+        """检测点击的折叠标记并切换折叠。"""
+        if self._file_type != 'Markdown':
+            return
+
+        area_width = self.line_number_area.width()
+        marker_width = self._folding.fold_marker_width
+
+        block = self.firstVisibleBlock()
+        top = round(self.blockBoundingGeometry(block).translated(self.contentOffset()).top())
+        bottom = top + round(self.blockBoundingRect(block).height())
+
+        while block.isValid():
+            if block.isVisible() and top <= y <= bottom:
+                break
+            block = block.next()
+            top = bottom
+            bottom = top + round(self.blockBoundingRect(block).height())
+
+        if block.isValid() and self._folding.is_foldable(block.blockNumber()):
+            self._folding.toggle_fold(block.blockNumber())
+            self._update_line_number_area_width(0)
+
+    def toggle_fold_all(self) -> None:
+        """折叠全部 / 展开全部（toggle）。"""
+        if self._file_type != 'Markdown':
+            return
+        self._folding.toggle_fold_all()
+        self._update_line_number_area_width(0)
+
+    def _refresh_folding(self) -> None:
+        """文本变化后重建折叠区间。"""
+        if self._file_type != 'Markdown':
+            return
+        try:
+            text = self.toPlainText()
+        except (RuntimeError, AttributeError):
+            return
+        self._folding.rebuild_from_text(text)
 
     # === 自动补全 ===
 

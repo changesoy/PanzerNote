@@ -157,6 +157,7 @@ class MenuBuilder:
         menu.addSeparator()
         self._add_action(menu, "折叠/展开文件树", QKeySequence("Ctrl+B"), mw._toggle_file_tree, "view.file_tree", "视图")
         self._add_action(menu, "折叠/展开侧栏", QKeySequence("Ctrl+Shift+O"), mw._toggle_side_panel, "view.side_panel", "视图")
+        self._add_action(menu, "折叠/展开全部标题", QKeySequence("Ctrl+K"), mw._toggle_fold_all, "view.fold_all", "视图")
         self._add_action(menu, "显示/隐藏小秘书", None, mw._toggle_secretary)
         menu.addSeparator()
         self._add_action(menu, "全屏模式", QKeySequence("F11"), mw._toggle_fullscreen, "view.fullscreen", "视图")

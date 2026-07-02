@@ -134,12 +134,25 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
     def _get_line_height(self) -> float:
         doc = self._editor.document()
         assert doc is not None
-        block_count = max(1, doc.blockCount())
+        block_count = max(1, self._count_visible_blocks())
         available = self.height() - self.TOP_MARGIN * 2
         natural = block_count * self.BASE_LINE_HEIGHT
         if natural <= available:
             return float(self.BASE_LINE_HEIGHT)
         return float(max(self.MIN_LINE_HEIGHT, available / block_count))
+
+    def _count_visible_blocks(self) -> int:
+        """统计可见 block 数（跳过被折叠隐藏的）。"""
+        doc = self._editor.document()
+        if doc is None:
+            return 1
+        count = 0
+        block = doc.begin()
+        while block.isValid():
+            if block.isVisible():
+                count += 1
+            block = block.next()
+        return max(1, count)
 
     def _get_viewport_rect(self) -> QRectF:
         editor = self._editor
@@ -223,7 +236,7 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
 
                 for line_num in range(start_line, end_line):
                     block = doc.findBlockByNumber(line_num)
-                    if not block.isValid():
+                    if not block.isValid() or not block.isVisible():
                         break
                     self._render_line(pic_painter, block, y, line_h)
                     y += line_h
@@ -249,31 +262,33 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
             if y > self.height():
                 break
 
-            text = block.text()
-            if text.strip():
-                layout = block.layout()
-                fmt_ranges = []
-                if layout:
-                    try:
-                        fmt_ranges = layout.formats()
-                    except AttributeError:
+            if block.isVisible():
+                text = block.text()
+                if text.strip():
+                    layout = block.layout()
+                    fmt_ranges = []
+                    if layout:
                         try:
-                            fmt_ranges = layout.additionalFormats()
+                            fmt_ranges = layout.formats()
                         except AttributeError:
-                            get_logger(__name__).debug("QTextBlockFormat 无 formats/additionalFormats 属性")
+                            try:
+                                fmt_ranges = layout.additionalFormats()
+                            except AttributeError:
+                                get_logger(__name__).debug("QTextBlockFormat 无 formats/additionalFormats 属性")
 
-                segments = self._build_color_segments(text, fmt_ranges, default_color)
-                x = float(left)
-                rect_h = max(1.0, line_h - 0.5)
-                for seg_start, seg_end, color in segments:
-                    seg_x = left + seg_start * char_w
-                    seg_w = (seg_end - seg_start) * char_w
-                    if seg_x + seg_w > max_x:
-                        seg_w = max(0, max_x - seg_x)
-                    if seg_w > 0:
-                        painter.fillRect(QRectF(seg_x, y, seg_w, rect_h), color)
+                    segments = self._build_color_segments(text, fmt_ranges, default_color)
+                    x = float(left)
+                    rect_h = max(1.0, line_h - 0.5)
+                    for seg_start, seg_end, color in segments:
+                        seg_x = left + seg_start * char_w
+                        seg_w = (seg_end - seg_start) * char_w
+                        if seg_x + seg_w > max_x:
+                            seg_w = max(0, max_x - seg_x)
+                        if seg_w > 0:
+                            painter.fillRect(QRectF(seg_x, y, seg_w, rect_h), color)
 
-            y += line_h
+                y += line_h
+
             block = block.next()
 
     def _render_line(self, painter: QPainter, block, y: float, line_h: float):

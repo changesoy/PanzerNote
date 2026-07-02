@@ -102,6 +102,7 @@ class Config:
             }
         },
         "bookmarks": {},
+        "folds": {},
         "recent_files": [],
         "external_files": []
     }
@@ -397,6 +398,18 @@ class Config:
             bookmarks[filepath] = sorted(lines)
         else:
             bookmarks.pop(filepath, None)
+
+    def get_folds(self, filepath: str) -> list:
+        """获取指定文件的折叠状态（被折叠标题行号列表）。"""
+        return list(self._workspace.get("folds", {}).get(filepath, []))
+
+    def set_folds(self, filepath: str, lines: list) -> None:
+        """设置指定文件的折叠状态（被折叠标题行号列表）。"""
+        folds = self._workspace.setdefault("folds", {})
+        if lines:
+            folds[filepath] = sorted(lines)
+        else:
+            folds.pop(filepath, None)
 
     def add_recent_file(self, filepath: str) -> None:
         recent = self._workspace.get("recent_files", [])

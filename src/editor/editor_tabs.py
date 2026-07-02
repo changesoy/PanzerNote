@@ -453,6 +453,11 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if saved_bookmarks:
             self._restore_bookmarks(widget, filepath, saved_bookmarks)
 
+        # 恢复折叠状态
+        saved_folds = self.config.get_folds(filepath)
+        if saved_folds:
+            self._restore_folds(widget, filepath, saved_folds)
+
         return int(index)
 
     def save_current(self) -> Tuple[bool, int]:
@@ -1495,3 +1500,29 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             if editor is not None:
                 bookmarks = editor.get_bookmarks()
                 self.config.set_bookmarks(filepath, list(bookmarks) if bookmarks else [])
+
+    def _restore_folds(self, widget, filepath: str, lines: list) -> None:
+        """恢复已保存的折叠状态。"""
+        editor = self._get_editor_from_widget(widget)
+        if editor is not None and hasattr(editor, '_folding'):
+            # 确保折叠区间已计算（load_content 时 _file_type 可能还不是 Markdown）
+            editor._refresh_folding()
+            editor._folding.set_collapsed_lines(lines)
+
+    def save_all_folds(self) -> None:
+        """保存所有已打开标签页的折叠状态到 config。"""
+        for i in range(self.count()):
+            widget = self.widget(i)
+            if widget is None:
+                continue
+            tab_id = getattr(widget, 'tab_id', None)
+            if tab_id is None:
+                continue
+            info = self._tab_info.get(tab_id, {})
+            filepath = info.get("filepath")
+            if not filepath:
+                continue
+            editor = self._get_editor_from_widget(widget)
+            if editor is not None and hasattr(editor, '_folding'):
+                collapsed = editor._folding.get_collapsed_lines()
+                self.config.set_folds(filepath, collapsed if collapsed else [])

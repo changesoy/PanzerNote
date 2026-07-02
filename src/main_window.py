@@ -403,6 +403,9 @@ class MainWindow(QMainWindow):
         # 书签持久化
         self.editor_tabs.save_all_bookmarks()
 
+        # 折叠状态持久化
+        self.editor_tabs.save_all_folds()
+
         self.config.update_last_login()
 
         self.config.save_settings()
@@ -1025,6 +1028,12 @@ class MainWindow(QMainWindow):
         editor = self.editor_tabs.current_editor()
         if editor:
             editor.prev_bookmark()
+
+    def _toggle_fold_all(self):
+        """折叠/展开全部 Markdown 标题。"""
+        editor = self.editor_tabs.current_editor()
+        if editor:
+            editor.toggle_fold_all()
 
     # === 视图操作 ===
 

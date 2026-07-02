@@ -37,6 +37,7 @@ from .editor.editor_tabs import EditorTabWidget
 from .game.secretary_widget import SecretaryWidget
 from .editor.status_bar import StatusBarWidget
 from .editor.find_replace import FindReplaceBar
+from .editor.outline_panel import OutlinePanel
 from .editor.editor_settings_dialog import EditorSettingsDialog
 from .editor.file_open_service import FileOpenService, FileOpenSource, FileOpenSecurityError, _is_inside_root
 from .plugins.plugin_manager import PluginManager
@@ -176,7 +177,18 @@ class MainWindow(QMainWindow):
 
         self._split_tabs: List[EditorTabWidget] = []
 
-        editor_layout.addWidget(self.editor_splitter)
+        # 大纲面板
+        self.outline_panel = OutlinePanel()
+        self.outline_panel.hide()
+        self.outline_panel.heading_clicked.connect(self._on_outline_heading_clicked)
+
+        # 编辑器+大纲容器（用 splitter 包裹，支持拖拽调整宽度）
+        self._editor_outline_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._editor_outline_splitter.addWidget(self.editor_splitter)
+        self._editor_outline_splitter.addWidget(self.outline_panel)
+        self._editor_outline_splitter.setSizes([800, 200])
+
+        editor_layout.addWidget(self._editor_outline_splitter)
 
         self.splitter.addWidget(self.editor_container)
 
@@ -1386,6 +1398,42 @@ class MainWindow(QMainWindow):
     def _on_tab_changed(self, index: int):
         """标签页切换"""
         self._update_stats()
+        self._update_outline()
+
+    def _update_outline(self):
+        """根据当前编辑器类型显示/隐藏大纲面板"""
+        # 从所有 tab widget 中找到当前编辑器
+        editor = None
+        for tw in [self.editor_tabs] + self._split_tabs:
+            e = tw.current_editor()
+            if e is not None:
+                editor = e
+                break
+            w = tw.currentWidget()
+            if w is not None and w.hasFocus():
+                editor = e
+                break
+
+        if editor is not None:
+            try:
+                file_type = editor.get_file_type()
+            except (RuntimeError, AttributeError):
+                file_type = ""
+        else:
+            file_type = ""
+
+        if file_type == "Markdown":
+            self.outline_panel.set_editor(editor)
+            self.outline_panel.show()
+        else:
+            self.outline_panel.set_editor(None)
+            self.outline_panel.hide()
+
+    def _on_outline_heading_clicked(self, line_num: int):
+        """大纲面板点击标题 → 跳转到对应行"""
+        editor = self.editor_tabs.current_editor()
+        if editor is not None and editor.get_file_type() == "Markdown":
+            editor.goto_line(line_num)
 
     def _on_content_modified(self):
         """内容修改"""

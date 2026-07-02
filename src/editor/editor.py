@@ -557,36 +557,15 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
     # ═══════════════════ 键盘事件处理 ═══════════════════
 
     def keyPressEvent(self, event: QKeyEvent | None):
-        """键盘事件 - 自动缩进、行操作、大小写转换等"""
+        """键盘事件 - 自动缩进、自动配对、IME 等编辑器行为。
+
+        编辑器操作快捷键（删除行/复制行/移行/转大小写）由 ShortcutManager
+        统一管理，可在命令面板搜索、在快捷键面板自定义。
+        """
         if event is None:
             return
         modifiers = event.modifiers()
         key = event.key()
-
-        # Ctrl+Shift+K: 删除当前行
-        if modifiers == (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier) and key == Qt.Key.Key_K:
-            self.delete_current_line()
-            return
-
-        # Ctrl+Shift+D: 复制当前行
-        if modifiers == (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier) and key == Qt.Key.Key_D:
-            self.duplicate_line()
-            return
-
-        # Alt+Up: 上移当前行
-        if modifiers == Qt.KeyboardModifier.AltModifier and key == Qt.Key.Key_Up:
-            self.move_line_up()
-            return
-
-        # Alt+Down: 下移当前行
-        if modifiers == Qt.KeyboardModifier.AltModifier and key == Qt.Key.Key_Down:
-            self.move_line_down()
-            return
-
-        # Ctrl+Shift+U: 切换大小写
-        if modifiers == (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier) and key == Qt.Key.Key_U:
-            self.toggle_case()
-            return
 
         # Backspace: 删除成对的括号/引号
         if key == Qt.Key.Key_Backspace and not modifiers:

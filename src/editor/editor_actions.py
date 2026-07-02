@@ -75,18 +75,33 @@ class EditorActionsMixin:
             cursor.removeSelectedText()
         cursor.endEditBlock()
 
-    def duplicate_line(self) -> None:
-        """复制当前行到下一行"""
+    def copy_line(self) -> None:
+        """复制当前行到剪贴板（不删除，不换行）"""
+        cursor = self.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
+        cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
+        self.setTextCursor(cursor)
+        self.copy()
+        # 恢复光标位置（copy() 不改变选区，但 QTextEdit.copy 会保持选区）
+        # QPlainTextEdit.copy() 不会改变文本，只复制到剪贴板
+
+    def paste_line(self) -> None:
+        """粘贴剪贴板内容到当前行下方为新行"""
+        from PyQt6.QtWidgets import QApplication
+        clipboard = QApplication.clipboard()
+        if clipboard is None:
+            return
+        text = clipboard.text()
+        if not text:
+            return
+
         cursor = self.textCursor()
         cursor.beginEditBlock()
 
         with self.programmatic_modify():
-            cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
-            cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
-            line_text = cursor.selectedText()
-
+            # 移到当前行末尾，插入新行 + 剪贴板内容
             cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock)
-            cursor.insertText('\n' + line_text)
+            cursor.insertText('\n' + text)
 
         cursor.endEditBlock()
 

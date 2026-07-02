@@ -968,8 +968,11 @@ class MainWindow(QMainWindow):
     def _move_line_down(self):
         self.editor_tabs.move_line_down()
 
-    def _duplicate_line(self):
-        self.editor_tabs.duplicate_line()
+    def _copy_line(self):
+        self.editor_tabs.copy_line()
+
+    def _paste_line(self):
+        self.editor_tabs.paste_line()
 
     def _goto_line(self):
         self.editor_tabs.show_goto_line_dialog()

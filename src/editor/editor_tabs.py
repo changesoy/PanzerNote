@@ -1362,11 +1362,17 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if editor:
             editor.delete_current_line()
 
-    def duplicate_line(self):
-        """复制当前行"""
+    def copy_line(self):
+        """复制当前行到剪贴板"""
         editor = self.current_editor()
         if editor:
-            editor.duplicate_line()
+            editor.copy_line()
+
+    def paste_line(self):
+        """粘贴为新的行"""
+        editor = self.current_editor()
+        if editor:
+            editor.paste_line()
 
     def move_line_up(self):
         """上移当前行"""

@@ -87,7 +87,8 @@ class MenuBuilder:
             self._add_action(line_menu, "删除当前行", QKeySequence("Ctrl+Shift+K"), mw._delete_current_line, "edit.delete_line", "编辑")
             self._add_action(line_menu, "上移当前行", QKeySequence("Alt+Up"), mw._move_line_up, "edit.move_line_up", "编辑")
             self._add_action(line_menu, "下移当前行", QKeySequence("Alt+Down"), mw._move_line_down, "edit.move_line_down", "编辑")
-            self._add_action(line_menu, "复制当前行", QKeySequence("Ctrl+Shift+D"), mw._duplicate_line, "edit.duplicate_line", "编辑")
+            self._add_action(line_menu, "复制当前行到剪贴板", QKeySequence("Ctrl+Shift+C"), mw._copy_line, "edit.copy_line", "编辑")
+            self._add_action(line_menu, "粘贴为新行", QKeySequence("Ctrl+Shift+V"), mw._paste_line, "edit.paste_line", "编辑")
 
         self._add_action(menu, "转到行...", QKeySequence("Ctrl+G"), mw._goto_line, "edit.goto_line", "编辑")
         menu.addSeparator()

@@ -395,6 +395,11 @@ class FindReplaceBar(ThemeAwareMixin, QWidget):
         cursor.setPosition(start)
         cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
         self._editor.setTextCursor(cursor)
+        # 自动展开包含匹配位置的折叠区域
+        folding = getattr(self._editor, '_folding', None)
+        if folding is not None:
+            block = self._editor.document().findBlock(start)
+            folding.ensure_visible(block.blockNumber() + 1)
         self._editor.ensureCursorVisible()
 
         self._apply_highlights()

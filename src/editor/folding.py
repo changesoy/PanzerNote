@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Markdown 标题折叠 —— 折叠区间计算、可见性切换、自动展开"""
+"""折叠管理器 —— Markdown 标题折叠 + 代码缩进折叠，统一管理折叠区间、可见性切换、自动展开"""
 
 from __future__ import annotations
 
-from typing import List, Set, Dict, Tuple
+from typing import List, Optional, Set, Dict, Tuple
 
 from PyQt6.QtCore import pyqtSignal, QObject
 from PyQt6.QtWidgets import QPlainTextEdit
@@ -12,10 +12,11 @@ from src.editor.outline_parser import parse_headings, Heading
 
 
 class FoldingManager(QObject):
-    """管理 Markdown 标题折叠。
+    """管理 Markdown 标题折叠 + 代码缩进折叠。
 
     职责：
-    - 根据标题列表计算折叠区间（标题行 → 下一同级/高级标题之前）
+    - Markdown：根据标题列表计算折叠区间（标题行 → 下一同级/高级标题之前）
+    - 代码文件：根据缩进级别计算折叠区间（缩进增加的行可折叠其后内容）
     - 切换折叠（setVisible）
     - 确保某行可见（自动展开包含它的折叠）
     - 提供折叠标记绘制所需的数据
@@ -67,6 +68,132 @@ class FoldingManager(QObject):
         # 清理不再有效的折叠状态
         valid = set(self._fold_ranges.keys())
         self._collapsed_blocks &= valid
+
+    def rebuild_from_indent(self, text: str, indent_size: int) -> None:
+        """从文本基于缩进级别重建折叠区间（用于 Python / YAML 等代码文件）。
+
+        算法：
+        - 对每行非空非注释行，计算缩进级别 = 前导空白 / indent_size
+        - 若紧邻下一非空非注释行缩进更深，则该行可折叠
+        - 折叠区间 = [当前行+1, 下一缩进级别 ≤ 当前级别的行-1]
+        - 空行和注释行归属到其上方最近的折叠区间
+        """
+        self._headings = []
+        self._fold_ranges.clear()
+
+        lines = text.split('\n')
+        n = len(lines)
+        if n == 0:
+            return
+
+        if indent_size < 1:
+            indent_size = 4
+
+        # 逐行计算缩进级别（跳过空行和纯注释行）
+        indent_levels: Dict[int, int] = {}
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if not stripped or stripped.startswith('#'):
+                continue
+            leading = len(line) - len(line.lstrip())
+            tab_count = line[:leading].count('\t')
+            spaces = leading - tab_count
+            level = (tab_count * indent_size + spaces) // indent_size
+            indent_levels[i + 1] = level  # 1-based 行号
+
+        # 构建折叠区间：仅当紧邻下一非空行缩进更深时，当前行可折叠
+        for line_num, level in indent_levels.items():
+            # 找到紧邻的下一非空非注释行
+            next_meaningful: Optional[int] = None
+            for scan in range(line_num + 1, n + 1):
+                if scan in indent_levels:
+                    next_meaningful = scan
+                    break
+
+            if next_meaningful is None:
+                continue
+
+            if indent_levels[next_meaningful] <= level:
+                continue  # 下一行没更深，不可折叠
+
+            # 可折叠：计算区间终点（到下一缩进级别 ≤ 当前的行之前）
+            first_child = line_num + 1
+            section_end = n + 1  # 默认到文件末尾
+            for scan in range(next_meaningful + 1, n + 1):
+                if scan in indent_levels and indent_levels[scan] <= level:
+                    section_end = scan
+                    break
+
+            self._fold_ranges[line_num] = (first_child, section_end - 1)
+
+        # 清理不再有效的折叠状态
+        valid = set(self._fold_ranges.keys())
+        self._collapsed_blocks &= valid
+
+    def fold_imports(self, text: str) -> None:
+        """为 Python 文件追加 import 折叠区间。
+
+        两层策略：
+        1. AST — 多行 import（如 from X import (\\n...\\n)）
+        2. 分组 — ≥2 行连续的 import/from 单行，首行可折叠整组
+        在 rebuild_from_indent 之后调用。仅 Python 文件使用。
+        """
+        import ast
+        import re
+
+        # ── 1. AST：多行 import ──
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            tree = None
+
+        if tree is not None:
+            for node in ast.walk(tree):
+                if not isinstance(node, (ast.Import, ast.ImportFrom)):
+                    continue
+                if node.end_lineno is None or node.end_lineno <= node.lineno:
+                    continue
+                self._fold_ranges[node.lineno] = (node.lineno + 1, node.end_lineno)
+
+        # ── 2. 分组：连续 import/from 单行，容忍 ≤4 行非 import 间隔 ──
+        lines = text.split('\n')
+        n = len(lines)
+        IMPORT_RE = re.compile(r'^(import\s|from\s)')
+        i = 0
+        while i < n:
+            stripped = lines[i].strip()
+            if not IMPORT_RE.match(stripped):
+                i += 1
+                continue
+
+            group_start = i
+            consecutive_non = 0
+            first_non_pos = -1
+            i += 1
+            while i < n:
+                stripped = lines[i].strip()
+                if IMPORT_RE.match(stripped):
+                    i += 1
+                    consecutive_non = 0
+                    first_non_pos = -1
+                else:
+                    if consecutive_non == 0:
+                        first_non_pos = i
+                    consecutive_non += 1
+                    if consecutive_non >= 5:
+                        break
+                    i += 1
+
+            if consecutive_non >= 5 and first_non_pos >= 0:
+                group_end = first_non_pos - 1
+            else:
+                group_end = i - 1
+
+            if group_end > group_start:
+                start_line = group_start + 1
+                end_line = group_end + 1
+                if start_line not in self._fold_ranges:
+                    self._fold_ranges[start_line] = (start_line + 1, end_line)
 
     def get_foldable_headings(self) -> List[Tuple[int, bool]]:
         """返回 [(line_num, is_collapsed)] — 所有可折叠标题行及其折叠状态。"""

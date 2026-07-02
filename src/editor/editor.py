@@ -94,6 +94,9 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
     # 不显示缩略图的文件类型
     _NO_MINIMAP_TYPES = {'纯文本', 'Markdown'}
 
+    # 支持折叠的文件类型
+    _FOLD_SUPPORTED_TYPES = frozenset({'Markdown', 'Python', 'YAML'})
+
     # 括号/引号自动配对映射（英文 + 中文）
     AUTO_PAIR_CHARS = {
         # 英文括号
@@ -339,8 +342,8 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             digits += 1
 
         space = 10 + self.fontMetrics().horizontalAdvance('9') * digits
-        # 为折叠标记预留空间（Markdown 文件）
-        if self._file_type == 'Markdown':
+        # 为折叠标记预留空间（支持折叠的文件类型）
+        if self._file_type in self._FOLD_SUPPORTED_TYPES:
             space += self._folding.fold_marker_width
         return int(space)
 
@@ -395,8 +398,8 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         bookmark_color = QColor("#FF9800") if not self._theme_engine else QColor(self._theme_engine.get_active_theme().colors.accent if hasattr(self._theme_engine.get_active_theme().colors, 'accent') else "#FF9800")
         painter.fillRect(event.rect(), QColor(bg_color))
 
-        is_markdown = self._file_type == 'Markdown'
-        marker_width = self._folding.fold_marker_width if is_markdown else 0
+        supports_fold = self._file_type in self._FOLD_SUPPORTED_TYPES
+        marker_width = self._folding.fold_marker_width if supports_fold else 0
         area_width = self.line_number_area.width()
 
         block = self.firstVisibleBlock()
@@ -428,7 +431,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
                 )
 
                 # 折叠标记 — 手绘三角（大小一致，不受行高影响）
-                if is_markdown and self._folding.is_foldable(block_number):
+                if supports_fold and self._folding.is_foldable(block_number):
                     collapsed = (block_number + 1) in self._folding._collapsed_blocks
                     # 绿色系：浅色主题用 Material Green，暗色主题用 Green 200/300
                     bg_luminance = QColor(bg_color).lightness()
@@ -964,7 +967,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
 
     def _handle_fold_marker_click(self, y: int) -> None:
         """检测点击的折叠标记并切换折叠。"""
-        if self._file_type != 'Markdown':
+        if self._file_type not in self._FOLD_SUPPORTED_TYPES:
             return
 
         area_width = self.line_number_area.width()
@@ -987,20 +990,26 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
 
     def toggle_fold_all(self) -> None:
         """折叠全部 / 展开全部（toggle）。"""
-        if self._file_type != 'Markdown':
+        if self._file_type not in self._FOLD_SUPPORTED_TYPES:
             return
         self._folding.toggle_fold_all()
         self._update_line_number_area_width(0)
 
     def _refresh_folding(self) -> None:
         """文本变化后重建折叠区间。"""
-        if self._file_type != 'Markdown':
+        if self._file_type not in self._FOLD_SUPPORTED_TYPES:
             return
         try:
             text = self.toPlainText()
         except (RuntimeError, AttributeError):
             return
-        self._folding.rebuild_from_text(text)
+        if self._file_type == 'Markdown':
+            self._folding.rebuild_from_text(text)
+        else:
+            indent_size = get_indent_width(self.config)
+            self._folding.rebuild_from_indent(text, indent_size)
+            if self._file_type == 'Python':
+                self._folding.fold_imports(text)
 
     # === 自动补全 ===
 

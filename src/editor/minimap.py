@@ -414,6 +414,10 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
             cursor = self._editor.textCursor()
             cursor.setPosition(block.position())
             self._editor.setTextCursor(cursor)
+            # 自动展开包含目标行的折叠区域
+            folding = getattr(self._editor, '_folding', None)
+            if folding is not None:
+                folding.ensure_visible(target_line + 1)
             self._editor.ensureCursorVisible()
             self._editor.setFocus()
 

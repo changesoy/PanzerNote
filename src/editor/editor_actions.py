@@ -289,7 +289,7 @@ class EditorActionsMixin:
                     f"JSON格式错误:\n{str(e)}"
                 )
 
-        elif self._file_type in ('XML', 'HTML'):
+        elif self._file_type == 'XML':
             try:
                 dom = minidom.parseString(content.encode('utf-8'))
                 formatted = dom.toprettyxml(indent="  ")
@@ -309,10 +309,46 @@ class EditorActionsMixin:
                     self.setPlainText('\n'.join(result_lines))
 
             except Exception as e:
-                get_logger(__name__).warning("XML/HTML格式化失败: %s", e)
+                get_logger(__name__).warning("XML格式化失败: %s", e)
                 QMessageBox.warning(
                     self, "格式化失败",
-                    f"XML/HTML格式错误:\n{str(e)}"
+                    f"XML格式错误:\n{str(e)}"
+                )
+
+        elif self._file_type == 'HTML':
+            try:
+                import html5lib  # type: ignore[import-untyped]
+                from html5lib import serialize
+                from xml.etree import ElementTree
+
+                parsed = html5lib.parse(
+                    content,
+                    treebuilder="etree",
+                    namespaceHTMLElements=False,
+                )
+                # html5lib.parse 返回 ElementTree，用 minidom 做 pretty-print
+                raw_xml = ElementTree.tostring(parsed, encoding="unicode")
+                dom = minidom.parseString(raw_xml.encode("utf-8"))
+                formatted = dom.toprettyxml(indent="  ")
+
+                # 去掉 <?xml?> 声明和空行
+                lines = formatted.split('\n')
+                result_lines = [l for l in lines if l.strip() and not l.strip().startswith('<?xml')]
+                formatted = '\n'.join(result_lines)
+
+                with self.programmatic_modify():
+                    self.setPlainText(formatted)
+
+            except ImportError:
+                QMessageBox.warning(
+                    self, "格式化失败",
+                    "HTML格式化需要安装 html5lib 库\n请运行: pip install html5lib"
+                )
+            except Exception as e:
+                get_logger(__name__).warning("HTML格式化失败: %s", e)
+                QMessageBox.warning(
+                    self, "格式化失败",
+                    f"HTML格式错误:\n{str(e)}"
                 )
 
         elif self._file_type == 'YAML':

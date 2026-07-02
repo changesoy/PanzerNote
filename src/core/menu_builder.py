@@ -19,6 +19,7 @@ class MenuBuilder:
     def __init__(self, config: Config, shortcut_manager: Optional[ShortcutManager] = None) -> None:
         self._config = config
         self._shortcut_manager = shortcut_manager
+        self._mw: Any = None
 
     def build(self, menubar: QMenuBar, main_window: Any) -> None:
         """构建完整菜单栏
@@ -27,6 +28,7 @@ class MenuBuilder:
             menubar: QMainWindow 的 menuBar()
             main_window: MainWindow 实例，用于绑定回调
         """
+        self._mw = main_window
         self._build_file_menu(menubar, main_window)
         self._build_edit_menu(menubar, main_window)
         self._build_game_menu(menubar, main_window)
@@ -153,6 +155,7 @@ class MenuBuilder:
         self._add_action(menu, "关闭分屏", None, mw._close_split, "view.close_split", "视图")
         menu.addSeparator()
         self._add_action(menu, "折叠/展开文件树", QKeySequence("Ctrl+B"), mw._toggle_file_tree, "view.file_tree", "视图")
+        self._add_action(menu, "折叠/展开侧栏", QKeySequence("Ctrl+Shift+O"), mw._toggle_side_panel, "view.side_panel", "视图")
         self._add_action(menu, "显示/隐藏小秘书", None, mw._toggle_secretary)
         menu.addSeparator()
         self._add_action(menu, "全屏模式", QKeySequence("F11"), mw._toggle_fullscreen, "view.fullscreen", "视图")
@@ -208,21 +211,24 @@ class MenuBuilder:
             if shortcut:
                 ks = QKeySequence(shortcut)
                 default_key = ks.toString() if not ks.isEmpty() else ""
-            action = self._shortcut_manager.register(
+            shortcut_action = self._shortcut_manager.register(
                 action_id, text, default_key, callback, category
             )
-            if action is None:
-                action = QAction(text, menu)
-                if shortcut:
-                    action.setShortcut(shortcut)
-                action.triggered.connect(callback)
+            # 将快捷键 QAction 挂到主窗口，确保全局快捷键生效
+            if shortcut_action is not None and self._mw is not None:
+                self._mw.addAction(shortcut_action)
+            # 菜单项不设置 shortcut，避免文字重叠
+            menu_action = QAction(text, menu)
+            menu_action.triggered.connect(callback)
+            menu.addAction(menu_action)
+            return menu_action
         else:
             action = QAction(text, menu)
             if shortcut:
                 action.setShortcut(shortcut)
             action.triggered.connect(callback)
-        menu.addAction(action)
-        return action
+            menu.addAction(action)
+            return action
 
     @staticmethod
     def _add_check_action(

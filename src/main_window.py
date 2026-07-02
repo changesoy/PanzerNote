@@ -38,6 +38,7 @@ from .game.secretary_widget import SecretaryWidget
 from .editor.status_bar import StatusBarWidget
 from .editor.find_replace import FindReplaceBar
 from .editor.outline_panel import OutlinePanel
+from .ui.side_panel_host import SidePanelHost
 from .editor.editor_settings_dialog import EditorSettingsDialog
 from .editor.file_open_service import FileOpenService, FileOpenSource, FileOpenSecurityError, _is_inside_root
 from .plugins.plugin_manager import PluginManager
@@ -144,12 +145,24 @@ class MainWindow(QMainWindow):
         # 分割器
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        # 文件树
+        # 侧栏面板宿主（统一管理文件树、大纲等面板）
+        self.side_panel_host = SidePanelHost(theme_engine=self.theme_engine)
+
+        # 文件树注册到宿主（默认面板）
         self.file_tree = FileTreeWidget(self.config, theme_engine=self.theme_engine)
         self.file_tree.file_open_requested.connect(self._open_file)
         self.file_tree.file_move_requested.connect(self._on_file_move_from_tree)
-        self.file_tree.setMinimumWidth(scale(100))
-        self.splitter.addWidget(self.file_tree)
+        self.side_panel_host.register_panel("filetree", self.file_tree, "≡", "文件树")
+
+        # 大纲面板注册到宿主
+        self.outline_panel = OutlinePanel()
+        self.outline_panel.heading_clicked.connect(self._on_outline_heading_clicked)
+        self.side_panel_host.register_panel("outline", self.outline_panel, "§", "大纲")
+
+        self.side_panel_host.setMinimumWidth(scale(100))
+        self.splitter.addWidget(self.side_panel_host)
+
+        self.side_panel_host.show_panel("filetree")
 
         # 编辑区容器
         self.editor_container = QWidget()
@@ -180,18 +193,7 @@ class MainWindow(QMainWindow):
 
         self._split_tabs: List[EditorTabWidget] = []
 
-        # 大纲面板
-        self.outline_panel = OutlinePanel()
-        self.outline_panel.hide()
-        self.outline_panel.heading_clicked.connect(self._on_outline_heading_clicked)
-
-        # 编辑器+大纲容器（用 splitter 包裹，支持拖拽调整宽度）
-        self._editor_outline_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self._editor_outline_splitter.addWidget(self.editor_splitter)
-        self._editor_outline_splitter.addWidget(self.outline_panel)
-        self._editor_outline_splitter.setSizes([800, 200])
-
-        editor_layout.addWidget(self._editor_outline_splitter)
+        editor_layout.addWidget(self.editor_splitter)
 
         self.splitter.addWidget(self.editor_container)
 
@@ -296,6 +298,8 @@ class MainWindow(QMainWindow):
 
         self.file_tree.refresh_external_files()
 
+        self.side_panel_host.restore_state(self.config)
+
         self.config.update_last_login()
         self.config.save_savegame()
 
@@ -382,6 +386,8 @@ class MainWindow(QMainWindow):
         if len(sizes) >= 2:
             self.config.set_view_setting("sidebar_width", sizes[0])
             self.config.set_view_setting("editor_area_width", sizes[1])
+
+        self.side_panel_host.save_state(self.config)
 
         self.config.update_last_login()
 
@@ -1024,12 +1030,11 @@ class MainWindow(QMainWindow):
             return
 
         if view == "editor":
-            self.file_tree.show()
+            self.side_panel_host.show_panel("filetree")
             self.splitter.show()
             self.game_view_container.hide()
             self.game_sidebar.set_current_view(None)
         else:
-            self.file_tree.hide()
             self.splitter.hide()
             self.game_view_container.show()
             self.game_sidebar.set_current_view(view)
@@ -1102,10 +1107,19 @@ class MainWindow(QMainWindow):
 
     def _toggle_file_tree(self):
         """切换文件树显示/隐藏"""
-        if self.file_tree.isVisible():
-            self.file_tree.hide()
+        self.side_panel_host.toggle("filetree")
+
+    def _toggle_side_panel(self):
+        """切换侧栏面板宿主显示/隐藏"""
+        if self.side_panel_host.isVisible():
+            self.side_panel_host.hide_panel()
         else:
-            self.file_tree.show()
+            current_id = self.side_panel_host.current_panel_id()
+            if current_id is not None:
+                self.side_panel_host.show_panel(current_id)
+            else:
+                # 无激活面板时默认显示大纲
+                self.side_panel_host.show_panel("outline")
 
     def _toggle_secretary(self):
         """切换小秘书显示/隐藏"""
@@ -1486,10 +1500,8 @@ class MainWindow(QMainWindow):
 
         if file_type == "Markdown":
             self.outline_panel.set_editor(editor)
-            self.outline_panel.show()
         else:
             self.outline_panel.set_editor(None)
-            self.outline_panel.hide()
 
     def _on_outline_heading_clicked(self, line_num: int):
         """大纲面板点击标题 → 跳转到对应行"""

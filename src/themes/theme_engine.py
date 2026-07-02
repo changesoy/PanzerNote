@@ -300,6 +300,10 @@ QMenu {{
     background-color: {c.surface};
     color: {c.text_primary};
     border: 1px solid {c.border};
+    padding: 4px;
+}}
+QMenu::item {{
+    padding: 4px 32px 4px 12px;
 }}
 QMenu::item:selected {{
     background-color: {c.primary_light};

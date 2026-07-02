@@ -97,6 +97,7 @@ _DEFAULT_SHORTCUTS = {
     "view.md_preview": ("切换Markdown预览", "Ctrl+Shift+M", "视图"),
     "view.minimap": ("显示/隐藏代码缩略图", "Ctrl+M", "视图"),
     "view.file_tree": ("折叠/展开文件树", "Ctrl+B", "视图"),
+    "view.side_panel": ("折叠/展开侧栏", "Ctrl+Shift+O", "视图"),
     "view.fullscreen": ("全屏模式", "F11", "视图"),
     "view.zoom_in": ("放大", "Ctrl++", "视图"),
     "view.zoom_out": ("缩小", "Ctrl+-", "视图"),

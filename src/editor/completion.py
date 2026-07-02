@@ -86,7 +86,12 @@ class CompletionPopup(QListWidget):
     # ---- 键盘导航 ----
 
     def key_press_event(self, event: QKeyEvent) -> bool:
-        """处理弹框内键盘导航，返回 True 表示已消费按键。"""
+        """处理弹框内键盘导航，返回 True 表示已消费按键。
+
+        Enter/Return: 接受当前候选后关闭弹框，不触发换行。
+                     再次按 Enter（弹框已关闭）才触发换行/dedent。
+        Tab: 接受当前候选（不触发换行）。
+        """
         key = event.key()
         if key == Qt.Key.Key_Escape:
             self.hide()
@@ -98,6 +103,9 @@ class CompletionPopup(QListWidget):
             self._navigate(1)
             return True
         if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self._on_accept()  # 接受补全
+            return True  # 消费事件，不触发换行
+        if key == Qt.Key.Key_Tab:
             self._on_accept()
             return True
         return False

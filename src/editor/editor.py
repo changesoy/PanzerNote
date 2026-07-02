@@ -663,7 +663,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             self._is_pasting = False
 
     def _handle_enter(self):
-        """处理回车键 - 自动缩进"""
+        """处理回车键 - 自动缩进、Python 关键词 dedent"""
         cursor = self.textCursor()
         block = cursor.block()
         text = block.text()
@@ -686,7 +686,19 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
                 extra_indent = get_indent_unit(self.config)
                 break
 
-        cursor.insertText('\n' + indent + extra_indent)
+        # Python 关键词触发 dedent（return / pass / break / continue / raise）
+        # 条件：Python 文件 && 没有额外缩进触发（如行尾有冒号）
+        if self._file_type == 'Python' and not extra_indent:
+            content = stripped.lstrip()
+            if content.split(maxsplit=1)[0] in ('return', 'pass', 'break', 'continue', 'raise'):
+                indent_unit = get_indent_unit(self.config)
+                if len(indent) >= len(indent_unit):
+                    indent = indent[:len(indent) - len(indent_unit)]
+
+        cursor.beginEditBlock()
+        cursor.insertBlock()
+        cursor.insertText(indent + extra_indent)
+        cursor.endEditBlock()
         self.setTextCursor(cursor)
         self.ensureCursorVisible()
 

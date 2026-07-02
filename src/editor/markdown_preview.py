@@ -278,6 +278,15 @@ pre code,
     border-radius: 0 !important;
     border: none !important;
 }}
+
+/* ========== 折叠区块（预览折叠对标编辑器折叠） ========== */
+section[data-fold-heading] {{
+    display: block;
+    margin: 0;
+}}
+section[data-fold-heading].folded {{
+    display: none;
+}}
 </style>
 </head>
 <body>
@@ -469,6 +478,23 @@ window.resyncAfterImagesLoaded = function() {{
         img.addEventListener("load", resync);
         img.addEventListener("error", resync);
     }});
+}};
+
+// ========== 折叠区块可见性同步 ==========
+window.updateFoldVisibility = function(collapsedLinesJson) {{
+    try {{
+        var collapsedLines = JSON.parse(collapsedLinesJson);
+        var collapsedSet = new Set(collapsedLines.map(String));
+        var sections = document.querySelectorAll('section[data-fold-heading]');
+        for (var i = 0; i < sections.length; i++) {{
+            var line = sections[i].getAttribute('data-fold-heading');
+            if (collapsedSet.has(line)) {{
+                sections[i].classList.add('folded');
+            }} else {{
+                sections[i].classList.remove('folded');
+            }}
+        }}
+    }} catch(e) {{}}
 }};
 </script>
 </body>
@@ -792,6 +818,10 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         vbar = self.editor.verticalScrollBar()
         if vbar is not None:
             vbar.valueChanged.connect(self._sync_scroll)
+        # 折叠状态变更 → 同步预览
+        folding = getattr(self.editor, '_folding', None)
+        if folding is not None:
+            folding.fold_state_changed.connect(self._sync_folds_to_preview)
 
     def _on_text_changed(self):
         self._preview_timer.start()
@@ -824,6 +854,9 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             html_content = self._process_code_blocks(html_content)
 
         html_content = self._resolve_local_images(html_content)
+
+        # 包裹折叠 section（编辑器的折叠状态同步到预览）
+        html_content = self._wrap_fold_sections(html_content, text)
 
         self._push_to_preview(html_content)
 
@@ -873,6 +906,9 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
                     self.preview.setHtml(full_html)
             elif isinstance(self.preview, PreviewBrowser):
                 self.preview.setHtml(full_html)
+
+        # 同步当前折叠状态到预览
+        self._sync_folds_to_preview()
 
     def _create_md_parser(self):
         if not HAS_MARKDOWN_IT:
@@ -1004,6 +1040,88 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
 
         return _IMG_SRC_RE.sub(_resolve_src, html)
 
+    # ──────────── 折叠 section 包裹 ────────────
+
+    def _wrap_fold_sections(self, html: str, text: str) -> str:
+        """在 Markdown 标题的 DOM 节点外包裹 <section data-fold-heading="N">。
+
+        折叠区间计算与 FoldingManager 一致，确保编辑器和预览折叠对应。
+        在 _process_code_blocks 之后、_push_to_preview 之前调用。
+        """
+        import re
+        from src.editor.outline_parser import parse_headings
+
+        headings = parse_headings(text)
+        if not headings:
+            return html
+
+        # 找到 HTML 中所有含 data-source-line 的标题标签及其位置
+        heading_pattern = re.compile(
+            r'(<h([1-6])((?:\s[^>]*)?)data-source-line="(\d+)"[^>]*>.*?</h\2>)',
+            re.DOTALL | re.IGNORECASE
+        )
+        matches = list(heading_pattern.finditer(html))
+        if not matches:
+            return html
+
+        # line_no → (level, tag_text, start_pos, end_pos)
+        heading_info: dict[int, tuple[int, str, int, int]] = {}
+        for m in matches:
+            level = int(m.group(2))
+            line_no = int(m.group(4))
+            heading_info[line_no] = (level, m.group(1), m.start(), m.end())
+
+        # 计算可折叠区间 → {heading_line: (content_start_pos, section_end_pos)}
+        foldable: dict[int, tuple[int, int]] = {}
+        for i, (h_level, line_no, _title) in enumerate(headings):
+            if line_no not in heading_info:
+                continue
+            # 找到下一个 ≤ 同级标题的起始位置
+            section_end = len(html)
+            for j in range(i + 1, len(headings)):
+                next_level, next_line, _ = headings[j]
+                if next_level <= h_level and next_line in heading_info:
+                    section_end = heading_info[next_line][2]  # 下一标题的 start
+                    break
+            content_start = heading_info[line_no][3]  # 当前标题 tag 结束位置
+            if content_start < section_end:
+                foldable[line_no] = (content_start, section_end)
+
+        if not foldable:
+            return html
+
+        # 逆序插入 <section> / </section>，保持位置正确
+        result = html
+        for line_no in sorted(foldable.keys(), reverse=True):
+            content_start, section_end = foldable[line_no]
+            section_open = f'<section data-fold-heading="{line_no}">'
+            section_close = '</section>'
+            result = result[:section_end] + section_close + result[section_end:]
+            result = result[:content_start] + section_open + result[content_start:]
+
+        return result
+
+    # ──────────── 折叠同步 ────────────
+
+    def _sync_folds_to_preview(self) -> None:
+        """将编辑器 FoldingManager 的折叠状态同步到预览 DOM。"""
+        if not self.editor:
+            return
+        folding = getattr(self.editor, '_folding', None)
+        if folding is None:
+            return
+        if not HAS_WEBENGINE or not isinstance(self.preview, QWebEngineView):
+            return
+        if not self._html_template_loaded:
+            return
+
+        import json
+        collapsed = folding.get_collapsed_lines()
+        js = f"window.updateFoldVisibility('{json.dumps(collapsed)}');"
+        page = self.preview.page()
+        if page is not None:
+            page.runJavaScript(js)
+
     # ──────────── 代码块后处理 ────────────
 
     def _process_code_blocks(self, html: str) -> str:
@@ -1118,6 +1236,7 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
 
         html_content = _CODEBLOCK_RE.sub(_replace_and_count, html_content)
         html_content = self._resolve_local_images(html_content)
+        html_content = self._wrap_fold_sections(html_content, text)
         self._push_to_preview(html_content)
 
     def _on_async_highlight_ready(self, task_id: str, html: str, language: str):

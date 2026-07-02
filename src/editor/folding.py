@@ -5,12 +5,13 @@ from __future__ import annotations
 
 from typing import List, Set, Dict, Tuple
 
+from PyQt6.QtCore import pyqtSignal, QObject
 from PyQt6.QtWidgets import QPlainTextEdit
 
 from src.editor.outline_parser import parse_headings, Heading
 
 
-class FoldingManager:
+class FoldingManager(QObject):
     """管理 Markdown 标题折叠。
 
     职责：
@@ -20,9 +21,11 @@ class FoldingManager:
     - 提供折叠标记绘制所需的数据
     """
 
+    fold_state_changed = pyqtSignal()
     _FOLD_MARKER_WIDTH = 16  # 折叠标记列的宽度（px）
 
     def __init__(self, editor: QPlainTextEdit):
+        super().__init__(editor)
         self._editor = editor
         self._collapsed_blocks: Set[int] = set()  # 被折叠的标题行 blockNumber
         self._headings: List[Heading] = []  # (level, line_num, title)
@@ -115,6 +118,7 @@ class FoldingManager:
 
         self._editor.viewport().update()
         self._editor.line_number_area.update()
+        self.fold_state_changed.emit()
 
     def toggle_fold_all(self) -> None:
         """全部折叠或全部展开（toggle）。"""
@@ -140,6 +144,7 @@ class FoldingManager:
 
         self._editor.viewport().update()
         self._editor.line_number_area.update()
+        self.fold_state_changed.emit()
 
     def _expand_all(self) -> None:
         """展开所有折叠区域。"""
@@ -159,6 +164,7 @@ class FoldingManager:
 
         self._editor.viewport().update()
         self._editor.line_number_area.update()
+        self.fold_state_changed.emit()
 
     def _restore_nested_folds(self, parent_heading_line: int) -> None:
         """展开父标题后，恢复其子标题的折叠状态。

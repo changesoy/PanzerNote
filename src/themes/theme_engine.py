@@ -403,16 +403,6 @@ QMessageBox {{
 QSplitter::handle {{
     background-color: {c.border};
 }}
-QFrame[frameShape="4"] {{
-    background-color: {c.border};
-    border: none;
-    max-height: 1px;
-}}
-QFrame[frameShape="5"] {{
-    background-color: {c.border};
-    border: none;
-    max-width: 1px;
-}}
 QScrollBar:vertical {{
     background-color: {c.surface};
     width: 12px;

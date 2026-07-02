@@ -22,12 +22,12 @@ from ..utils.dpi_helper import scale, scale_stylesheet
 from ..themes.theme_aware_mixin import ThemeAwareMixin
 
 
-class ShortcutEditDialog(QDialog):
+class ShortcutEditDialog(ThemeAwareMixin, QDialog):
 
     shortcut_changed = pyqtSignal(str, str)
 
     def __init__(self, action_id: str, action_name: str,
-                 current_shortcut: str, parent=None):
+                 current_shortcut: str, theme_engine=None, parent=None):
         super().__init__(parent)
         self._action_id = action_id
         self._action_name = action_name
@@ -83,6 +83,12 @@ class ShortcutEditDialog(QDialog):
         layout.addLayout(btn_layout)
 
         self._new_shortcut = current_shortcut
+
+        if theme_engine:
+            self._init_theme(theme_engine)
+
+    def _apply_theme_colors(self, colors):
+        pass
 
     def _on_reset(self):
         self._key_edit.clear()
@@ -254,7 +260,7 @@ class ShortcutPanel(ThemeAwareMixin, QWidget):
         name = item.text(0)
         current_shortcut = self._manager.get_shortcut(action_id) or ""
 
-        dialog = ShortcutEditDialog(action_id, name, current_shortcut, self)
+        dialog = ShortcutEditDialog(action_id, name, current_shortcut, self._theme_engine, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             new_shortcut = dialog.get_new_shortcut()
             if new_shortcut == "__reset__":

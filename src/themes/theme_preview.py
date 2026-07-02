@@ -14,6 +14,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QColor, QPalette
 
 from .theme_engine import ThemeEngine, ThemeDefinition, ThemeColorScheme
+from .theme_aware_mixin import ThemeAwareMixin
 
 
 class ThemePreviewWidget(QWidget):
@@ -268,13 +269,14 @@ class ThemePreviewWidget(QWidget):
             self.theme_applied.emit(self._current_theme_id)
 
 
-class ThemePreviewDialog(QDialog):
+class ThemePreviewDialog(ThemeAwareMixin, QDialog):
     theme_applied = pyqtSignal(str)
 
     def __init__(self, theme_engine: ThemeEngine, parent=None):
         super().__init__(parent)
         self._engine = theme_engine
         self._setup_ui()
+        self._init_theme(theme_engine)
 
     def _setup_ui(self):
         self.setWindowTitle("主题管理")
@@ -292,3 +294,6 @@ class ThemePreviewDialog(QDialog):
 
     def _on_theme_applied(self, theme_id: str):
         self.theme_applied.emit(theme_id)
+
+    def _apply_theme_colors(self, colors):
+        pass

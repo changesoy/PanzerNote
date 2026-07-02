@@ -42,10 +42,10 @@ from .eol_utils import detect_eol_from_bytes
 #  另存为对话框
 # ════════════════════════════════════════════════════════
 
-class SaveAsDialog(QDialog):
+class SaveAsDialog(ThemeAwareMixin, QDialog):
     """另存为对话框 - 支持选择编码"""
 
-    def __init__(self, suggested_path: str, current_encoding: str = "UTF-8", parent=None):
+    def __init__(self, suggested_path: str, current_encoding: str = "UTF-8", theme_engine=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("另存为")
         self.setMinimumWidth(500)
@@ -87,6 +87,12 @@ class SaveAsDialog(QDialog):
         btn_layout.addWidget(save_btn)
         btn_layout.addWidget(cancel_btn)
         layout.addLayout(btn_layout)
+
+        if theme_engine:
+            self._init_theme(theme_engine)
+
+    def _apply_theme_colors(self, colors):
+        pass
 
     def _browse(self):
         filepath, _ = QFileDialog.getSaveFileName(
@@ -496,7 +502,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
         current_encoding = info.get("encoding", "UTF-8")
 
-        dialog = SaveAsDialog(suggested_name, current_encoding, self)
+        dialog = SaveAsDialog(suggested_name, current_encoding, self._theme_engine, self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return False, 0
 

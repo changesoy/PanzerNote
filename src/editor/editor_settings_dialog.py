@@ -19,12 +19,13 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
 from ..core.config import Config
+from ..themes.theme_aware_mixin import ThemeAwareMixin
 
 
-class EditorSettingsDialog(QDialog):
+class EditorSettingsDialog(ThemeAwareMixin, QDialog):
     """记事本设置对话框"""
 
-    def __init__(self, config: Config, parent=None):
+    def __init__(self, config: Config, theme_engine=None, parent=None):
         super().__init__(parent)
         self.config = config
         self.setWindowTitle("记事本设置")
@@ -32,6 +33,8 @@ class EditorSettingsDialog(QDialog):
 
         self._init_ui()
         self._load_settings()
+        if theme_engine:
+            self._init_theme(theme_engine)
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
@@ -246,3 +249,6 @@ class EditorSettingsDialog(QDialog):
                 "size_percent": self.secretary_size_slider.value(),
             },
         }
+
+    def _apply_theme_colors(self, colors):
+        pass

@@ -10,26 +10,35 @@ from PyQt6.QtWidgets import (
     QListWidgetItem, QPushButton, QLabel,
 )
 
+from ..themes.theme_aware_mixin import ThemeAwareMixin
 from ..utils.error_handler import ErrorHandler, ErrorCategory
 from ..themes.theme_aware_mixin import ThemeAwareMixin
 
 
 class PluginManagerDialog(ThemeAwareMixin, QDialog):
-    def __init__(self, plugin_manager, secretary, theme_engine=None, parent=None):
+    def __init__(self, plugin_manager, secretary, parent=None, theme_engine=None):
         super().__init__(parent)
         self._plugin_manager = plugin_manager
         self._secretary = secretary
+        resolved_theme_engine = theme_engine or getattr(parent, "theme_engine", None)
+        self.setObjectName("PluginManagerDialog")
         self.setWindowTitle("插件管理")
         self.setMinimumSize(500, 400)
         self._init_ui()
         if theme_engine:
             self._init_theme(theme_engine)
 
+        if resolved_theme_engine:
+            self._init_theme(resolved_theme_engine)
+
     def _init_ui(self):
         layout = QVBoxLayout(self)
 
         self._list_widget = QListWidget()
+        self._list_widget.setObjectName("PluginList")
+        self._list_widget.setAlternatingRowColors(True)
         self._count_label = QLabel()
+        self._count_label.setObjectName("PluginCountLabel")
 
         self._refresh_list()
         layout.addWidget(self._count_label)
@@ -59,6 +68,117 @@ class PluginManagerDialog(ThemeAwareMixin, QDialog):
         close_btn = QPushButton("关闭")
         close_btn.clicked.connect(self.accept)
         layout.addWidget(close_btn)
+
+    def _apply_theme_colors(self, colors):
+        self.setStyleSheet(f"""
+        QDialog#PluginManagerDialog {{
+            background-color: {colors.dialog_bg};
+            color: {colors.text_primary};
+        }}
+
+        QLabel#PluginCountLabel {{
+            color: {colors.text_primary};
+            font-size: 14px;
+            padding: 4px 0;
+        }}
+
+        QListWidget#PluginList {{
+            background-color: {colors.card};
+            color: {colors.text_primary};
+            border: 1px solid {colors.border};
+            border-radius: 4px;
+            padding: 6px;
+            outline: none;
+            alternate-background-color: {colors.surface};
+        }}
+
+        QListWidget#PluginList::item {{
+            color: {colors.text_primary};
+            background: transparent;
+            padding: 6px 8px;
+            border-radius: 4px;
+        }}
+
+        QListWidget#PluginList::item:hover {{
+            background-color: {colors.surface};
+        }}
+
+        QListWidget#PluginList::item:selected {{
+            background-color: {colors.primary_light};
+            color: {colors.text_primary};
+        }}
+
+        QPushButton {{
+            background-color: {colors.primary};
+            color: white;
+            border: 1px solid {colors.primary_dark};
+            border-radius: 4px;
+            padding: 6px 14px;
+            min-height: 24px;
+        }}
+
+        QPushButton:hover {{
+            background-color: {colors.primary_dark};
+        }}
+
+        QPushButton:pressed {{
+            background-color: {colors.primary_dark};
+        }}
+
+        QPushButton:disabled {{
+            background-color: {colors.border};
+            color: {colors.text_disabled};
+            border-color: {colors.border};
+        }}
+
+        QScrollBar:vertical {{
+            background-color: {colors.surface};
+            width: 12px;
+            margin: 0;
+        }}
+
+        QScrollBar::handle:vertical {{
+            background-color: {colors.border};
+            border-radius: 6px;
+            min-height: 20px;
+            margin: 2px;
+        }}
+
+        QScrollBar::handle:vertical:hover {{
+            background-color: {colors.text_disabled};
+        }}
+
+        QScrollBar::add-line:vertical,
+        QScrollBar::sub-line:vertical {{
+            height: 0;
+        }}
+
+        QScrollBar:horizontal {{
+            background-color: {colors.surface};
+            height: 12px;
+            margin: 0;
+        }}
+
+        QScrollBar::handle:horizontal {{
+            background-color: {colors.border};
+            border-radius: 6px;
+            min-width: 20px;
+            margin: 2px;
+        }}
+
+        QScrollBar::handle:horizontal:hover {{
+            background-color: {colors.text_disabled};
+        }}
+
+        QScrollBar::add-line:horizontal,
+        QScrollBar::sub-line:horizontal {{
+            width: 0;
+        }}
+        """)
+
+        self._list_widget.viewport().setStyleSheet(
+            f"background-color: {colors.card}; color: {colors.text_primary};"
+        )
 
     def _get_selected_plugin_id(self):
         item = self._list_widget.currentItem()

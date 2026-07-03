@@ -237,6 +237,7 @@ li input[type="checkbox"] {{
     padding: 0;
     border-radius: 6px;
     background: #EDF3FA;
+    border: 1px solid #D8DEE9;
     overflow: auto;
 }}
 .code-pre {{
@@ -504,6 +505,7 @@ window.resyncAfterImagesLoaded = function() {{
 // ========== 折叠区块可见性同步 ==========
 window.updateFoldVisibility = function(collapsedLinesJson) {{
     try {{
+        _previewScrollLock = performance.now() + 220;
         var collapsedLines = JSON.parse(collapsedLinesJson);
         var collapsedSet = new Set(collapsedLines.map(String));
         var sections = document.querySelectorAll('section[data-fold-heading]');
@@ -527,7 +529,8 @@ window.updateFoldVisibility = function(collapsedLinesJson) {{
 # ════════════════════════════════════════════════════════
 
 _DARK_COLOR_MAP = {
-    "#EDF3FA": "#1E1E1E",
+    "#EDF3FA": "#2D2D30",
+    "#D8DEE9": "#3E3E42",
     "#2470B3": "#569CD6",
     "#1a5a96": "#6CB6FF",
     "#f2f6fc": "#252526",
@@ -888,6 +891,12 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         if folding is not None:
             folding.fold_state_changed.connect(self._sync_folds_to_preview)
 
+    def refresh_preview_now(self) -> None:
+        """文件装载/主题重建后强制刷新预览，不依赖 textChanged 防抖。"""
+        if hasattr(self, "_preview_timer"):
+            self._preview_timer.stop()
+        self._update_preview()
+
     def _on_text_changed(self):
         self._preview_timer.start()
 
@@ -965,7 +974,62 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             theme_engine = getattr(self, '_theme_engine', None)
             is_dark = bool(theme_engine and theme_engine.get_active_theme().is_dark)
             template = _get_dark_preview_template() if is_dark else PREVIEW_HTML_TEMPLATE
-            full_html = template.format(content=html_content)
+            try:
+                full_html = template.format(content=html_content)
+            except Exception as exc:
+                get_logger(__name__).error(
+                    "Markdown preview template format failed: %s",
+                    exc,
+                    exc_info=True,
+                )
+
+                if is_dark:
+                    fallback_bg = "#1E1E1E"
+                    fallback_text = "#D4D4D4"
+                    fallback_code_bg = "#2D2D30"
+                    fallback_border = "#3E3E42"
+                else:
+                    fallback_bg = "#FFFFFF"
+                    fallback_text = "#2B2B2B"
+                    fallback_code_bg = "#EDF3FA"
+                    fallback_border = "#D9D9D9"
+
+                full_html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+body {{
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+                 "Microsoft YaHei UI", "Microsoft YaHei", Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.7;
+    margin: 0;
+    padding: 12px 20px 40px 20px;
+    background: {fallback_bg};
+    color: {fallback_text};
+    word-wrap: break-word;
+}}
+pre {{
+    background: {fallback_code_bg};
+    color: {fallback_text};
+    border: 1px solid {fallback_border};
+    border-radius: 6px;
+    padding: 12px 14px;
+    overflow: auto;
+}}
+code {{
+    font-family: Consolas, "Courier New", monospace;
+}}
+a {{
+    color: #569CD6;
+}}
+</style>
+</head>
+<body>
+{html_content}
+</body>
+</html>"""
             if HAS_WEBENGINE and isinstance(self.preview, QWebEngineView):
                 if self._base_path:
                     base_url = QUrl.fromLocalFile(self._base_path + '/')
@@ -1158,14 +1222,18 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         if not foldable:
             return html
 
-        # 逆序插入 <section> / </section>，保持位置正确
-        result = html
-        for line_no in sorted(foldable.keys(), reverse=True):
-            content_start, section_end = foldable[line_no]
+        ops: list[tuple[int, int, str]] = []
+        for line_no, (content_start, section_end) in foldable.items():
             section_open = f'<section data-fold-heading="{line_no}">'
             section_close = '</section>'
-            result = result[:section_end] + section_close + result[section_end:]
-            result = result[:content_start] + section_open + result[content_start:]
+            ops.append((content_start, 0, section_open))
+            ops.append((section_end, -line_no, section_close))
+
+        ops.sort(key=lambda x: (x[0], x[1]), reverse=True)
+
+        result = html
+        for pos, _tiebreaker, tag in ops:
+            result = result[:pos] + tag + result[pos:]
 
         return result
 
@@ -1193,14 +1261,33 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
     # ──────────── 代码块后处理 ────────────
 
     def _get_code_highlight_theme(self) -> Optional[str]:
-        """根据当前明/暗主题自动选择代码高亮主题。
-        若用户在配置中显式指定了主题，则优先使用用户配置。"""
+        """根据当前明/暗主题选择 Markdown 预览代码高亮主题。
+
+        兼容旧配置：
+        - 空值 / auto / default / none / null 视为自动；
+        - 深色主题下，历史默认浅色主题 pycharm_light 视为自动；
+        - 其它显式主题名保留，尊重用户选择。
+        """
+        is_dark = bool(
+            self._theme_engine and self._theme_engine.get_active_theme().is_dark
+        )
+        fallback_theme = "vscode_dark" if is_dark else "pycharm_light"
+
         user_theme = self.config.get_editor_setting("code_highlight_theme", None)
-        if user_theme:
-            return str(user_theme)
-        # 根据明/暗主题自动选择
-        is_dark = bool(self._theme_engine and self._theme_engine.get_active_theme().is_dark)
-        return "vscode_dark" if is_dark else "pycharm_light"
+        user_theme_name = str(user_theme).strip() if user_theme is not None else ""
+
+        if not user_theme_name:
+            return fallback_theme
+
+        normalized = user_theme_name.lower()
+
+        if normalized in {"auto", "default", "none", "null"}:
+            return fallback_theme
+
+        if is_dark and normalized == "pycharm_light":
+            return "vscode_dark"
+
+        return user_theme_name
 
     def _process_code_blocks(self, html: str) -> str:
         """替换所有 <pre><code> 块：语法高亮 + 浅蓝容器 + 嵌入位置标记"""

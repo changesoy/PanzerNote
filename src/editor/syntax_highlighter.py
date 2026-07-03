@@ -111,9 +111,9 @@ class MarkdownHighlighter(QSyntaxHighlighter):
         "list_fg": "#D4D4D4",
         "quote_fg": "#6A9955",
         "hr_fg": "#555555",
-        "fence_fg": "#808080",
+        "fence_fg": "#A0A0A0",
         "code_block_fg": "#D4D4D4",
-        "code_block_bg": "#252526",
+        "code_block_bg": "#2D2D30",
     }
 
     def __init__(self, document: QTextDocument, is_dark: bool = False):

@@ -28,7 +28,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QRect, QSize, QTimer, QPointF, pyqtSignal
 from PyQt6.QtGui import (
     QFont, QColor, QPainter, QTextFormat, QTextCharFormat,
-    QSyntaxHighlighter, QTextDocument, QTextCursor, QKeyEvent, QAction
+    QSyntaxHighlighter, QTextDocument, QTextCursor, QKeyEvent, QAction,
+    QHideEvent, QFocusEvent,
 )
 
 from ..core.config import Config
@@ -241,6 +242,13 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
                 # Pygments 高亮器：重新设置文件类型以切换主题
                 self.set_file_type(self._filepath_or_ext)
         self._highlight_current_line()
+
+        # 更新无父顶层补全弹窗的主题
+        if hasattr(self, "_completion_popup") and self._completion_popup is not None:
+            self._completion_popup.apply_theme_colors(colors)
+            font_family = self.config.get_editor_setting("font_family", "Microsoft YaHei")
+            font_size = self.config.get_editor_setting("font_size", 12)
+            self._completion_popup.apply_font(font_family, font_size)
 
     def _show_context_menu(self, position):
         """显示中文右键菜单"""
@@ -718,6 +726,16 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
 
         super().keyPressEvent(event)
 
+    def hideEvent(self, event: QHideEvent):
+        """编辑器隐藏时隐藏补全弹窗。"""
+        self._completion_popup.hide()
+        super().hideEvent(event)
+
+    def focusOutEvent(self, event: QFocusEvent):
+        """编辑器失焦时隐藏补全弹窗。"""
+        self._completion_popup.hide()
+        super().focusOutEvent(event)
+
     def inputMethodEvent(self, event):
         """IME 输入事件：修复中文输入法提交字符时的自动配对
 
@@ -924,12 +942,20 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
 
     def load_content(self, content: str):
         """加载文本内容，大文件自动启用延迟高亮"""
-        if not self._lazy_highlight.load_content(content):
-            self.setPlainText(content)
+        # 停止补全相关状态，避免加载过程中弹窗
+        self._completion_timer.stop()
+        self._completion_popup.hide()
+
+        with self.programmatic_modify():
+            if not self._lazy_highlight.load_content(content):
+                self.setPlainText(content)
+
         # 重建补全词集
         self._completion_provider.rebuild_from_text(self.toPlainText())
         # 重建折叠区间
         self._refresh_folding()
+        # 再次确保补全弹窗已隐藏
+        self._completion_popup.hide()
 
     def goto_line(self, line: int):
         """跳转到指定行（如果行在折叠区域内则自动展开）"""
@@ -1032,13 +1058,20 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
 
     def _trigger_completion(self) -> None:
         """光标位置改变时触发补全检查。"""
-        if self._completion_popup.visible:
+        # 编辑器不可见/无焦点/程序化修改/粘贴/IME 组字中直接隐藏并返回
+        if self._programmatic_modify or self._is_pasting or self._composing:
             self._completion_popup.hide()
-    
+            return
+
+        if not self.hasFocus() or not self.isVisible():
+            self._completion_popup.hide()
+            return
+
         if not self.config.get_editor_setting("enable_completion", False):
             return
-        if self._composing:
-            return
+
+        if self._completion_popup.visible:
+            self._completion_popup.hide()
 
         prefix = self._completion_prefix()
         min_chars = self.config.get_editor_setting("completion_min_chars", 2)

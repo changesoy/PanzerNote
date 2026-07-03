@@ -27,44 +27,56 @@ class ThemePreviewWidget(QWidget):
         self._setup_ui()
 
     def _setup_ui(self):
+        self.setObjectName("ThemePreviewWidget")
+
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
 
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        layout.addWidget(splitter)
+        self._splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._splitter.setObjectName("ThemePreviewSplitter")
+        layout.addWidget(self._splitter)
 
         left_panel = QWidget()
+        left_panel.setObjectName("ThemePreviewLeftPanel")
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
 
-        left_layout.addWidget(QLabel("可用主题"))
+        self._available_label = QLabel("可用主题")
+        self._available_label.setObjectName("ThemePreviewSectionLabel")
+        left_layout.addWidget(self._available_label)
 
         self._theme_list = QListWidget()
+        self._theme_list.setObjectName("ThemeList")
         self._theme_list.currentItemChanged.connect(self._on_theme_selected)
         left_layout.addWidget(self._theme_list)
 
         self._apply_btn = QPushButton("应用主题")
+        self._apply_btn.setObjectName("ApplyThemeButton")
         self._apply_btn.clicked.connect(self._on_apply)
         left_layout.addWidget(self._apply_btn)
 
-        splitter.addWidget(left_panel)
+        self._splitter.addWidget(left_panel)
 
         right_panel = QWidget()
+        right_panel.setObjectName("ThemePreviewRightPanel")
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
 
         self._preview_area = QScrollArea()
+        self._preview_area.setObjectName("ThemePreviewArea")
         self._preview_area.setWidgetResizable(True)
         self._preview_content = QWidget()
+        self._preview_content.setObjectName("ThemePreviewContent")
         self._preview_layout = QVBoxLayout(self._preview_content)
         self._preview_area.setWidget(self._preview_content)
         right_layout.addWidget(self._preview_area)
 
         self._info_label = QLabel("选择一个主题进行预览")
+        self._info_label.setObjectName("ThemeInfoLabel")
         right_layout.addWidget(self._info_label)
 
-        splitter.addWidget(right_panel)
-        splitter.setSizes([200, 500])
+        self._splitter.addWidget(right_panel)
+        self._splitter.setSizes([200, 500])
 
         self._refresh_theme_list()
 
@@ -276,9 +288,10 @@ class ThemePreviewDialog(ThemeAwareMixin, QDialog):
         super().__init__(parent)
         self._engine = theme_engine
         self._setup_ui()
-        self._init_theme(theme_engine)
+        self._init_theme(self._engine)
 
     def _setup_ui(self):
+        self.setObjectName("ThemePreviewDialog")
         self.setWindowTitle("主题管理")
         self.setMinimumSize(700, 500)
 
@@ -288,9 +301,186 @@ class ThemePreviewDialog(ThemeAwareMixin, QDialog):
         self._preview_widget.theme_applied.connect(self._on_theme_applied)
         layout.addWidget(self._preview_widget)
 
-        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        btn_box.rejected.connect(self.reject)
-        layout.addWidget(btn_box)
+        self._button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        self._button_box.setObjectName("ThemeDialogButtonBox")
+        self._button_box.rejected.connect(self.reject)
+        layout.addWidget(self._button_box)
+
+    def _apply_theme_colors(self, colors: ThemeColorScheme):
+        """应用主题管理弹窗的局部样式。
+
+        只处理主题管理弹窗内容区，不修改全局主题样式。
+        """
+        self.setStyleSheet(f"""
+    QDialog#ThemePreviewDialog {{
+        background-color: {colors.dialog_bg};
+        color: {colors.text_primary};
+    }}
+
+    QWidget#ThemePreviewWidget,
+    QWidget#ThemePreviewLeftPanel,
+    QWidget#ThemePreviewRightPanel,
+    QWidget#ThemePreviewContent {{
+        background-color: {colors.dialog_bg};
+        color: {colors.text_primary};
+    }}
+
+    QSplitter#ThemePreviewSplitter::handle {{
+        background-color: {colors.border};
+    }}
+
+    QLabel {{
+        color: {colors.text_primary};
+    }}
+
+    QLabel#ThemePreviewSectionLabel,
+    QLabel#ThemeInfoLabel {{
+        color: {colors.text_secondary};
+    }}
+
+    QListWidget#ThemeList {{
+        background-color: {colors.card};
+        color: {colors.text_primary};
+        border: 1px solid {colors.border};
+        border-radius: 4px;
+        padding: 4px;
+        outline: none;
+    }}
+
+    QListWidget#ThemeList::item {{
+        color: {colors.text_primary};
+        background: transparent;
+        padding: 6px 8px;
+        border-radius: 4px;
+    }}
+
+    QListWidget#ThemeList::item:hover {{
+        background-color: {colors.surface};
+    }}
+
+    QListWidget#ThemeList::item:selected {{
+        background-color: {colors.primary_light};
+        color: {colors.text_primary};
+        border-left: 3px solid {colors.primary};
+    }}
+
+    QScrollArea#ThemePreviewArea {{
+        background-color: {colors.dialog_bg};
+        border: 1px solid {colors.border};
+        border-radius: 4px;
+    }}
+
+    QScrollArea#ThemePreviewArea > QWidget {{
+        background-color: {colors.dialog_bg};
+    }}
+
+    QGroupBox {{
+        background-color: {colors.card};
+        color: {colors.text_primary};
+        border: 1px solid {colors.border};
+        border-radius: 4px;
+        margin-top: 10px;
+        padding-top: 14px;
+    }}
+
+    QGroupBox::title {{
+        subcontrol-origin: margin;
+        left: 8px;
+        padding: 0 4px;
+        color: {colors.text_secondary};
+        background-color: {colors.card};
+    }}
+
+    QCheckBox {{
+        color: {colors.text_primary};
+    }}
+
+    QPushButton,
+    QDialogButtonBox QPushButton {{
+        background-color: {colors.primary};
+        color: white;
+        border: 1px solid {colors.primary_dark};
+        border-radius: 4px;
+        padding: 6px 16px;
+        min-height: 24px;
+    }}
+
+    QPushButton:hover,
+    QDialogButtonBox QPushButton:hover {{
+        background-color: {colors.primary_dark};
+    }}
+
+    QPushButton:pressed,
+    QDialogButtonBox QPushButton:pressed {{
+        background-color: {colors.primary_dark};
+    }}
+
+    QPushButton:disabled,
+    QDialogButtonBox QPushButton:disabled {{
+        background-color: {colors.border};
+        color: {colors.text_disabled};
+        border-color: {colors.border};
+    }}
+
+    QScrollBar:vertical {{
+        background-color: {colors.surface};
+        width: 12px;
+        margin: 0;
+    }}
+
+    QScrollBar::handle:vertical {{
+        background-color: {colors.border};
+        border-radius: 6px;
+        min-height: 20px;
+        margin: 2px;
+    }}
+
+    QScrollBar::handle:vertical:hover {{
+        background-color: {colors.text_disabled};
+    }}
+
+    QScrollBar::add-line:vertical,
+    QScrollBar::sub-line:vertical {{
+        height: 0;
+    }}
+
+    QScrollBar:horizontal {{
+        background-color: {colors.surface};
+        height: 12px;
+        margin: 0;
+    }}
+
+    QScrollBar::handle:horizontal {{
+        background-color: {colors.border};
+        border-radius: 6px;
+        min-width: 20px;
+        margin: 2px;
+    }}
+
+    QScrollBar::handle:horizontal:hover {{
+        background-color: {colors.text_disabled};
+    }}
+
+    QScrollBar::add-line:horizontal,
+    QScrollBar::sub-line:horizontal {{
+        width: 0;
+    }}
+    """)
+
+        # QScrollArea 的 viewport 有时不会完全继承父级背景，显式补一次。
+        preview_widget = getattr(self, "_preview_widget", None)
+        preview_area = getattr(preview_widget, "_preview_area", None)
+        preview_content = getattr(preview_widget, "_preview_content", None)
+
+        if preview_area is not None:
+            preview_area.viewport().setStyleSheet(
+                f"background-color: {colors.dialog_bg};"
+            )
+
+        if preview_content is not None:
+            preview_content.setStyleSheet(
+                f"background-color: {colors.dialog_bg};"
+            )
 
     def _on_theme_applied(self, theme_id: str):
         self.theme_applied.emit(theme_id)

@@ -504,6 +504,7 @@ window.resyncAfterImagesLoaded = function() {{
 // ========== 折叠区块可见性同步 ==========
 window.updateFoldVisibility = function(collapsedLinesJson) {{
     try {{
+        _previewScrollLock = performance.now() + 220;
         var collapsedLines = JSON.parse(collapsedLinesJson);
         var collapsedSet = new Set(collapsedLines.map(String));
         var sections = document.querySelectorAll('section[data-fold-heading]');
@@ -1158,14 +1159,18 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         if not foldable:
             return html
 
-        # 逆序插入 <section> / </section>，保持位置正确
-        result = html
-        for line_no in sorted(foldable.keys(), reverse=True):
-            content_start, section_end = foldable[line_no]
+        ops: list[tuple[int, int, str]] = []
+        for line_no, (content_start, section_end) in foldable.items():
             section_open = f'<section data-fold-heading="{line_no}">'
             section_close = '</section>'
-            result = result[:section_end] + section_close + result[section_end:]
-            result = result[:content_start] + section_open + result[content_start:]
+            ops.append((content_start, 0, section_open))
+            ops.append((section_end, -line_no, section_close))
+
+        ops.sort(key=lambda x: (x[0], x[1]), reverse=True)
+
+        result = html
+        for pos, _tiebreaker, tag in ops:
+            result = result[:pos] + tag + result[pos:]
 
         return result
 

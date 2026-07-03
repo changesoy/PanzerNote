@@ -237,6 +237,7 @@ li input[type="checkbox"] {{
     padding: 0;
     border-radius: 6px;
     background: #EDF3FA;
+    border: 1px solid #D8DEE9;
     overflow: auto;
 }}
 .code-pre {{
@@ -528,7 +529,8 @@ window.updateFoldVisibility = function(collapsedLinesJson) {{
 # ════════════════════════════════════════════════════════
 
 _DARK_COLOR_MAP = {
-    "#EDF3FA": "#1E1E1E",
+    "#EDF3FA": "#2D2D30",
+    "#D8DEE9": "#3E3E42",
     "#2470B3": "#569CD6",
     "#1a5a96": "#6CB6FF",
     "#f2f6fc": "#252526",
@@ -1259,14 +1261,33 @@ a {{
     # ──────────── 代码块后处理 ────────────
 
     def _get_code_highlight_theme(self) -> Optional[str]:
-        """根据当前明/暗主题自动选择代码高亮主题。
-        若用户在配置中显式指定了主题，则优先使用用户配置。"""
+        """根据当前明/暗主题选择 Markdown 预览代码高亮主题。
+
+        兼容旧配置：
+        - 空值 / auto / default / none / null 视为自动；
+        - 深色主题下，历史默认浅色主题 pycharm_light 视为自动；
+        - 其它显式主题名保留，尊重用户选择。
+        """
+        is_dark = bool(
+            self._theme_engine and self._theme_engine.get_active_theme().is_dark
+        )
+        fallback_theme = "vscode_dark" if is_dark else "pycharm_light"
+
         user_theme = self.config.get_editor_setting("code_highlight_theme", None)
-        if user_theme:
-            return str(user_theme)
-        # 根据明/暗主题自动选择
-        is_dark = bool(self._theme_engine and self._theme_engine.get_active_theme().is_dark)
-        return "vscode_dark" if is_dark else "pycharm_light"
+        user_theme_name = str(user_theme).strip() if user_theme is not None else ""
+
+        if not user_theme_name:
+            return fallback_theme
+
+        normalized = user_theme_name.lower()
+
+        if normalized in {"auto", "default", "none", "null"}:
+            return fallback_theme
+
+        if is_dark and normalized == "pycharm_light":
+            return "vscode_dark"
+
+        return user_theme_name
 
     def _process_code_blocks(self, html: str) -> str:
         """替换所有 <pre><code> 块：语法高亮 + 浅蓝容器 + 嵌入位置标记"""

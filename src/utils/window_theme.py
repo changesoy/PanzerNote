@@ -58,7 +58,7 @@ class NativeTitleBarThemeFilter(QObject):
         if event.type() == QEvent.Type.Show and isinstance(obj, QWidget) and obj.isWindow():
             # 跳过无边框窗口（如 CompletionPopup），它们没有原生标题栏
             if obj.windowFlags() & Qt.WindowType.FramelessWindowHint:
-                return super().eventFilter(obj, event)
+                return bool(super().eventFilter(obj, event))
 
             widget = obj
 
@@ -71,7 +71,7 @@ class NativeTitleBarThemeFilter(QObject):
             # 延迟到 native handle/窗口实现稳定后再设。
             QTimer.singleShot(0, apply_later)
 
-        return super().eventFilter(obj, event)
+        return bool(super().eventFilter(obj, event))
 
 
 def install_native_titlebar_theme_filter(

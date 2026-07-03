@@ -415,6 +415,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             self._connect_editor_signals(widget.editor)
             widget.editor.set_file_type(filepath)
             widget.set_base_path(os.path.dirname(os.path.abspath(filepath)))
+            widget.refresh_preview_now()
         else:
             widget = Editor(self.config, theme_engine=self._theme_engine)
             widget.load_content(content)

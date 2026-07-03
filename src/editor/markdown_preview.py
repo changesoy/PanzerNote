@@ -889,6 +889,12 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         if folding is not None:
             folding.fold_state_changed.connect(self._sync_folds_to_preview)
 
+    def refresh_preview_now(self) -> None:
+        """文件装载/主题重建后强制刷新预览，不依赖 textChanged 防抖。"""
+        if hasattr(self, "_preview_timer"):
+            self._preview_timer.stop()
+        self._update_preview()
+
     def _on_text_changed(self):
         self._preview_timer.start()
 

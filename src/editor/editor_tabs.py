@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QTabWidget, QTabBar, QMessageBox,
     QFileDialog, QPlainTextEdit, QTextEdit, QMenu,
     QInputDialog, QLabel, QDialog, QHBoxLayout, QComboBox,
-    QPushButton, QLineEdit, QFormLayout, QApplication
+    QPushButton, QLineEdit, QFormLayout, QApplication, QToolButton
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QMimeData, QPoint, QByteArray
 from PyQt6.QtGui import QFont, QTextCursor, QColor, QTextCharFormat, QDrag, QAction
@@ -189,6 +189,57 @@ class DraggableTabBar(QTabBar):
 
 
 # ════════════════════════════════════════════════════════
+#  _TabCloseButton —— 自定义关闭按钮容器
+# ════════════════════════════════════════════════════════
+
+class _TabCloseButton(QWidget):
+    """标签关闭按钮容器。
+
+    原生 QTabBar 关闭按钮是固定贴右边缘的 QToolButton widget，
+    QSS 的 subcontrol-position / right / margin 对它无效，
+    tab 的 padding-right 也不影响其位置。
+    本容器用固定宽度 + QHBoxLayout 的 contentsMargins 右侧留白，
+    让内部小按钮左移，使 × 图标落在文字与 tab 右边界之间。
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(28, 22)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(4, 1, 10, 1)
+        layout.setSpacing(0)
+
+        self._btn = QToolButton()
+        self._btn.setObjectName("tabCloseInnerBtn")
+        self._btn.setFixedSize(15, 16)
+        self._btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn.setText("×")
+        self._btn.setStyleSheet(
+            "#tabCloseInnerBtn { border: none; background: transparent; border-radius: 2px; padding: 0; }"
+            "#tabCloseInnerBtn:hover { background: rgba(128,128,128,90); }"
+        )
+        layout.addWidget(self._btn)
+        layout.addStretch()
+
+        self._btn.clicked.connect(self._on_clicked)
+
+    def _on_clicked(self):
+        tab_bar = self.parent()
+        while tab_bar is not None and not isinstance(tab_bar, QTabBar):
+            tab_bar = tab_bar.parent()
+        if tab_bar is None:
+            return
+        for i in range(tab_bar.count()):
+            if tab_bar.tabButton(i, QTabBar.ButtonPosition.RightSide) is self:
+                tab_widget = tab_bar.parent()
+                while tab_widget is not None and not isinstance(tab_widget, QTabWidget):
+                    tab_widget = tab_widget.parent()
+                if tab_widget is not None and hasattr(tab_widget, '_on_tab_close_requested'):
+                    tab_widget._on_tab_close_requested(i)
+                return
+
+
+# ════════════════════════════════════════════════════════
 #  EditorTabWidget
 # ════════════════════════════════════════════════════════
 
@@ -244,6 +295,11 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         # ── 查找替换栏（嵌入在标签内容上方） ──
         # 不在这里创建，而是由 main_window 在 editor_container 中创建
         self._find_bar: Optional[FindReplaceBar] = None
+
+    def tabInserted(self, index):
+        super().tabInserted(index)
+        btn = _TabCloseButton(self)
+        self.tabBar().setTabButton(index, QTabBar.ButtonPosition.RightSide, btn)
 
     def set_find_bar(self, find_bar: FindReplaceBar):
         """设置外部传入的查找替换栏"""
@@ -710,20 +766,57 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
     def _apply_theme_colors(self, colors):
         self.setStyleSheet(f"""
-            QTabWidget::pane {{ border: none; }}
-            QTabBar::tab {{
-                padding: 8px 15px; margin-right: 2px;
-                background-color: {colors.surface}; border: 1px solid {colors.border};
-                border-bottom: none; border-top-left-radius: 4px;
-                border-top-right-radius: 4px;
-                color: {colors.text_secondary};
-            }}
-            QTabBar::tab:selected {{
-                background-color: {colors.card}; border-bottom: 1px solid {colors.card};
-                color: {colors.text_primary};
-            }}
-            QTabBar::tab:hover {{ background-color: {colors.primary_light}; }}
-        """)
+    QTabWidget {{
+        background-color: {colors.surface};
+        border: none;
+    }}
+
+    QTabWidget::pane {{
+        background-color: {colors.editor_bg};
+        border: none;
+        top: -1px;
+    }}
+
+    QTabBar {{
+        background-color: {colors.surface};
+        border: none;
+    }}
+
+    QTabBar::tab {{
+        padding: 8px 15px;
+        margin-right: 2px;
+        background-color: {colors.surface};
+        border: 1px solid {colors.border};
+        border-bottom: none;
+        border-top-left-radius: 4px;
+        border-top-right-radius: 4px;
+        color: {colors.text_secondary};
+    }}
+
+    QTabBar::tab:selected {{
+        background-color: {colors.card};
+        border-color: {colors.border};
+        border-bottom: 1px solid {colors.card};
+        color: {colors.text_primary};
+    }}
+
+    QTabBar::tab:hover:!selected {{
+        background-color: {colors.primary_light};
+        color: {colors.text_primary};
+    }}
+
+    QTabBar QToolButton {{
+        background-color: {colors.surface};
+        color: {colors.text_primary};
+        border: 1px solid {colors.border};
+        border-radius: 3px;
+        margin: 1px;
+    }}
+
+    QTabBar QToolButton:hover {{
+        background-color: {colors.primary_light};
+    }}
+    """)
 
     def _on_tab_close_requested(self, index: int):
         self._close_tab(index)

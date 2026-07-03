@@ -806,6 +806,7 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self._base_path = path
 
     def _on_load_finished(self, ok):
+        get_logger(__name__).info("[LOAD] loadFinished ok=%s", ok)
         if ok:
             self._html_template_loaded = True
 
@@ -904,26 +905,31 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
     # ──────────── 核心渲染 ────────────
 
     def _update_preview(self):
-        text = self.editor.toPlainText()
+        try:
+            text = self.editor.toPlainText()
 
-        if self._render_cache and is_enabled("markdown_incremental"):
-            html_content = self._render_cache.render(text)
-        elif HAS_MARKDOWN_IT or HAS_MARKDOWN:
-            html_content = self._render_markdown_with_source_map(text)
-        else:
-            html_content = self._basic_md_to_html(text)
+            if self._render_cache and is_enabled("markdown_incremental"):
+                html_content = self._render_cache.render(text)
+            elif HAS_MARKDOWN_IT or HAS_MARKDOWN:
+                html_content = self._render_markdown_with_source_map(text)
+            else:
+                html_content = self._basic_md_to_html(text)
 
-        if self._async_renderer and is_enabled("async_highlight"):
-            html_content = self._process_code_blocks_async(html_content)
-        else:
-            html_content = self._process_code_blocks(html_content)
+            if self._async_renderer and is_enabled("async_highlight"):
+                html_content = self._process_code_blocks_async(html_content)
+            else:
+                html_content = self._process_code_blocks(html_content)
 
-        html_content = self._resolve_local_images(html_content)
+            html_content = self._resolve_local_images(html_content)
 
-        # 包裹折叠 section（编辑器的折叠状态同步到预览）
-        html_content = self._wrap_fold_sections(html_content, text)
+            # 包裹折叠 section（编辑器的折叠状态同步到预览）
+            html_content = self._wrap_fold_sections(html_content, text)
 
-        self._push_to_preview(html_content)
+            self._push_to_preview(html_content)
+        except Exception:
+            from ..utils.logger import get_logger
+            get_logger(__name__).exception("预览渲染异常")
+
 
     def _push_to_preview(self, html_content: str):
         """把渲染好的 HTML 推送到预览，供 _update_preview / _on_async_highlight_done 共用。
@@ -932,6 +938,11 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
           因此保留滚动位置)；
         - 否则：整页 setHtml(首次加载 / QTextBrowser)。
         """
+        get_logger(__name__).info(
+            "[PUSH] webengine=%s renderer=%s tpl_loaded=%s html_len=%d",
+            HAS_WEBENGINE, type(self.preview).__name__,
+            self._html_template_loaded, len(html_content),
+        )
         if isinstance(self.preview, PreviewBrowser):
             self.preview.set_code_blocks(self._code_blocks)
 
@@ -965,13 +976,16 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             theme_engine = getattr(self, '_theme_engine', None)
             is_dark = bool(theme_engine and theme_engine.get_active_theme().is_dark)
             template = _get_dark_preview_template() if is_dark else PREVIEW_HTML_TEMPLATE
-            full_html = template.format(content=html_content)
+            template = template.replace("{{", "{").replace("}}", "}")
+            full_html = template.replace("{content}", html_content)
+            get_logger(__name__).info("[PUSH] full setHtml is_dark=%s full_len=%d", is_dark, len(full_html))
+            import tempfile
+            _tmp_path = os.path.join(tempfile.gettempdir(), "panzernote_preview_debug.html")
+            with open(_tmp_path, "w", encoding="utf-8") as _f:
+                _f.write(full_html)
+            get_logger(__name__).info("[PUSH] wrote debug HTML to %s", _tmp_path)
             if HAS_WEBENGINE and isinstance(self.preview, QWebEngineView):
-                if self._base_path:
-                    base_url = QUrl.fromLocalFile(self._base_path + '/')
-                    self.preview.setHtml(full_html, base_url)
-                else:
-                    self.preview.setHtml(full_html)
+                self.preview.setUrl(QUrl.fromLocalFile(_tmp_path))
             elif isinstance(self.preview, PreviewBrowser):
                 self.preview.setHtml(full_html)
 

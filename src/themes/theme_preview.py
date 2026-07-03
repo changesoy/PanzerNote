@@ -102,6 +102,9 @@ class ThemePreviewWidget(QWidget):
                 if w is not None:
                     w.deleteLater()
 
+        # 当前活动主题的边框色，用于色块描边（避免写死 #999）
+        active_border = self._engine.get_active_theme().colors.border
+
         info_group = QGroupBox("主题信息")
         info_layout = QFormLayout()
         info_layout.addRow("名称:", QLabel(theme.name))
@@ -147,7 +150,7 @@ class ThemePreviewWidget(QWidget):
             swatch.setFixedSize(40, 20)
             swatch.setStyleSheet(
                 f"background-color: {color_hex}; "
-                f"border: 1px solid #999; border-radius: 2px;"
+                f"border: 1px solid {active_border}; border-radius: 2px;"
             )
             hex_label = QLabel(color_hex)
             hex_label.setFont(QFont("Consolas", 9))
@@ -179,7 +182,7 @@ class ThemePreviewWidget(QWidget):
             swatch.setFixedSize(40, 20)
             swatch.setStyleSheet(
                 f"background-color: {color_hex}; "
-                f"border: 1px solid #999; border-radius: 2px;"
+                f"border: 1px solid {active_border}; border-radius: 2px;"
             )
             hex_label = QLabel(color_hex)
             hex_label.setFont(QFont("Consolas", 9))
@@ -212,7 +215,7 @@ class ThemePreviewWidget(QWidget):
             swatch.setFixedSize(40, 20)
             swatch.setStyleSheet(
                 f"background-color: {color_hex}; "
-                f"border: 1px solid #999; border-radius: 2px;"
+                f"border: 1px solid {active_border}; border-radius: 2px;"
             )
             hex_label = QLabel(color_hex)
             hex_label.setFont(QFont("Consolas", 9))
@@ -241,7 +244,7 @@ class ThemePreviewWidget(QWidget):
             swatch.setFixedSize(40, 20)
             swatch.setStyleSheet(
                 f"background-color: {color_hex}; "
-                f"border: 1px solid #999; border-radius: 2px;"
+                f"border: 1px solid {active_border}; border-radius: 2px;"
             )
             label = QLabel(label_text)
             hex_label = QLabel(color_hex)
@@ -296,4 +299,16 @@ class ThemePreviewDialog(ThemeAwareMixin, QDialog):
         self.theme_applied.emit(theme_id)
 
     def _apply_theme_colors(self, colors):
-        pass
+        self.setStyleSheet(f"""
+            QScrollArea {{ background-color: {colors.dialog_bg}; border: none; }}
+            QScrollArea > QWidget > QWidget {{ background-color: {colors.dialog_bg}; }}
+            QListWidget {{
+                background-color: {colors.card};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border};
+            }}
+            QListWidget::item:selected {{
+                background-color: {colors.primary_light};
+                color: {colors.text_primary};
+            }}
+        """)

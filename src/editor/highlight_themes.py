@@ -39,6 +39,8 @@ if HAS_PYGMENTS:
             "name": "VSCode Dark+",
             "description": "仿 VSCode Dark+ 暗色主题",
             "styles": {
+                # ── 根默认色 ── 覆盖所有未显式着色的 token（避免裸文本在暗色下退回黑色）
+                Token:                          {"color": "#D4D4D4"},
                 # ── 关键字 ── 紫色
                 Token.Keyword:                  {"color": "#C586C0"},
                 Token.Keyword.Constant:         {"color": "#C586C0"},
@@ -128,6 +130,8 @@ if HAS_PYGMENTS:
             "name": "PyCharm Light",
             "description": "仿 JetBrains IntelliJ / PyCharm Light 主题",
             "styles": {
+                # ── 根默认色 ── 覆盖所有未显式着色的 token（轻色主题下保持稳定的深色文本）
+                Token:                          {"color": "#2b2b2b"},
                 # ── 关键字 ── 深蓝加粗
                 Token.Keyword:                  {"color": "#0033B3", "bold": True},
                 Token.Keyword.Constant:         {"color": "#0033B3", "bold": True},
@@ -395,7 +399,10 @@ def highlight_code_html(code: str, language: str, theme_name=None) -> str:
     if not HAS_PYGMENTS:
         return _html.escape(code)
 
-    StyleClass = _get_pygments_style_class(theme_name)
+    try:
+        StyleClass = _get_pygments_style_class(theme_name)
+    except Exception:
+        return _html.escape(code)
     if StyleClass is None:
         return _html.escape(code)
 

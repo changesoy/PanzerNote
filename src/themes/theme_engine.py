@@ -311,8 +311,15 @@ QMenu::item:selected {{
 """)
 
         parts.append(f"""
+QTabWidget {{
+    background-color: {c.background};
+}}
 QTabWidget::pane {{
+    background-color: {c.background};
     border: 1px solid {c.border};
+}}
+QTabBar {{
+    background-color: {c.background};
 }}
 QTabBar::tab {{
     background-color: {c.surface};
@@ -334,6 +341,16 @@ QTreeView {{
 }}
 QTreeView::item:selected {{
     background-color: {c.primary_light};
+}}
+QListWidget {{
+    background-color: {c.card};
+    color: {c.text_primary};
+    border: 1px solid {c.border};
+    outline: none;
+}}
+QListWidget::item:selected {{
+    background-color: {c.primary_light};
+    color: {c.text_primary};
 }}
 """)
 

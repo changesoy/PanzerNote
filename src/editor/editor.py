@@ -243,6 +243,13 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
                 self.set_file_type(self._filepath_or_ext)
         self._highlight_current_line()
 
+        # 更新无父顶层补全弹窗的主题
+        if hasattr(self, "_completion_popup") and self._completion_popup is not None:
+            self._completion_popup.apply_theme_colors(colors)
+            font_family = self.config.get_editor_setting("font_family", "Microsoft YaHei")
+            font_size = self.config.get_editor_setting("font_size", 12)
+            self._completion_popup.apply_font(font_family, font_size)
+
     def _show_context_menu(self, position):
         """显示中文右键菜单"""
         menu = QMenu(self)

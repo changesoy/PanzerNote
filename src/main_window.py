@@ -44,6 +44,7 @@ from .editor.file_open_service import FileOpenService, FileOpenSource, FileOpenS
 from .plugins.plugin_manager import PluginManager
 from .themes.theme_engine import ThemeEngine
 from .themes.theme_preview import ThemePreviewDialog
+from .themes.theme_aware_mixin import _update_title_bar_theme, _fix_separator_lines
 from .ui.command_palette import CommandPalette
 from .editor.find_in_files_panel import FindInFilesPanel
 from .utils.logger import get_logger
@@ -1308,7 +1309,7 @@ class MainWindow(QMainWindow):
 
     def _show_editor_settings(self):
         """显示记事本设置"""
-        dialog = EditorSettingsDialog(self.config, self)
+        dialog = EditorSettingsDialog(self.config, self.theme_engine, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             settings = dialog.get_settings()
             editor = settings["editor"]
@@ -1643,8 +1644,10 @@ class MainWindow(QMainWindow):
         self.line1.setStyleSheet(f"background-color: {colors.border};")
         self.line2.setStyleSheet(f"background-color: {colors.border};")
 
+        # 修复所有子控件中的 QFrame 分隔线颜色
+        _fix_separator_lines(self, colors.border)
         # Windows 下设置标题栏暗色模式（DWM API）
-        self._update_title_bar_theme(theme.is_dark)
+        _update_title_bar_theme(self, theme.is_dark)
 
     def _update_title_bar_theme(self, is_dark: bool):
         """更新当前主窗口原生标题栏深/浅色。"""
@@ -1697,5 +1700,5 @@ class MainWindow(QMainWindow):
 
     def _show_plugin_manager(self):
         from .plugins.plugin_manager_dialog import PluginManagerDialog
-        dialog = PluginManagerDialog(self.plugin_manager, self.secretary, parent=self)
+        dialog = PluginManagerDialog(self.plugin_manager, self.secretary, theme_engine=self.theme_engine, parent=self)
         dialog.exec()

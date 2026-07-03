@@ -484,3 +484,6 @@ class ThemePreviewDialog(ThemeAwareMixin, QDialog):
 
     def _on_theme_applied(self, theme_id: str):
         self.theme_applied.emit(theme_id)
+
+    def _apply_theme_colors(self, colors):
+        pass

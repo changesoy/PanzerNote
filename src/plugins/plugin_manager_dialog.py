@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
 
 from ..themes.theme_aware_mixin import ThemeAwareMixin
 from ..utils.error_handler import ErrorHandler, ErrorCategory
+from ..themes.theme_aware_mixin import ThemeAwareMixin
 
 
 class PluginManagerDialog(ThemeAwareMixin, QDialog):
@@ -24,6 +25,8 @@ class PluginManagerDialog(ThemeAwareMixin, QDialog):
         self.setWindowTitle("插件管理")
         self.setMinimumSize(500, 400)
         self._init_ui()
+        if theme_engine:
+            self._init_theme(theme_engine)
 
         if resolved_theme_engine:
             self._init_theme(resolved_theme_engine)
@@ -250,3 +253,6 @@ class PluginManagerDialog(ThemeAwareMixin, QDialog):
                 self._refresh_list()
             except Exception as e:
                 ErrorHandler.show_from_exception(e, ErrorCategory.GENERAL, "热加载失败")
+
+    def _apply_theme_colors(self, colors):
+        pass

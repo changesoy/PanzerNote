@@ -27,7 +27,7 @@ class ShortcutEditDialog(ThemeAwareMixin, QDialog):
     shortcut_changed = pyqtSignal(str, str)
 
     def __init__(self, action_id: str, action_name: str,
-                 current_shortcut: str, parent=None):
+                 current_shortcut: str, theme_engine=None, parent=None):
         super().__init__(parent)
         self._action_id = action_id
         self._action_name = action_name
@@ -383,7 +383,7 @@ class ShortcutPanel(ThemeAwareMixin, QWidget):
         name = item.text(0)
         current_shortcut = self._manager.get_shortcut(action_id) or ""
 
-        dialog = ShortcutEditDialog(action_id, name, current_shortcut, self)
+        dialog = ShortcutEditDialog(action_id, name, current_shortcut, self._theme_engine, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             new_shortcut = dialog.get_new_shortcut()
             if new_shortcut == "__reset__":

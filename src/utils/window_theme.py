@@ -12,7 +12,7 @@ import ctypes
 from ctypes import wintypes
 from typing import Callable, Optional
 
-from PyQt6.QtCore import QObject, QEvent, QTimer
+from PyQt6.QtCore import QObject, QEvent, QTimer, Qt
 from PyQt6.QtWidgets import QApplication, QWidget
 
 
@@ -56,6 +56,10 @@ class NativeTitleBarThemeFilter(QObject):
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
         if event.type() == QEvent.Type.Show and isinstance(obj, QWidget) and obj.isWindow():
+            # 跳过无边框窗口（如 CompletionPopup），它们没有原生标题栏
+            if obj.windowFlags() & Qt.WindowType.FramelessWindowHint:
+                return super().eventFilter(obj, event)
+
             widget = obj
 
             def apply_later() -> None:

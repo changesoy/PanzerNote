@@ -1654,7 +1654,8 @@ class MainWindow(QMainWindow):
         app = QApplication.instance()
         if app is not None:
             for widget in app.topLevelWidgets():
-                apply_native_dark_titlebar(widget, is_dark)
+                if widget.isVisible():
+                    apply_native_dark_titlebar(widget, is_dark)
 
     def _show_theme_dialog(self):
         dialog = ThemePreviewDialog(self.theme_engine, self)

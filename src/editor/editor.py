@@ -144,7 +144,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self._fold_timer.timeout.connect(self._refresh_folding)
 
         self._completion_provider = CompletionProvider()
-        self._completion_popup = CompletionPopup(None)  # 无父窗口，避免被 viewport 裁剪
+        self._completion_popup = CompletionPopup(theme_engine=self._theme_engine)  # 无父窗口，避免被 viewport 裁剪
         self._completion_popup.item_selected.connect(self._apply_completion)
 
         self._selection_manager = ExtraSelectionManager(self)

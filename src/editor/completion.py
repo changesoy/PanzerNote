@@ -13,11 +13,13 @@ from PyQt6.QtCore import QPoint, Qt, pyqtSignal
 from PyQt6.QtGui import QKeyEvent
 from PyQt6.QtWidgets import QListWidget, QListWidgetItem, QWidget
 
+from ..themes.theme_aware_mixin import ThemeAwareMixin
+
 # 词语提取正则：字母/数字/下划线 + 中日韩统一表意文字
 _WORD_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf]|[a-zA-Z0-9_]{2,}")
 
 
-class CompletionPopup(QListWidget):
+class CompletionPopup(ThemeAwareMixin, QListWidget):
     """自动补全弹框。
 
     以 ToolTip 形式浮于编辑器上方，不抢夺焦点。
@@ -25,7 +27,7 @@ class CompletionPopup(QListWidget):
 
     item_selected = pyqtSignal(str)
 
-    def __init__(self, parent: QWidget):
+    def __init__(self, theme_engine=None, parent=None):
         super().__init__(parent)
         self.setWindowFlags(
             Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint
@@ -35,6 +37,28 @@ class CompletionPopup(QListWidget):
         self.setMinimumWidth(200)
         self._is_visible = False
         self.itemDoubleClicked.connect(self._on_accept)
+
+        if theme_engine:
+            self._init_theme(theme_engine)
+
+    def _apply_theme_colors(self, colors):
+        self.setStyleSheet(f"""
+            QListWidget {{
+                background-color: {colors.card};
+                color: {colors.text_primary};
+                border: 1px solid {colors.border};
+                outline: none;
+            }}
+
+            QListWidget::item {{
+                padding: 2px 8px;
+            }}
+
+            QListWidget::item:selected {{
+                background-color: {colors.primary_light};
+                color: {colors.text_primary};
+            }}
+        """)
 
     # ---- 显示控制 ----
 

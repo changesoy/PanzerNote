@@ -50,6 +50,10 @@ from .utils.logger import get_logger
 from .utils.error_handler import ErrorHandler, ErrorCategory
 from .utils.feature_flags import is_enabled
 from .utils.dpi_helper import scale, scale_size
+from .utils.window_theme import (
+    apply_native_dark_titlebar,
+    install_native_titlebar_theme_filter,
+)
 
 
 class MainWindow(QMainWindow):
@@ -80,6 +84,13 @@ class MainWindow(QMainWindow):
         self.theme_engine = ThemeEngine(config)
         self.theme_engine.load_external_themes()
         self.theme_engine.initialize_active_theme()
+
+        self._native_titlebar_filter = install_native_titlebar_theme_filter(
+            QApplication.instance(),
+            lambda: self.theme_engine.get_active_theme().is_dark,
+            parent=self,
+        )
+
         self.plugin_manager = PluginManager(config)
         self.plugin_manager.scan_plugins()
         self._register_plugin_callbacks()
@@ -596,6 +607,18 @@ class MainWindow(QMainWindow):
             self.resource_bar.refresh()
 
     # === 事件处理 ===
+
+    def showEvent(self, event):
+        super().showEvent(event)
+
+        def apply_later() -> None:
+            try:
+                theme = self.theme_engine.get_active_theme()
+                self._update_title_bar_theme(theme.is_dark)
+            except Exception:
+                pass
+
+        QTimer.singleShot(0, apply_later)
 
     def changeEvent(self, event: Optional[QEvent]):
         """窗口状态变化事件"""
@@ -1624,26 +1647,14 @@ class MainWindow(QMainWindow):
         self._update_title_bar_theme(theme.is_dark)
 
     def _update_title_bar_theme(self, is_dark: bool):
-        """Windows 下通过 DWM API 设置标题栏暗色模式"""
-        import sys
-        if sys.platform != "win32":
-            return
-        try:
-            import ctypes
-            from ctypes import wintypes
+        """更新当前主窗口原生标题栏深/浅色。"""
+        apply_native_dark_titlebar(self, is_dark)
 
-            DWMWA_USE_IMMERSIVE_DARK_MODE = 20
-            hwnd = int(self.winId())
-
-            value = ctypes.c_int(1 if is_dark else 0)
-            ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                hwnd,
-                DWMWA_USE_IMMERSIVE_DARK_MODE,
-                ctypes.byref(value),
-                ctypes.sizeof(value),
-            )
-        except Exception:
-            pass
+        # 运行时切换主题时，顺手更新当前已经存在的顶层窗口。
+        app = QApplication.instance()
+        if app is not None:
+            for widget in app.topLevelWidgets():
+                apply_native_dark_titlebar(widget, is_dark)
 
     def _show_theme_dialog(self):
         dialog = ThemePreviewDialog(self.theme_engine, self)

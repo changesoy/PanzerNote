@@ -972,7 +972,62 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             theme_engine = getattr(self, '_theme_engine', None)
             is_dark = bool(theme_engine and theme_engine.get_active_theme().is_dark)
             template = _get_dark_preview_template() if is_dark else PREVIEW_HTML_TEMPLATE
-            full_html = template.format(content=html_content)
+            try:
+                full_html = template.format(content=html_content)
+            except Exception as exc:
+                get_logger(__name__).error(
+                    "Markdown preview template format failed: %s",
+                    exc,
+                    exc_info=True,
+                )
+
+                if is_dark:
+                    fallback_bg = "#1E1E1E"
+                    fallback_text = "#D4D4D4"
+                    fallback_code_bg = "#2D2D30"
+                    fallback_border = "#3E3E42"
+                else:
+                    fallback_bg = "#FFFFFF"
+                    fallback_text = "#2B2B2B"
+                    fallback_code_bg = "#EDF3FA"
+                    fallback_border = "#D9D9D9"
+
+                full_html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+body {{
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+                 "Microsoft YaHei UI", "Microsoft YaHei", Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.7;
+    margin: 0;
+    padding: 12px 20px 40px 20px;
+    background: {fallback_bg};
+    color: {fallback_text};
+    word-wrap: break-word;
+}}
+pre {{
+    background: {fallback_code_bg};
+    color: {fallback_text};
+    border: 1px solid {fallback_border};
+    border-radius: 6px;
+    padding: 12px 14px;
+    overflow: auto;
+}}
+code {{
+    font-family: Consolas, "Courier New", monospace;
+}}
+a {{
+    color: #569CD6;
+}}
+</style>
+</head>
+<body>
+{html_content}
+</body>
+</html>"""
             if HAS_WEBENGINE and isinstance(self.preview, QWebEngineView):
                 if self._base_path:
                     base_url = QUrl.fromLocalFile(self._base_path + '/')

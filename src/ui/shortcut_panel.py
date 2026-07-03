@@ -22,7 +22,7 @@ from ..utils.dpi_helper import scale, scale_stylesheet
 from ..themes.theme_aware_mixin import ThemeAwareMixin
 
 
-class ShortcutEditDialog(QDialog):
+class ShortcutEditDialog(ThemeAwareMixin, QDialog):
 
     shortcut_changed = pyqtSignal(str, str)
 
@@ -84,6 +84,52 @@ class ShortcutEditDialog(QDialog):
 
         self._new_shortcut = current_shortcut
 
+        theme_engine = getattr(parent, "_theme_engine", None)
+        if theme_engine:
+            self._init_theme(theme_engine)
+
+    def _apply_theme_colors(self, colors):
+        self.setStyleSheet(scale_stylesheet(f"""
+        QDialog {{
+            background-color: {colors.dialog_bg};
+            color: {colors.text_primary};
+        }}
+
+        QLabel {{
+            color: {colors.text_primary};
+        }}
+
+        QKeySequenceEdit {{
+            background-color: {colors.card};
+            color: {colors.text_primary};
+            border: 1px solid {colors.border};
+            border-radius: 4px;
+            padding: 6px 8px;
+            selection-background-color: {colors.primary_light};
+        }}
+
+        QKeySequenceEdit:focus {{
+            border-color: {colors.primary};
+        }}
+
+        QPushButton {{
+            background-color: {colors.primary};
+            color: white;
+            border: 1px solid {colors.primary_dark};
+            border-radius: 4px;
+            padding: 6px 14px;
+            min-height: 24px;
+        }}
+
+        QPushButton:hover {{
+            background-color: {colors.primary_dark};
+        }}
+
+        QPushButton:pressed {{
+            background-color: {colors.primary_dark};
+        }}
+        """))
+
     def _on_reset(self):
         self._key_edit.clear()
         self._new_shortcut = "__reset__"
@@ -126,6 +172,7 @@ class ShortcutPanel(ThemeAwareMixin, QWidget):
         self._edit_callback = callback
 
     def _init_ui(self):
+        self.setObjectName("ShortcutPanel")
         self.setWindowTitle("快捷键提示")
         self.setMinimumSize(scale(500), scale(400))
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowStaysOnTopHint)
@@ -138,14 +185,16 @@ class ShortcutPanel(ThemeAwareMixin, QWidget):
 
         header_layout = QHBoxLayout()
 
-        title = QLabel("快捷键列表")
-        title.setFont(QFont("Microsoft YaHei", 14, QFont.Weight.Bold))
-        header_layout.addWidget(title)
+        self._title_label = QLabel("快捷键列表")
+        self._title_label.setObjectName("ShortcutTitleLabel")
+        self._title_label.setFont(QFont("Microsoft YaHei", 14, QFont.Weight.Bold))
+        header_layout.addWidget(self._title_label)
 
         header_layout.addStretch()
 
-        hint = QLabel("Ctrl+/ 打开/关闭此面板")
-        header_layout.addWidget(hint)
+        self._hint_label = QLabel("Ctrl+/ 打开/关闭此面板")
+        self._hint_label.setObjectName("ShortcutHintLabel")
+        header_layout.addWidget(self._hint_label)
 
         layout.addLayout(header_layout)
 
@@ -158,6 +207,7 @@ class ShortcutPanel(ThemeAwareMixin, QWidget):
         layout.addLayout(search_layout)
 
         self._tree = QTreeWidget()
+        self._tree.setObjectName("ShortcutTree")
         self._tree.setHeaderLabels(["功能", "快捷键"])
         self._tree.setAlternatingRowColors(True)
         self._tree.setIndentation(scale(20))
@@ -171,30 +221,109 @@ class ShortcutPanel(ThemeAwareMixin, QWidget):
         self._tree.itemDoubleClicked.connect(self._on_item_double_clicked)
         layout.addWidget(self._tree)
 
-        footer = QLabel("双击快捷键项可自定义 | 灰色项为系统级快捷键")
-        layout.addWidget(footer)
+        self._footer_label = QLabel("双击快捷键项可自定义 | 灰色项为系统级快捷键")
+        self._footer_label.setObjectName("ShortcutFooterLabel")
+        layout.addWidget(self._footer_label)
 
         self._populate_tree()
 
     def _apply_theme_colors(self, colors):
-        self._tree.setStyleSheet(scale_stylesheet(f"""
-            QTreeWidget {{
-                font-family: "Microsoft YaHei";
-                font-size: 13px;
-                border: 1px solid {colors.border};
-                border-radius: 4px;
-            }}
-            QTreeWidget::item {{
-                padding: 4px 8px;
-                border-bottom: 1px solid {colors.divider};
-            }}
-            QTreeWidget::item:hover {{
-                background-color: {colors.primary_light};
-            }}
-            QTreeWidget::item:selected {{
-                background-color: {colors.editor_selection};
-            }}
+        self.setStyleSheet(scale_stylesheet(f"""
+        QWidget#ShortcutPanel {{
+            background-color: {colors.dialog_bg};
+            color: {colors.text_primary};
+        }}
+
+        QLabel#ShortcutTitleLabel {{
+            color: {colors.text_primary};
+            background: transparent;
+        }}
+
+        QLabel#ShortcutHintLabel,
+        QLabel#ShortcutFooterLabel {{
+            color: {colors.text_secondary};
+            background: transparent;
+        }}
+
+        QLineEdit#ShortcutSearchInput {{
+            background-color: {colors.card};
+            color: {colors.text_primary};
+            border: 1px solid {colors.border};
+            border-radius: 4px;
+            padding: 6px 8px;
+            selection-background-color: {colors.primary_light};
+        }}
+
+        QLineEdit#ShortcutSearchInput:focus {{
+            border-color: {colors.primary};
+        }}
+
+        QTreeWidget#ShortcutTree {{
+            font-family: "Microsoft YaHei";
+            font-size: 13px;
+            background-color: {colors.card};
+            color: {colors.text_primary};
+            border: 1px solid {colors.border};
+            border-radius: 4px;
+            outline: none;
+            alternate-background-color: {colors.surface};
+        }}
+
+        QTreeWidget#ShortcutTree::item {{
+            color: {colors.text_primary};
+            padding: 4px 8px;
+            border-bottom: 1px solid {colors.divider};
+        }}
+
+        QTreeWidget#ShortcutTree::item:hover {{
+            background-color: {colors.surface};
+        }}
+
+        QTreeWidget#ShortcutTree::item:selected {{
+            background-color: {colors.editor_selection};
+            color: {colors.text_primary};
+        }}
+
+        QTreeWidget#ShortcutTree::branch {{
+            background-color: {colors.card};
+        }}
+
+        QHeaderView::section {{
+            background-color: {colors.surface};
+            color: {colors.text_primary};
+            border: none;
+            border-right: 1px solid {colors.border};
+            border-bottom: 1px solid {colors.border};
+            padding: 6px 8px;
+            font-weight: bold;
+        }}
+
+        QScrollBar:vertical {{
+            background-color: {colors.surface};
+            width: 12px;
+            margin: 0;
+        }}
+
+        QScrollBar::handle:vertical {{
+            background-color: {colors.border};
+            border-radius: 6px;
+            min-height: 20px;
+            margin: 2px;
+        }}
+
+        QScrollBar::handle:vertical:hover {{
+            background-color: {colors.text_disabled};
+        }}
+
+        QScrollBar::add-line:vertical,
+        QScrollBar::sub-line:vertical {{
+            height: 0;
+        }}
         """))
+
+        self._tree.viewport().setStyleSheet(
+            f"background-color: {colors.card}; color: {colors.text_primary};"
+        )
 
     def _populate_tree(self, filter_text: str = ""):
         self._tree.clear()

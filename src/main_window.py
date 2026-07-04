@@ -288,15 +288,32 @@ class MainWindow(QMainWindow):
             on_idle_reward=self._on_idle_reward,
         )
 
-    def _restore_state(self):
-        """恢复窗口状态"""
+    def _restore_window_geometry(self) -> None:
+        """在窗口不可见状态下恢复几何和最大化状态。
+
+        最大化场景：预缩放控件树到屏幕可用尺寸，确保 showMaximized()
+        首帧 paint 时 backing store 已是正确尺寸，消除视觉撕裂。
+        """
         width = self.config.get_window_setting("width", 1200)
         height = self.config.get_window_setting("height", 800)
         x = self.config.get_window_setting("x", 100)
         y = self.config.get_window_setting("y", 100)
 
-        self.resize(width, height)
-        self.move(x, y)
+        if self._initial_maximized:
+            screen = QApplication.screenAt(QPoint(x, y)) or QApplication.primaryScreen()
+            if screen:
+                avail = screen.availableGeometry()
+                self.resize(avail.width(), avail.height())
+            state = self.windowState()
+            state &= ~Qt.WindowState.WindowMinimized
+            state |= Qt.WindowState.WindowMaximized
+            self.setWindowState(state)
+        else:
+            self.setGeometry(x, y, width, height)
+
+    def _restore_state(self):
+        """恢复窗口状态"""
+        self._restore_window_geometry()
 
         self._calculate_offline_rewards()
         self._check_daily_checkin()
@@ -684,12 +701,13 @@ class MainWindow(QMainWindow):
 
         确保 MainWindow.__init__() 期间窗口始终不可见，
         第一个同步恢复的文件在主窗口显示前完成控件挂载。
+        最大化场景使用 showMaximized() 让 Qt 在一步内以最终
+        尺寸完成首次渲染，避免普通尺寸 → 最大化尺寸的两段式跳变。
         """
         if self._presented:
             return
 
         self._presented = True
-
         if self._initial_maximized:
             self.showMaximized()
         else:

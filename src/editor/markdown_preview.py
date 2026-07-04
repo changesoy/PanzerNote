@@ -272,6 +272,31 @@ li input[type="checkbox"] {{
     user-select: none;
     pointer-events: none;
 }}
+
+.code-copy-btn {{
+    display: none;
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 26px;
+    height: 22px;
+    border: 1px solid rgba(128, 128, 128, 0.35);
+    border-radius: 3px;
+    background: rgba(128, 128, 128, 0.12);
+    font-size: 12px;
+    line-height: 20px;
+    padding: 0;
+    cursor: pointer;
+    z-index: 10;
+}}
+.code-copy-btn:hover {{
+    background: rgba(128, 128, 128, 0.25);
+    border-color: rgba(128, 128, 128, 0.55);
+}}
+.code-container:hover .code-copy-btn {{
+    display: block;
+}}
+
 pre code,
 .code-block,
 .code-block code,
@@ -520,6 +545,19 @@ window.updateFoldVisibility = function(collapsedLinesJson) {{
         }}
     }} catch(e) {{}}
 }};
+
+(function() {{
+    document.addEventListener('click', function(e) {{
+        var btn = e.target.closest('.code-copy-btn');
+        if (!btn) return;
+        e.stopPropagation();
+        var idx = btn.getAttribute('data-code-index');
+        if (idx == null) return;
+        document.title = '__pncopy__:' + idx;
+        btn.textContent = '\\u2714';
+        setTimeout(function() {{ btn.textContent = '\\ud83d\\udccb'; }}, 800);
+    }});
+}})();
 </script>
 </body>
 </html>"""
@@ -1480,6 +1518,8 @@ a {{
 
         return (
             f'<div class="code-container src-line"{line_attr}>'
+            f'<button class="code-copy-btn" data-code-index="{index}"'
+            f' title="复制到剪贴板">\U0001f4cb</button>'
             f'<span class="code-marker">{sm}</span>'
             f'<pre class="code-pre"><code class="code-block">{code_html}</code></pre>'
             f'<span class="code-marker">{em}</span>'
@@ -1646,8 +1686,20 @@ a {{
     # ──────────── 预览 -> 编辑器 反向同步 ────────────
 
     def _on_preview_title(self, title: str):
-        """JS 经 document.title 回传 "__pzsync__:<行号>:<nonce>"，据此滚动编辑器。"""
-        if not title or not title.startswith("__pzsync__:"):
+        """JS 经 document.title 回传消息，据此滚动编辑器或执行复制。"""
+        if not title:
+            return
+        if title.startswith("__pncopy__:"):
+            try:
+                idx = int(title.split(":")[1])
+                if 0 <= idx < len(self._code_blocks):
+                    cb = QApplication.clipboard()
+                    if cb is not None:
+                        cb.setText(self._code_blocks[idx])
+            except (ValueError, IndexError):
+                pass
+            return
+        if not title.startswith("__pzsync__:"):
             return
         parts = title.split(":")
         if len(parts) < 2:

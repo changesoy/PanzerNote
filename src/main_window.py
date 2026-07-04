@@ -34,6 +34,7 @@ from .game.resource_bar import ResourceBar
 from .game.game_sidebar import GameSidebar
 from .editor.file_tree import FileTreeWidget
 from .editor.editor_tabs import EditorTabWidget
+from .editor.webengine_runtime import WebEngineRuntime
 from .game.secretary_widget import SecretaryWidget
 from .editor.status_bar import StatusBarWidget
 from .editor.find_replace import FindReplaceBar
@@ -90,6 +91,8 @@ class MainWindow(QMainWindow):
             lambda: self.theme_engine.get_active_theme().is_dark,
             parent=self,
         )
+
+        self.webengine_runtime = WebEngineRuntime(self)
 
         # 保存待恢复的最大化状态（不在 __init__ 期间显示窗口）
         self._initial_maximized = bool(
@@ -209,7 +212,11 @@ class MainWindow(QMainWindow):
         self.editor_splitter.setChildrenCollapsible(False)
 
         # 编辑器标签页
-        self.editor_tabs = EditorTabWidget(self.config, theme_engine=self.theme_engine)
+        self.editor_tabs = EditorTabWidget(
+            self.config,
+            theme_engine=self.theme_engine,
+            webengine_runtime=self.webengine_runtime,
+        )
         self.editor_tabs.set_find_bar(self.find_replace_bar)
         self.editor_tabs.current_changed.connect(self._on_tab_changed)
         self.editor_tabs.content_modified.connect(self._on_content_modified)
@@ -225,6 +232,8 @@ class MainWindow(QMainWindow):
         editor_layout.addWidget(self.editor_splitter)
 
         self.splitter.addWidget(self.editor_container)
+
+        self.webengine_runtime.prepare_startup_anchor(self.editor_container)
 
         # 设置分割器初始大小
         sidebar_width = self.config.get_view_setting("sidebar_width", 200)
@@ -1195,7 +1204,11 @@ class MainWindow(QMainWindow):
         if self._split_tabs:
             return
         self.editor_splitter.setOrientation(orientation)
-        split_tabs = EditorTabWidget(self.config, theme_engine=self.theme_engine)
+        split_tabs = EditorTabWidget(
+            self.config,
+            theme_engine=self.theme_engine,
+            webengine_runtime=self.webengine_runtime,
+        )
         split_tabs.set_find_bar(self.find_replace_bar)
         split_tabs.current_changed.connect(self._on_tab_changed)
         split_tabs.content_modified.connect(self._on_content_modified)

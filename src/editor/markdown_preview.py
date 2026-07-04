@@ -59,6 +59,7 @@ from ..utils.feature_flags import is_enabled
 from ..security.path_validator import PathValidator
 from ..themes.theme_aware_mixin import ThemeAwareMixin
 from .highlight_themes import highlight_code_html
+from .webengine_runtime import WebEngineRuntime
 
 # ════════════════════════════════════════════════════════
 #  正则 / 常量
@@ -759,10 +760,17 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
     包含左侧编辑器和右侧预览，提供与Editor相同的接口
     """
 
-    def __init__(self, config: Config, theme_engine=None, parent=None):
+    def __init__(
+        self,
+        config: Config,
+        theme_engine=None,
+        webengine_runtime: WebEngineRuntime | None = None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.config = config
         self._theme_engine = theme_engine
+        self._webengine_runtime = webengine_runtime
         self.tab_id = None
 
         self._code_blocks: list[str] = []
@@ -839,6 +847,13 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self.splitter.addWidget(self.preview)
         self.splitter.setSizes([500, 500])
         layout.addWidget(self.splitter)
+
+        if (
+            HAS_WEBENGINE
+            and isinstance(self.preview, QWebEngineView)
+            and self._webengine_runtime is not None
+        ):
+            self._webengine_runtime.notify_real_view_attached()
 
         # 防抖定时器
         self._preview_timer = QTimer(self)

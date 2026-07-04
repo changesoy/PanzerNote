@@ -36,6 +36,7 @@ from .find_replace import FindReplaceBar
 from .save_task_manager import SaveTaskManager, SaveState
 from .temp_session_manager import TempSessionManager
 from .eol_utils import detect_eol_from_bytes
+from .webengine_runtime import WebEngineRuntime
 
 
 # ════════════════════════════════════════════════════════
@@ -254,10 +255,17 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     word_count_updated = pyqtSignal()
     file_saved = pyqtSignal()
 
-    def __init__(self, config: Config, theme_engine=None, parent=None):
+    def __init__(
+        self,
+        config: Config,
+        theme_engine=None,
+        webengine_runtime: WebEngineRuntime | None = None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.config = config
         self._theme_engine = theme_engine
+        self._webengine_runtime = webengine_runtime
 
         self._tab_info: Dict[int, Dict] = {}
         self._next_tab_id = 0
@@ -474,7 +482,11 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         is_md = self._is_markdown_file(filepath)
 
         if is_md:
-            widget = MarkdownPreviewWidget(self.config, theme_engine=self._theme_engine)
+            widget = MarkdownPreviewWidget(
+                self.config,
+                theme_engine=self._theme_engine,
+                webengine_runtime=self._webengine_runtime,
+            )
             widget.editor.load_content(content)
             self._connect_editor_signals(widget.editor)
             widget.editor.set_file_type(filepath)

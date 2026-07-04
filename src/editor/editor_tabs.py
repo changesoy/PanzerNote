@@ -36,6 +36,7 @@ from .find_replace import FindReplaceBar
 from .save_task_manager import SaveTaskManager, SaveState
 from .temp_session_manager import TempSessionManager
 from .eol_utils import detect_eol_from_bytes
+from .webengine_runtime import WebEngineRuntime
 
 
 # ════════════════════════════════════════════════════════
@@ -254,10 +255,17 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     word_count_updated = pyqtSignal()
     file_saved = pyqtSignal()
 
-    def __init__(self, config: Config, theme_engine=None, parent=None):
+    def __init__(
+        self,
+        config: Config,
+        theme_engine=None,
+        webengine_runtime: WebEngineRuntime | None = None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.config = config
         self._theme_engine = theme_engine
+        self._webengine_runtime = webengine_runtime
 
         self._tab_info: Dict[int, Dict] = {}
         self._next_tab_id = 0
@@ -299,7 +307,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     def tabInserted(self, index):
         super().tabInserted(index)
         btn = _TabCloseButton(self)
-        self.tabBar().setTabButton(index, QTabBar.ButtonPosition.RightSide, btn)
+        self.tabBar().setTabButton(index, QTabBar.ButtonPosition.RightSide, btn)  # type: ignore[union-attr]
 
     def set_find_bar(self, find_bar: FindReplaceBar):
         """设置外部传入的查找替换栏"""
@@ -401,7 +409,14 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         ext = os.path.splitext(filepath)[1].lower()
         return ext in ('.md', '.markdown')
 
-    def open_file(self, filepath: str) -> int:
+    def open_file(
+        self,
+        filepath: str,
+        *,
+        activate: bool = True,
+        insert_index: int | None = None,
+        render_preview: bool = True,
+    ) -> int:
         """打开文件"""
         # 检查文件是否已经打开
         for i in range(self.count()):
@@ -410,7 +425,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             if tab_id is not None:
                 info = self._tab_info.get(tab_id, {})
                 if info.get("filepath") == filepath:
-                    self.setCurrentIndex(i)
+                    if activate:
+                        self.setCurrentIndex(i)
                     return i
 
         # 读取文件内容，检测编码
@@ -466,12 +482,17 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         is_md = self._is_markdown_file(filepath)
 
         if is_md:
-            widget = MarkdownPreviewWidget(self.config, theme_engine=self._theme_engine)
+            widget = MarkdownPreviewWidget(
+                self.config,
+                theme_engine=self._theme_engine,
+                webengine_runtime=self._webengine_runtime,
+            )
             widget.editor.load_content(content)
             self._connect_editor_signals(widget.editor)
             widget.editor.set_file_type(filepath)
             widget.set_base_path(os.path.dirname(os.path.abspath(filepath)))
-            widget.refresh_preview_now()
+            if render_preview:
+                widget.refresh_preview_now()
         else:
             widget = Editor(self.config, theme_engine=self._theme_engine)
             widget.load_content(content)
@@ -479,7 +500,10 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             widget.set_file_type(filepath)
 
         filename = os.path.basename(filepath)
-        index = self.addTab(widget, filename)
+        if insert_index is not None:
+            index = self.insertTab(insert_index, widget, filename)
+        else:
+            index = self.addTab(widget, filename)
 
         tab_id = self._generate_tab_id()
         widget.tab_id = tab_id
@@ -502,7 +526,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         }
         self._save_manager.register_tab(tab_id)
 
-        self.setCurrentIndex(index)
+        if activate:
+            self.setCurrentIndex(index)
         self.tab_count_changed.emit(self.count())
 
         # 恢复书签
@@ -993,9 +1018,15 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 ErrorHandler.show_from_exception(e, ErrorCategory.FILE, "重命名失败")
 
     def _on_current_changed(self, index: int):
+        widget = self.widget(index)
+
+        if isinstance(widget, MarkdownPreviewWidget):
+            widget.ensure_preview_rendered()
+
         if self._find_bar:
             editor = self.current_editor()
             self._find_bar.set_editor(editor)
+
         self.current_changed.emit(index)
 
     def _connect_editor_signals(self, editor):

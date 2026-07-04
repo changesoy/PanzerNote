@@ -54,7 +54,9 @@ class NativeTitleBarThemeFilter(QObject):
         super().__init__(parent)
         self._is_dark_getter = is_dark_getter
 
-    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+    def eventFilter(self, obj: QObject | None, event: QEvent | None) -> bool:
+        if obj is None or event is None:
+            return bool(super().eventFilter(obj, event))
         if event.type() == QEvent.Type.Show and isinstance(obj, QWidget) and obj.isWindow():
             # 跳过无边框窗口（如 CompletionPopup），它们没有原生标题栏
             if obj.windowFlags() & Qt.WindowType.FramelessWindowHint:

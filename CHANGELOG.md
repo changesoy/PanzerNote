@@ -2,6 +2,33 @@
 
 本文件记录 PanzerNote 各版本的变更。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
 
+## v1.8.1
+
+**启动性能与窗口显示优化**
+
+**窗口显示入口统一**
+
+- **集中式 `present()` 入口**：`MainWindow` 新增 `present()` 作为唯一窗口显示入口，替代直接 `show()`。`__init__()` 期间窗口始终不可见，首个同步恢复文件在显示前完成控件挂载
+- **最大化启动预缩放**：新增 `_restore_window_geometry()`，最大化场景在窗口不可见时预缩放控件树到屏幕可用尺寸并设置 `WindowMaximized` 状态，使 `showMaximized()` 首帧 paint 时 backing store 已是正确尺寸，消除普通尺寸→最大化尺寸的两段式视觉撕裂
+- **mypy 全量类型修复**：`main_window.py`、`editor.py`、`folding.py`、`completion.py`、`plugin_manager_dialog.py`、`shortcut_panel.py`、`side_panel_host.py`、`window_theme.py` 中的 `QApplication.instance()` 调用改为 `cast(QApplication, ...)`，viewport/signalsBlocked 等处补充 `type: ignore` 注解；`window_theme.py` 的 `eventFilter` 签名补充 `None` 守卫
+
+**会话恢复策略优化**
+
+- **分级恢复计划**：新增 `_build_restore_plan(open_files)`，将打开文件列表拆分为 `pre_show_entries`（首个标签 + 首个 Markdown 标签，显示前同步挂载）和 `deferred_entries`（其余文件，显示后通过 `QTimer.singleShot(0, ...)` 异步恢复）。若首个标签和首个 Markdown 是同一文件，只恢复一次
+- **光标恢复提取**：新增 `_restore_cursor_for_tab(file_info, tab_index)`，支持 `Editor` 和 `MarkdownPreviewWidget` 的光标位置/滚动位置恢复，被 pre-show 和 deferred 两条路径复用
+
+**WebEngine 启动锚点机制**
+
+- **启动锚点预初始化**：新增 `src/editor/webengine_runtime.py`（`WebEngineRuntime`），在主窗口 `__init__` 中创建，布局 setup 期间调用 `prepare_startup_anchor()` 在编辑器容器中挂载 1×1 最小 QWebEngineView，强制 Qt WebEngine 提前加载 Chromium 运行时，消除首个 Markdown 预览打开时的白屏卡顿
+- **锚点释放**：`MarkdownPreviewWidget` 首个真实 QWebEngineView 预览挂载到控件树后，调用 `notify_real_view_attached()` 延迟释放启动锚点，回收占用的 GPU 资源
+- **全链路注入**：`WebEngineRuntime` 实例通过 `MainWindow` → `EditorTabWidget` → `MarkdownPreviewWidget` 逐级传递
+
+**非活动预览延迟渲染**
+
+- **延迟渲染标志**：`MarkdownPreviewWidget` 新增 `_preview_dirty` / `_initial_preview_rendered` 标志。`open_file(render_preview=False)` 打开的 Markdown 标签跳过预览渲染，仅创建编辑器控件
+- **按需激活渲染**：新增 `invalidate_preview()`（标记预览为脏）和 `ensure_preview_rendered()`（仅在 `_preview_dirty` 时触发渲染，避免重复计算）。选项卡切换时调用 `ensure_preview_rendered()`，确保切换到后台 Markdown 标签时预览即时就绪
+- **启动加速**：会话恢复时首个标签以外的 Markdown 文件均以 `render_preview=False` 打开，在窗口显示后再按需渲染，减少启动阻塞
+
 ## v1.8.0
 
 **编辑器能力增强、Markdown 预览稳定化与深色主题系统补全**

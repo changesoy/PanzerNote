@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer, QEvent, pyqtSignal, QPoint
 from PyQt6.QtGui import QIcon, QCloseEvent, QAction, QTextCursor
-from typing import List, Optional
+from typing import List, Optional, cast
 
 from . import __version__
 from .core.config import Config
@@ -34,6 +34,7 @@ from .game.resource_bar import ResourceBar
 from .game.game_sidebar import GameSidebar
 from .editor.file_tree import FileTreeWidget
 from .editor.editor_tabs import EditorTabWidget
+from .editor.webengine_runtime import WebEngineRuntime
 from .game.secretary_widget import SecretaryWidget
 from .editor.status_bar import StatusBarWidget
 from .editor.find_replace import FindReplaceBar
@@ -86,10 +87,18 @@ class MainWindow(QMainWindow):
         self.theme_engine.initialize_active_theme()
 
         self._native_titlebar_filter = install_native_titlebar_theme_filter(
-            QApplication.instance(),
+            cast(QApplication, QApplication.instance()),
             lambda: self.theme_engine.get_active_theme().is_dark,
             parent=self,
         )
+
+        self.webengine_runtime = WebEngineRuntime(self)
+
+        # 保存待恢复的最大化状态（不在 __init__ 期间显示窗口）
+        self._initial_maximized = bool(
+            self.config.get_window_setting("maximized", False)
+        )
+        self._presented = False
 
         self.plugin_manager = PluginManager(config)
         self.plugin_manager.scan_plugins()
@@ -203,7 +212,11 @@ class MainWindow(QMainWindow):
         self.editor_splitter.setChildrenCollapsible(False)
 
         # 编辑器标签页
-        self.editor_tabs = EditorTabWidget(self.config, theme_engine=self.theme_engine)
+        self.editor_tabs = EditorTabWidget(
+            self.config,
+            theme_engine=self.theme_engine,
+            webengine_runtime=self.webengine_runtime,
+        )
         self.editor_tabs.set_find_bar(self.find_replace_bar)
         self.editor_tabs.current_changed.connect(self._on_tab_changed)
         self.editor_tabs.content_modified.connect(self._on_content_modified)
@@ -219,6 +232,8 @@ class MainWindow(QMainWindow):
         editor_layout.addWidget(self.editor_splitter)
 
         self.splitter.addWidget(self.editor_container)
+
+        self.webengine_runtime.prepare_startup_anchor(self.editor_container)
 
         # 设置分割器初始大小
         sidebar_width = self.config.get_view_setting("sidebar_width", 200)
@@ -273,42 +288,62 @@ class MainWindow(QMainWindow):
             on_idle_reward=self._on_idle_reward,
         )
 
-    def _restore_state(self):
-        """恢复窗口状态"""
+    def _restore_window_geometry(self) -> None:
+        """在窗口不可见状态下恢复几何和最大化状态。
+
+        最大化场景：预缩放控件树到屏幕可用尺寸，确保 showMaximized()
+        首帧 paint 时 backing store 已是正确尺寸，消除视觉撕裂。
+        """
         width = self.config.get_window_setting("width", 1200)
         height = self.config.get_window_setting("height", 800)
         x = self.config.get_window_setting("x", 100)
         y = self.config.get_window_setting("y", 100)
-        maximized = self.config.get_window_setting("maximized", False)
 
-        self.resize(width, height)
-        self.move(x, y)
+        if self._initial_maximized:
+            screen = QApplication.screenAt(QPoint(x, y)) or QApplication.primaryScreen()
+            if screen:
+                avail = screen.availableGeometry()
+                self.resize(avail.width(), avail.height())
+            state = self.windowState()
+            state &= ~Qt.WindowState.WindowMinimized
+            state |= Qt.WindowState.WindowMaximized
+            self.setWindowState(state)
+        else:
+            self.setGeometry(x, y, width, height)
 
-        if maximized:
-            self.showMaximized()
+    def _restore_state(self):
+        """恢复窗口状态"""
+        self._restore_window_geometry()
 
         self._calculate_offline_rewards()
         self._check_daily_checkin()
 
         open_files = self.config.get_open_files()
         if open_files:
-            first_file = open_files[0]
-            filepath = first_file.get("path")
-            if filepath and os.path.exists(filepath):
-                self._open_file(filepath)
-                self._restore_cursor_for_current_tab(first_file)
-                remaining = open_files[1:]
-            else:
-                remaining = open_files[1:]
-                if self.editor_tabs.count() == 0:
-                    self.editor_tabs.new_file()
+            pre_show_entries, deferred_entries = self._build_restore_plan(open_files)
+
+            for entry in pre_show_entries:
+                filepath = entry.get("path")
+                if filepath and os.path.exists(filepath):
+                    index = self.editor_tabs.open_file(
+                        filepath,
+                        activate=False,
+                        insert_index=entry.get("index"),
+                        render_preview=False,
+                    )
+                    if index >= 0:
+                        self._restore_cursor_for_tab(entry, index)
+
+            self._pending_files = deferred_entries
+
+            if self.editor_tabs.count() == 0:
+                self.editor_tabs.new_file()
         else:
-            remaining = []
+            self._pending_files = []
             self.editor_tabs.new_file()
 
-        if remaining:
+        if self._pending_files:
             from PyQt6.QtCore import QTimer
-            self._pending_files = remaining
             QTimer.singleShot(0, self._open_next_pending_file)
         else:
             active_index = self.config.get_active_tab_index()
@@ -326,6 +361,73 @@ class MainWindow(QMainWindow):
         self.config.update_last_login()
         self.config.save_savegame()
 
+    def _build_restore_plan(self, open_files: list) -> tuple[list, list]:
+        """构建会话恢复计划
+
+        返回 (pre_show_entries, deferred_entries)
+
+        pre_show_entries: 显示前同步恢复的文件列表
+          - 原本的首个标签
+          - 会话中的首个 Markdown 标签（若二者是同一个，只恢复一次）
+
+        deferred_entries: 显示后异步恢复的文件列表
+        """
+        pre_show_entries = []
+        deferred_entries = []
+
+        first_file_index = None
+        first_md_index = None
+
+        for idx, entry in enumerate(open_files):
+            entry_with_index = {"index": idx, **entry}
+            filepath = entry.get("path")
+            if filepath and os.path.exists(filepath):
+                ext = os.path.splitext(filepath)[1].lower()
+                is_md = ext in ('.md', '.markdown')
+
+                if first_file_index is None:
+                    first_file_index = idx
+                    pre_show_entries.append(entry_with_index)
+                elif is_md and first_md_index is None:
+                    first_md_index = idx
+                    pre_show_entries.append(entry_with_index)
+                else:
+                    deferred_entries.append(entry_with_index)
+            else:
+                deferred_entries.append(entry_with_index)
+
+        return pre_show_entries, deferred_entries
+
+    def _restore_cursor_for_tab(self, file_info: dict, tab_index: int):
+        """恢复指定索引标签的光标位置"""
+        cursor_pos = file_info.get("cursor_position")
+        scroll_pos = file_info.get("scroll_position")
+        if cursor_pos is None and scroll_pos is None:
+            return
+
+        from .editor.editor import Editor
+        from .editor.markdown_preview import MarkdownPreviewWidget
+        widget = self.editor_tabs.widget(tab_index)
+        if widget is None:
+            return
+
+        editor = None
+        if isinstance(widget, Editor):
+            editor = widget
+        elif isinstance(widget, MarkdownPreviewWidget):
+            editor = widget.editor
+
+        if editor:
+            if cursor_pos is not None:
+                cursor = editor.textCursor()
+                cursor.setPosition(min(cursor_pos, len(editor.toPlainText())))
+                editor.setTextCursor(cursor)
+            if scroll_pos is not None:
+                from PyQt6.QtCore import QTimer
+                vbar = editor.verticalScrollBar()
+                if vbar is not None:
+                    QTimer.singleShot(0, lambda v=scroll_pos, sb=vbar: sb.setValue(v))
+
     def _open_next_pending_file(self):
         if not hasattr(self, '_pending_files') or not self._pending_files:
             active_index = self.config.get_active_tab_index()
@@ -335,29 +437,15 @@ class MainWindow(QMainWindow):
 
         file_info = self._pending_files.pop(0)
         filepath = file_info.get("path")
-        cursor_pos = file_info.get("cursor_position")
-        scroll_pos = file_info.get("scroll_position")
         if filepath and os.path.exists(filepath):
-            self._open_file(filepath)
-            if cursor_pos is not None or scroll_pos is not None:
-                from .editor.editor import Editor
-                from .editor.markdown_preview import MarkdownPreviewWidget
-                widget = self.editor_tabs.currentWidget()
-                editor = None
-                if isinstance(widget, Editor):
-                    editor = widget
-                elif isinstance(widget, MarkdownPreviewWidget):
-                    editor = widget.editor
-                if editor:
-                    if cursor_pos is not None:
-                        cursor = editor.textCursor()
-                        cursor.setPosition(min(cursor_pos, len(editor.toPlainText())))
-                        editor.setTextCursor(cursor)
-                    if scroll_pos is not None:
-                        from PyQt6.QtCore import QTimer
-                        vbar = editor.verticalScrollBar()
-                        if vbar is not None:
-                            QTimer.singleShot(0, lambda v=scroll_pos, sb=vbar: sb.setValue(v))
+            index = self.editor_tabs.open_file(
+                filepath,
+                activate=False,
+                insert_index=file_info.get("index"),
+                render_preview=True,
+            )
+            if index >= 0:
+                self._restore_cursor_for_tab(file_info, index)
 
         if self._pending_files:
             from PyQt6.QtCore import QTimer
@@ -607,6 +695,23 @@ class MainWindow(QMainWindow):
             self.resource_bar.refresh()
 
     # === 事件处理 ===
+
+    def present(self) -> None:
+        """唯一的窗口显示入口
+
+        确保 MainWindow.__init__() 期间窗口始终不可见，
+        第一个同步恢复的文件在主窗口显示前完成控件挂载。
+        最大化场景使用 showMaximized() 让 Qt 在一步内以最终
+        尺寸完成首次渲染，避免普通尺寸 → 最大化尺寸的两段式跳变。
+        """
+        if self._presented:
+            return
+
+        self._presented = True
+        if self._initial_maximized:
+            self.showMaximized()
+        else:
+            self.show()
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -1117,7 +1222,11 @@ class MainWindow(QMainWindow):
         if self._split_tabs:
             return
         self.editor_splitter.setOrientation(orientation)
-        split_tabs = EditorTabWidget(self.config, theme_engine=self.theme_engine)
+        split_tabs = EditorTabWidget(
+            self.config,
+            theme_engine=self.theme_engine,
+            webengine_runtime=self.webengine_runtime,
+        )
         split_tabs.set_find_bar(self.find_replace_bar)
         split_tabs.current_changed.connect(self._on_tab_changed)
         split_tabs.content_modified.connect(self._on_content_modified)
@@ -1651,7 +1760,7 @@ class MainWindow(QMainWindow):
         apply_native_dark_titlebar(self, is_dark)
 
         # 运行时切换主题时，顺手更新当前已经存在的顶层窗口。
-        app = QApplication.instance()
+        app = cast(QApplication, QApplication.instance())
         if app is not None:
             for widget in app.topLevelWidgets():
                 if widget.isVisible():

@@ -59,6 +59,7 @@ from ..utils.feature_flags import is_enabled
 from ..security.path_validator import PathValidator
 from ..themes.theme_aware_mixin import ThemeAwareMixin
 from .highlight_themes import highlight_code_html
+from .webengine_runtime import WebEngineRuntime
 
 # ════════════════════════════════════════════════════════
 #  正则 / 常量
@@ -759,10 +760,17 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
     包含左侧编辑器和右侧预览，提供与Editor相同的接口
     """
 
-    def __init__(self, config: Config, theme_engine=None, parent=None):
+    def __init__(
+        self,
+        config: Config,
+        theme_engine=None,
+        webengine_runtime: WebEngineRuntime | None = None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.config = config
         self._theme_engine = theme_engine
+        self._webengine_runtime = webengine_runtime
         self.tab_id = None
 
         self._code_blocks: list[str] = []
@@ -772,6 +780,8 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self._render_cache = None
         self._md_parser = self._create_md_parser()
         self._html_template_loaded = False
+        self._preview_dirty = True
+        self._initial_preview_rendered = False
         self._last_sync_frac: float = 1.0
         self._last_at_top: bool = True
         self._last_at_bottom: bool = False
@@ -840,6 +850,13 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self.splitter.setSizes([500, 500])
         layout.addWidget(self.splitter)
 
+        if (
+            HAS_WEBENGINE
+            and isinstance(self.preview, QWebEngineView)
+            and self._webengine_runtime is not None
+        ):
+            self._webengine_runtime.notify_real_view_attached()
+
         # 防抖定时器
         self._preview_timer = QTimer(self)
         self._preview_timer.setSingleShot(True)
@@ -896,6 +913,18 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         if hasattr(self, "_preview_timer"):
             self._preview_timer.stop()
         self._update_preview()
+        self._initial_preview_rendered = True
+
+    def invalidate_preview(self) -> None:
+        self._preview_dirty = True
+
+    def ensure_preview_rendered(self) -> None:
+        if not self._preview_dirty:
+            return
+
+        self._preview_dirty = False
+        self._initial_preview_rendered = True
+        self.refresh_preview_now()
 
     def _on_text_changed(self):
         self._preview_timer.start()

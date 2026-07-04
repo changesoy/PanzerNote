@@ -155,7 +155,7 @@ def main():
     profiler.end_phase()
 
     profiler.begin_phase(PHASE_WINDOW_SHOW)
-    window.show()
+    window.present()
     profiler.end_phase()
 
     logger.info(profiler.get_report())

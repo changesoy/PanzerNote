@@ -122,7 +122,7 @@ class SidePanelHost(ThemeAwareMixin, QWidget):
 
         self.show()
 
-        if not self.panel_visibility_changed.signalsBlocked():
+        if not self.panel_visibility_changed.signalsBlocked():  # type: ignore[attr-defined]
             self.panel_visibility_changed.emit(True)
 
     def show_panel(self, panel_id: str) -> None:

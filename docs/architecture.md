@@ -105,6 +105,7 @@ PanzerNote/
 │   │   ├── incremental_renderer.py # 渲染缓存（MD5 哈希缓存，全文级）
 │   │   ├── syntax_highlighter.py   # 语法高亮（Pygments 适配器 + Markdown 专用高亮器）
 │   │   ├── highlight_themes.py     # 代码高亮主题
+│   │   ├── webengine_runtime.py     # WebEngine 启动锚点管理（预初始化 + 锚点释放）
 │   │   ├── markdown_preview.py     # Markdown 分屏预览（源码行号同步 + 代码块高亮 + 本地图片）
 │   │   ├── minimap.py              # 代码缩略图（块级缓存增量失效）
 │   │   ├── find_replace.py         # 查找替换栏
@@ -248,13 +249,14 @@ Config 类是整个应用的配置中枢，通过组合方式委托 `SavegameMan
 
 **拆分后的模块职责**：
 
-| 模块                    | 职责                                                  |
-| ----------------------- | ----------------------------------------------------- |
-| `main_window.py`        | 布局组装、菜单动作代理、状态管理、插件/主题集成       |
-| `core/timer_manager.py` | 定时器生命周期管理（自动保存/统计/挂机奖励）          |
-| `core/event_bus.py`     | 信号连接集中管理，解耦模块间通信                      |
-| `core/menu_builder.py`  | 菜单栏构建逻辑，已接入 ShortcutManager                |
-| `game/game_engine.py`   | 挂机收益计算（在线/离线奖励、打字奖励、资源上限检查） |
+| 模块                          | 职责                                                                             |
+| ----------------------------- | -------------------------------------------------------------------------------- |
+| `main_window.py`              | 布局组装、菜单动作代理、状态管理、插件/主题集成、统一窗口显示入口（`present()`） |
+| `editor/webengine_runtime.py` | WebEngine 启动锚点管理：首个预览挂载前预初始化 Qt WebEngine，挂载后释放锚点      |
+| `core/timer_manager.py`       | 定时器生命周期管理（自动保存/统计/挂机奖励）                                     |
+| `core/event_bus.py`           | 信号连接集中管理，解耦模块间通信                                                 |
+| `core/menu_builder.py`        | 菜单栏构建逻辑，已接入 ShortcutManager                                           |
+| `game/game_engine.py`         | 挂机收益计算（在线/离线奖励、打字奖励、资源上限检查）                            |
 
 **定时器**（由 `TimerManager` 管理）：
 
@@ -266,6 +268,14 @@ Config 类是整个应用的配置中枢，通过组合方式委托 `SavegameMan
 
 - **在线**：每分钟 fuel/ammo/steel +5，bauxite 每3分钟+5（用 `bauxite_counter` 计数）
 - **离线**：启动时 `GameEngine.calculate_offline_rewards()` 根据 `last_login` 计算时间差，收益 = 在线的 1/3（向大取整），上限24h，最少5分钟
+
+**窗口启动与会话恢复**：
+
+- `present()` — 统一的窗口显示入口（替代直接 `show()`）。`__init__()` 期间窗口始终不可见，最大化场景使用 `showMaximized()` 让 Qt 以最终尺寸完成首次渲染，避免普通尺寸→最大化尺寸的两段式跳变
+- `_restore_window_geometry()` — 在窗口不可见状态下恢复几何和最大化状态。最大化场景预缩放控件树到屏幕可用尺寸，消除首帧 paint 时的视觉撕裂
+- `_build_restore_plan(open_files)` — 会话恢复计划：返回 `(pre_show_entries, deferred_entries)`。`pre_show_entries` 包含首个标签和首个 Markdown 标签（若二者是同一文件，只恢复一次），在窗口显示前同步挂载；`deferred_entries` 在窗口显示后通过 `QTimer.singleShot(0, ...)` 异步恢复
+- `_restore_cursor_for_tab(file_info, tab_index)` — 提取的光标/滚动位置恢复辅助函数，支持 `Editor` 和 `MarkdownPreviewWidget`
+- `WebEngineRuntime` — 在 `__init__` 中创建，布局 setup 期间调用 `prepare_startup_anchor()` 在编辑器容器中挂载一个 1×1 的最小 QWebEngineView，强制 Qt WebEngine 提前初始化，避免首个 Markdown 预览打开时的白屏延迟。首个真实预览挂载后调用 `notify_real_view_attached()` 释放锚点
 
 ### 4.3 编辑器 (`editor/editor.py`)
 
@@ -324,7 +334,7 @@ Config 类是整个应用的配置中枢，通过组合方式委托 `SavegameMan
 
 **核心逻辑**：
 
-- `open_file()` — 编码级联检测（UTF-8 → GBK → UTF-16 → 容错UTF-8），Markdown 文件自动使用 `MarkdownPreviewWidget`
+- `open_file()` — 编码级联检测（UTF-8 → GBK → UTF-16 → 容错UTF-8），Markdown 文件自动使用 `MarkdownPreviewWidget`；新增 `render_preview` 参数（默认 `True`），设为 `False` 时延迟预览渲染以加速启动恢复
 - `_on_text_changed()` — 比较当前内容与 `last_saved_content`，决定是否标记为已修改（标签名加 ` *`）；粘贴操作不计入打字奖励
 - `move_file_to_folder()` — 先保存最新内容 → `shutil.move` → 更新 `_tab_info` 中的 filepath
 - 所有编辑操作（undo/redo/cut/copy/paste/行操作/大小写/格式化）通过代理方法转发给当前编辑器
@@ -378,6 +388,18 @@ Config 类是整个应用的配置中枢，通过组合方式委托 `SavegameMan
 **首次渲染稳定化**：
 
 - 新增 `refresh_preview_now()`，Markdown 文件 `set_base_path()` 后显式触发 `_update_preview()`，不再依赖 `textChanged` 防抖定时器
+
+**非活动预览延迟渲染**：
+
+- 新增 `_preview_dirty` / `_initial_preview_rendered` 标志，`open_file(render_preview=False)` 打开的 Markdown 标签延迟预览渲染
+- `invalidate_preview()` — 将预览标记为脏，下次激活时重新渲染
+- `ensure_preview_rendered()` — 仅在 `_preview_dirty` 时触发渲染，避免重复计算。选项卡切换时被调用，确保切换到该标签时预览已就绪
+- 启动恢复时首个标签以外的 Markdown 文件均以 `render_preview=False` 打开，加速启动
+
+**WebEngine 启动锚点集成**：
+
+- `MarkdownPreviewWidget.__init__()` 接收 `webengine_runtime` 参数
+- 首个真实 QWebEngineView 预览挂载到控件树后，调用 `_webengine_runtime.notify_real_view_attached()` 释放 1×1 启动锚点，回收占用的 GPU 资源
 
 ### 4.6 代码高亮主题 (`editor/highlight_themes.py`)
 

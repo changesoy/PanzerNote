@@ -321,7 +321,7 @@ class ShortcutPanel(ThemeAwareMixin, QWidget):
         }}
         """))
 
-        self._tree.viewport().setStyleSheet(
+        self._tree.viewport().setStyleSheet(  # type: ignore[union-attr]
             f"background-color: {colors.card}; color: {colors.text_primary};"
         )
 

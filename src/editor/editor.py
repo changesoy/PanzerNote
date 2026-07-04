@@ -27,7 +27,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QRect, QSize, QTimer, QPointF, pyqtSignal
 from PyQt6.QtGui import (
-    QFont, QColor, QPainter, QTextFormat, QTextCharFormat,
+    QFont, QColor, QPainter, QTextFormat, QTextCharFormat, QPolygonF,
     QSyntaxHighlighter, QTextDocument, QTextCursor, QKeyEvent, QAction,
     QHideEvent, QFocusEvent,
 )
@@ -145,7 +145,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self._fold_timer.timeout.connect(self._refresh_folding)
 
         self._completion_provider = CompletionProvider()
-        self._completion_popup = CompletionPopup(None)  # 无父窗口，避免被 viewport 裁剪
+        self._completion_popup = CompletionPopup(None)  # type: ignore[arg-type]
         self._completion_popup.item_selected.connect(self._apply_completion)
 
         self._selection_manager = ExtraSelectionManager(self)
@@ -466,18 +466,18 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
                     cy = float(top + self.fontMetrics().height() // 2)  # 三角中心 y
                     if collapsed:
                         # 向右三角 ▶
-                        points = [
+                        points = QPolygonF([
                             QPointF(cx - tri_size // 2, cy - tri_size // 2),
                             QPointF(cx - tri_size // 2, cy + tri_size // 2),
                             QPointF(cx + tri_size // 2, cy),
-                        ]
+                        ])
                     else:
                         # 向下三角 ▼
-                        points = [
+                        points = QPolygonF([
                             QPointF(cx - tri_size // 2, cy - tri_size // 2),
                             QPointF(cx + tri_size // 2, cy - tri_size // 2),
                             QPointF(cx, cy + tri_size // 2),
-                        ]
+                        ])
                     painter.drawPolygon(points)
                     painter.setPen(Qt.PenStyle.SolidLine)
                     painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -726,12 +726,12 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
 
         super().keyPressEvent(event)
 
-    def hideEvent(self, event: QHideEvent):
+    def hideEvent(self, event: QHideEvent | None) -> None:
         """编辑器隐藏时隐藏补全弹窗。"""
         self._completion_popup.hide()
         super().hideEvent(event)
 
-    def focusOutEvent(self, event: QFocusEvent):
+    def focusOutEvent(self, event: QFocusEvent | None) -> None:
         """编辑器失焦时隐藏补全弹窗。"""
         self._completion_popup.hide()
         super().focusOutEvent(event)
@@ -1085,7 +1085,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self._completion_popup.set_candidates(candidates)
         # 弹框定位到光标下方
         cr = self.cursorRect()
-        pos = self.viewport().mapToGlobal(cr.bottomLeft())
+        pos = self.viewport().mapToGlobal(cr.bottomLeft())  # type: ignore[union-attr]
         self._completion_popup.show_at(pos)
 
     def _rebuild_completion_words(self) -> None:

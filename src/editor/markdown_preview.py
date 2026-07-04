@@ -780,6 +780,8 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self._render_cache = None
         self._md_parser = self._create_md_parser()
         self._html_template_loaded = False
+        self._preview_dirty = True
+        self._initial_preview_rendered = False
         self._last_sync_frac: float = 1.0
         self._last_at_top: bool = True
         self._last_at_bottom: bool = False
@@ -911,6 +913,18 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         if hasattr(self, "_preview_timer"):
             self._preview_timer.stop()
         self._update_preview()
+        self._initial_preview_rendered = True
+
+    def invalidate_preview(self) -> None:
+        self._preview_dirty = True
+
+    def ensure_preview_rendered(self) -> None:
+        if not self._preview_dirty:
+            return
+
+        self._preview_dirty = False
+        self._initial_preview_rendered = True
+        self.refresh_preview_now()
 
     def _on_text_changed(self):
         self._preview_timer.start()

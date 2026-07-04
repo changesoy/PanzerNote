@@ -1018,9 +1018,15 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 ErrorHandler.show_from_exception(e, ErrorCategory.FILE, "重命名失败")
 
     def _on_current_changed(self, index: int):
+        widget = self.widget(index)
+
+        if isinstance(widget, MarkdownPreviewWidget):
+            widget.ensure_preview_rendered()
+
         if self._find_bar:
             editor = self.current_editor()
             self._find_bar.set_editor(editor)
+
         self.current_changed.emit(index)
 
     def _connect_editor_signals(self, editor):

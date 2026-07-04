@@ -12,6 +12,7 @@ This commit does not change runtime behavior.
 PanzerNote dark theme should follow VS Code Dark Modern / Dark+ rather than JetBrains Darcula.
 
 Reasons:
+
 - Current editor background, selection color, Markdown preview code block, and `vscode_dark` highlighter already match VS Code more closely.
 - JetBrains Darcula uses a warmer gray UI base such as #3C3F41, which would require a much broader palette migration.
 
@@ -19,14 +20,14 @@ Reasons:
 
 These are allowed for now:
 
-| Area | Reason |
-|---|---|
-| `src/themes/theme_engine.py` | Theme definitions are the source of truth |
-| `src/editor/highlight_themes.py` | Syntax theme definitions are intentional palettes |
-| `src/editor/syntax_highlighter.py` | Markdown semantic highlighter palette; allowed but should stay aligned with VS Code |
+| Area                                           | Reason                                                                                                         |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `src/themes/theme_engine.py`                   | Theme definitions are the source of truth                                                                      |
+| `src/editor/highlight_themes.py`               | Syntax theme definitions are intentional palettes                                                              |
+| `src/editor/syntax_highlighter.py`             | Markdown semantic highlighter palette; allowed but should stay aligned with VS Code                            |
 | `src/editor/markdown_preview.py` HTML template | Self-contained rendered document CSS; allowed but should be gradually converted to explicit semantic variables |
-| assets | Real image/icon assets |
-| tests | Test fixtures |
+| assets                                         | Real image/icon assets                                                                                         |
+| tests                                          | Test fixtures                                                                                                  |
 
 ## Scan Patterns
 
@@ -48,19 +49,19 @@ Excluded paths:
 
 ## Summary
 
-| File | Count | Status | Notes |
-|---|---:|---|---|
-| `src/editor/markdown_preview.py` | 49 | Mostly allowed | HTML template CSS and dark map; monitor carefully |
-| `src/editor/editor.py` | 21 | Needs migration | gutter bookmark/fold colors and fallbacks |
-| `src/editor/minimap.py` | 13 | Low priority | most colors are fallback; theme path exists |
-| `src/editor/find_replace.py` | 10 | Needs migration | search match/current match colors should become theme tokens |
-| `src/ui/side_panel_host.py` | 8 | Needs review | checked button should not depend on Material purple |
-| `src/editor/secure_markdown_renderer.py` | 8 | Needs ownership decision | legacy/secure renderer may duplicate preview CSS |
-| `src/widgets/game_sidebar.py` | 7 | Needs review | likely resource/status colors |
-| `src/themes/theme_preview.py` | 4 | Low priority | color swatches are intentionally literal |
-| `src/widgets/secretary_widget.py` | 4 | Needs review | bubble/status colors should map to theme tokens |
-| `src/ui/command_palette.py` | 3 | Low priority | hint fallback only; themed after init |
-| `src/editor/find_in_files_panel.py` | 2 | Low priority | already mostly themed |
+| File                                     | Count | Status                   | Notes                                                        |
+| ---------------------------------------- | ----: | ------------------------ | ------------------------------------------------------------ |
+| `src/editor/markdown_preview.py`         |    49 | Mostly allowed           | HTML template CSS and dark map; monitor carefully            |
+| `src/editor/editor.py`                   |    21 | Needs migration          | gutter bookmark/fold colors and fallbacks                    |
+| `src/editor/minimap.py`                  |    13 | Low priority             | most colors are fallback; theme path exists                  |
+| `src/editor/find_replace.py`             |    10 | Needs migration          | search match/current match colors should become theme tokens |
+| `src/ui/side_panel_host.py`              |     8 | Needs review             | checked button should not depend on Material purple          |
+| `src/editor/secure_markdown_renderer.py` |     8 | Needs ownership decision | legacy/secure renderer may duplicate preview CSS             |
+| `src/game/game_sidebar.py`               |     7 | Needs review             | likely resource/status colors                                |
+| `src/themes/theme_preview.py`            |     4 | Low priority             | color swatches are intentionally literal                     |
+| `src/game/secretary_widget.py`           |     4 | Needs review             | bubble/status colors should map to theme tokens              |
+| `src/ui/command_palette.py`              |     3 | Low priority             | hint fallback only; themed after init                        |
+| `src/editor/find_in_files_panel.py`      |     2 | Low priority             | already mostly themed                                        |
 
 ## Unreasonable Color Arrangements
 
@@ -70,6 +71,7 @@ Current dark theme mixes Material-like `#BB86FC` / `#03DAC6` with VS Code-like e
 
 Recommendation:
 Future palette migration should move to VS Code blue:
+
 - `primary`: `#0078D4`
 - `primary_dark`: `#026EC1`
 - `selection_bg`: `#264F78`
@@ -81,6 +83,7 @@ Do not change this in the audit commit.
 
 `primary_light` currently behaves like selection background.
 Future migration should introduce:
+
 - `selection_bg`
 - `selection_fg`
 - `hover_bg`
@@ -90,6 +93,7 @@ Future migration should introduce:
 
 Many surfaces use `#1E1E1E`.
 Future migration should introduce separate levels:
+
 - window / title / status: `#181818`
 - editor: `#1F1F1F` or `#1E1E1E`
 - widget: `#202020`
@@ -99,6 +103,7 @@ Future migration should introduce separate levels:
 ### 4. Search highlight colors live in `find_replace.py`
 
 Move later to:
+
 - `search_match_bg`
 - `search_current_bg`
 - `search_current_fg`
@@ -106,6 +111,7 @@ Move later to:
 ### 5. Gutter bookmark and fold marker colors live in `editor.py`
 
 Move later to:
+
 - `editor_bookmark_bg`
 - `editor_bookmark_fg`
 - `editor_fold_marker`
@@ -121,6 +127,7 @@ After palette migration, use VS Code blue or `selection_bg`.
 ### Batch A: ThemeColorScheme semantic tokens
 
 Add tokens only, with old values as defaults:
+
 - `selection_bg`
 - `selection_fg`
 - `hover_bg`

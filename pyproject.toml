@@ -10,11 +10,11 @@ authors = [
     {name = "Changes"},
 ]
 requires-python = ">=3.11"
-license = {text = "MIT"}
+license = {text = "GPL-3.0-or-later"}
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: End Users/Desktop",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -38,6 +38,7 @@ format = [
     "tomli>=2.0",
     "tomli-w>=1.0",
     "cssbeautifier>=1.4",
+    "html5lib>=1.1",
 ]
 dev = [
     "pytest>=9.0.3",

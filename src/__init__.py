@@ -9,10 +9,10 @@ PanzerNote - 战车少女主题记事本
 版本更新流程：
 1. 仅修改本文件中的 __version__
 2. 运行 python scripts/verify_version.py 验证一致性
-3. 手动同步 README.md / 项目说明.md / plugins/plugin_api.md 中的版本号
+3. 手动同步 README.md / docs/architecture.md / plugins/plugin_api.md 中的版本号
 """
 
-__version__ = "1.7.0"
+__version__ = "1.8.0"
 __author__ = "Changes"
 
 

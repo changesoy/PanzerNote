@@ -2,6 +2,15 @@
 
 本文件记录 PanzerNote 各版本的变更。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
 
+## v1.8.2
+
+**Markdown 预览代码块复制功能迁移至 QWebEngineView**
+
+- **代码块一键复制补全**：将代码块复制功能从 QTextBrowser 降级引擎（`PreviewBrowser`）迁移至 QWebEngineView 主力引擎。HTML 模板中嵌入浮动复制按钮，CSS 实现悬停显隐，半透明色兼容明暗主题
+- **document.title 桥接模式**：JS 事件委托捕获复制点击，通过 `document.title = '__pncopy__:N'` 回传 Python 侧，`_on_preview_title()` 新增 `__pncopy__` 分支调用 `QApplication.clipboard().setText()` 执行复制，绕过 Chromium 非安全上下文剪贴板限制
+- **复制反馈**：点击后按钮显示 ✓ 符号，800ms 后恢复 📋
+- **降级路径保留**：`PreviewBrowser`（QTextBrowser）原有的 QPushButton 复制实现完整保留，不受影响
+
 ## v1.8.1
 
 **启动性能与窗口显示优化**

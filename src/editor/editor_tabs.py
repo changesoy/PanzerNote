@@ -401,7 +401,14 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         ext = os.path.splitext(filepath)[1].lower()
         return ext in ('.md', '.markdown')
 
-    def open_file(self, filepath: str) -> int:
+    def open_file(
+        self,
+        filepath: str,
+        *,
+        activate: bool = True,
+        insert_index: int | None = None,
+        render_preview: bool = True,
+    ) -> int:
         """打开文件"""
         # 检查文件是否已经打开
         for i in range(self.count()):
@@ -410,7 +417,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             if tab_id is not None:
                 info = self._tab_info.get(tab_id, {})
                 if info.get("filepath") == filepath:
-                    self.setCurrentIndex(i)
+                    if activate:
+                        self.setCurrentIndex(i)
                     return i
 
         # 读取文件内容，检测编码
@@ -471,7 +479,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             self._connect_editor_signals(widget.editor)
             widget.editor.set_file_type(filepath)
             widget.set_base_path(os.path.dirname(os.path.abspath(filepath)))
-            widget.refresh_preview_now()
+            if render_preview:
+                widget.refresh_preview_now()
         else:
             widget = Editor(self.config, theme_engine=self._theme_engine)
             widget.load_content(content)
@@ -479,7 +488,10 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             widget.set_file_type(filepath)
 
         filename = os.path.basename(filepath)
-        index = self.addTab(widget, filename)
+        if insert_index is not None:
+            index = self.insertTab(insert_index, widget, filename)
+        else:
+            index = self.addTab(widget, filename)
 
         tab_id = self._generate_tab_id()
         widget.tab_id = tab_id
@@ -502,7 +514,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         }
         self._save_manager.register_tab(tab_id)
 
-        self.setCurrentIndex(index)
+        if activate:
+            self.setCurrentIndex(index)
         self.tab_count_changed.emit(self.count())
 
         # 恢复书签

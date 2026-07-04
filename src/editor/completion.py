@@ -129,7 +129,7 @@ class CompletionPopup(QListWidget):
     """)
 
         # QListWidget 的 viewport 在部分平台/样式下可能保持系统默认背景，显式补一次。
-        self.viewport().setStyleSheet(
+        self.viewport().setStyleSheet(  # type: ignore[union-attr]
             f"background-color: {colors.card};"
         )
 

@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer, QEvent, pyqtSignal, QPoint
 from PyQt6.QtGui import QIcon, QCloseEvent, QAction, QTextCursor
-from typing import List, Optional
+from typing import List, Optional, cast
 
 from . import __version__
 from .core.config import Config
@@ -86,10 +86,16 @@ class MainWindow(QMainWindow):
         self.theme_engine.initialize_active_theme()
 
         self._native_titlebar_filter = install_native_titlebar_theme_filter(
-            QApplication.instance(),
+            cast(QApplication, QApplication.instance()),
             lambda: self.theme_engine.get_active_theme().is_dark,
             parent=self,
         )
+
+        # 保存待恢复的最大化状态（不在 __init__ 期间显示窗口）
+        self._initial_maximized = bool(
+            self.config.get_window_setting("maximized", False)
+        )
+        self._presented = False
 
         self.plugin_manager = PluginManager(config)
         self.plugin_manager.scan_plugins()
@@ -279,13 +285,9 @@ class MainWindow(QMainWindow):
         height = self.config.get_window_setting("height", 800)
         x = self.config.get_window_setting("x", 100)
         y = self.config.get_window_setting("y", 100)
-        maximized = self.config.get_window_setting("maximized", False)
 
         self.resize(width, height)
         self.move(x, y)
-
-        if maximized:
-            self.showMaximized()
 
         self._calculate_offline_rewards()
         self._check_daily_checkin()
@@ -607,6 +609,22 @@ class MainWindow(QMainWindow):
             self.resource_bar.refresh()
 
     # === 事件处理 ===
+
+    def present(self) -> None:
+        """唯一的窗口显示入口
+
+        确保 MainWindow.__init__() 期间窗口始终不可见，
+        第一个同步恢复的文件在主窗口显示前完成控件挂载。
+        """
+        if self._presented:
+            return
+
+        self._presented = True
+
+        if self._initial_maximized:
+            self.showMaximized()
+        else:
+            self.show()
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -1651,7 +1669,7 @@ class MainWindow(QMainWindow):
         apply_native_dark_titlebar(self, is_dark)
 
         # 运行时切换主题时，顺手更新当前已经存在的顶层窗口。
-        app = QApplication.instance()
+        app = cast(QApplication, QApplication.instance())
         if app is not None:
             for widget in app.topLevelWidgets():
                 if widget.isVisible():

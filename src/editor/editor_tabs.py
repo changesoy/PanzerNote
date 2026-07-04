@@ -299,7 +299,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     def tabInserted(self, index):
         super().tabInserted(index)
         btn = _TabCloseButton(self)
-        self.tabBar().setTabButton(index, QTabBar.ButtonPosition.RightSide, btn)
+        self.tabBar().setTabButton(index, QTabBar.ButtonPosition.RightSide, btn)  # type: ignore[union-attr]
 
     def set_find_bar(self, find_bar: FindReplaceBar):
         """设置外部传入的查找替换栏"""

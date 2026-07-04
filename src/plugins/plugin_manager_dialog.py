@@ -173,7 +173,7 @@ class PluginManagerDialog(ThemeAwareMixin, QDialog):
         }}
         """)
 
-        self._list_widget.viewport().setStyleSheet(
+        self._list_widget.viewport().setStyleSheet(  # type: ignore[union-attr]
             f"background-color: {colors.card}; color: {colors.text_primary};"
         )
 

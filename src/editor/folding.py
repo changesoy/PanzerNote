@@ -243,8 +243,8 @@ class FoldingManager(QObject):
                 if block.isValid():
                     block.setVisible(False)
 
-        self._editor.viewport().update()
-        self._editor.line_number_area.update()
+        self._editor.viewport().update()  # type: ignore[union-attr]
+        self._editor.line_number_area.update()  # type: ignore[attr-defined,union-attr]
         self.fold_state_changed.emit()
 
     def toggle_fold_all(self) -> None:
@@ -269,8 +269,8 @@ class FoldingManager(QObject):
                 if block.isValid():
                     block.setVisible(False)
 
-        self._editor.viewport().update()
-        self._editor.line_number_area.update()
+        self._editor.viewport().update()  # type: ignore[union-attr]
+        self._editor.line_number_area.update()  # type: ignore[attr-defined,union-attr]
         self.fold_state_changed.emit()
 
     def _expand_all(self) -> None:
@@ -289,8 +289,8 @@ class FoldingManager(QObject):
                 if block.isValid():
                     block.setVisible(True)
 
-        self._editor.viewport().update()
-        self._editor.line_number_area.update()
+        self._editor.viewport().update()  # type: ignore[union-attr]
+        self._editor.line_number_area.update()  # type: ignore[attr-defined,union-attr]
         self.fold_state_changed.emit()
 
     def _restore_nested_folds(self, parent_heading_line: int) -> None:
@@ -350,8 +350,8 @@ class FoldingManager(QObject):
             self._restore_nested_folds(heading_line)
 
         if to_expand:
-            self._editor.viewport().update()
-            self._editor.line_number_area.update()
+            self._editor.viewport().update()  # type: ignore[union-attr]
+            self._editor.line_number_area.update()  # type: ignore[attr-defined,union-attr]
 
     def is_line_visible(self, line: int) -> bool:
         """第 line 行（1-based）是否可见。"""
@@ -388,8 +388,8 @@ class FoldingManager(QObject):
                     block.setVisible(False)
 
         if self._collapsed_blocks:
-            self._editor.viewport().update()
-            self._editor.line_number_area.update()
+            self._editor.viewport().update()  # type: ignore[union-attr]
+            self._editor.line_number_area.update()  # type: ignore[attr-defined,union-attr]
 
     @property
     def visible_block_count(self) -> int:

@@ -25,7 +25,7 @@ class ReadOnlyConfigView:
         'add_recent_file', 'add_external_file', 'remove_external_file',
         'set_resources', 'add_resource', 'set_cores', 'add_cores',
         'add_chars_typed', 'set_total_documents',
-        'set_encryption_password', 'enable_encryption', 'disable_encryption',
+        
         'update_last_login', 'ensure_directories',
         'save', 'save_settings', 'save_workspace', 'save_savegame',
         '_save_user_data_path',

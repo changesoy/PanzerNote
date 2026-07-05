@@ -514,36 +514,12 @@ class MainWindow(QMainWindow):
 
         from .core.savegame_manager import SavegameSaveResult
         result = self.config.save_savegame()
-        if result == SavegameSaveResult.SKIPPED_ENCRYPTED_UNREAD:
-            self._prompt_encrypted_savegame_save()
-
-    def _prompt_encrypted_savegame_save(self):
-        from .core.savegame_manager import SavegameSaveResult
-        msg_box = QMessageBox(self)
-        msg_box.setWindowTitle("存档已加密")
-        msg_box.setIcon(QMessageBox.Icon.Warning)
-        msg_box.setText("游戏存档已加密但未解锁，本次游戏进度无法保存。")
-        msg_box.setInformativeText("请输入密码解锁存档，或放弃本次进度。")
-        unlock_btn = msg_box.addButton("输入密码解锁", QMessageBox.ButtonRole.AcceptRole)
-        discard_btn = msg_box.addButton("放弃进度", QMessageBox.ButtonRole.DestructiveRole)
-        msg_box.exec()
-
-        if msg_box.clickedButton() == unlock_btn:
-            from PyQt6.QtWidgets import QInputDialog
-            password, ok = QInputDialog.getText(
-                self, "解锁存档", "请输入存档加密密码：",
-                QLineEdit.EchoMode.Password, ""
+        if result == SavegameSaveResult.WRITE_FAILED:
+            QMessageBox.warning(
+                self,
+                "游戏存档保存失败",
+                "游戏进度保存失败。请检查磁盘空间或文件权限。"
             )
-            if ok and password:
-                if self.config.verify_encryption_password(password):
-                    self.config.set_encryption_password(password)
-                    result = self.config.save_savegame()
-                    if result == SavegameSaveResult.SUCCESS:
-                        QMessageBox.information(self, "成功", "存档已保存。")
-                    else:
-                        QMessageBox.warning(self, "保存失败", "存档保存时发生错误。")
-                else:
-                    QMessageBox.warning(self, "密码错误", "密码不正确，存档未保存。")
 
     def _save_to_temp(self):
         """保存到暂存文件"""

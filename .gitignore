@@ -3,13 +3,9 @@
 # ============================================================
 
 # --- 项目文档报告 ---
-PanzerNote v1.6.6 技术审阅报告.md
-PanzerNote v1.6.6 详细修改规划.md
-PanzerNote v1.6.6 性能优化报告.md
-PanzerNote_Editor_Implementation_Plan_Revised.md
-新建 文本文档 (2).txt
 hotfix.txt
-深色模式修复.txt
+优化规划大纲.md
+待修分支.md
 
 # --- Python ---
 __pycache__/
@@ -39,6 +35,7 @@ pythonenv/
 # --- IDE / 编辑器 ---
 .idea/
 .vscode/
+.trae/
 *.swp
 *.swo
 *~

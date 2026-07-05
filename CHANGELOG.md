@@ -11,6 +11,20 @@
 - **复制反馈**：点击后按钮显示 ✓ 符号，800ms 后恢复 📋
 - **降级路径保留**：`PreviewBrowser`（QTextBrowser）原有的 QPushButton 复制实现完整保留，不受影响
 
+**移除存档加密系统**
+
+- **SavegameManager 简化为纯明文存档管理器**：移除 `CryptoManager`、`_encryption_password`、`_encrypted_unread` 等全部加密状态与逻辑。`SavegameSaveResult` 枚举从三个值（`SUCCESS`/`SKIPPED_ENCRYPTED_UNREAD`/`ENCRYPTION_FAILED`）简化为两个（`SUCCESS`/`WRITE_FAILED`）。`load()` 不再检测 `.encrypted` 文件，直接加载 `savegame.json`；`save()` 改为 try/except 包裹，失败时返回 `WRITE_FAILED`
+- **Config 删除加密依赖**：移除 `CryptoManager` 的导入与实例化，`SavegameManager` 不再接收 `crypto_manager` 参数。删除 `is_savegame_encrypted()`、`set_encryption_password()` 等 6 个加密代理方法
+- **MainWindow 删除加密弹窗**：删除 `_prompt_encrypted_savegame_save()` 整个方法。`_save_state()` 中 `SavegameSaveResult` 仅处理 `WRITE_FAILED`，弹窗提示检查磁盘空间或文件权限
+- **删除文件与清理依赖**：删除 `src/security/crypto_manager.py`（含 `CryptoManager`、`DecryptionError`、`MigrationError` 类），更新 `__init__.py` 导出。移除 `requirements.txt` 和 `pyproject.toml` 中的 `cryptography>=48.0.0` 依赖
+- **幽灵 API 清理**：`plugin_api_views.py` 的 `_DENIED_ATTRS` 中移除已不存在的 `set_encryption_password`、`enable_encryption`、`disable_encryption`
+- **文档同步**：README 特性概览和安全与限制章节移除存档加密相关描述；architecture.md 删除 `crypto_manager.py` 目录条目、4.11.4 整节及相关安全约束条目
+
+**兼容性说明**
+
+- 本次变更为破坏性变更。
+- `SavegameSaveResult` 枚举值变更：`SKIPPED_ENCRYPTED_UNREAD` 和 `ENCRYPTION_FAILED` 已移除，新增 `WRITE_FAILED`
+
 ## v1.8.1
 
 **启动性能与窗口显示优化**

@@ -42,7 +42,7 @@ PanzerNote 是一款以已停服二次元游戏《战车少女》（PanzerMaiden
 | 小秘书               | ✅ 完成   | 立绘 + 台词气泡 + 事件台词 + 自定义角色/皮肤/状态                                             |
 | 书签持久化           | ✅ 完成   | 书签保存到 workspace.json，关闭重开后恢复                                                     |
 | 设置系统             | ✅ 完成   | settings.json + workspace.json + savegame.json，首次运行对话框                                |
-| 安全防护体系         | ✅ 完成   | 路径验证/文件操作安全/存档加密/输入验证/拖放白名单                                            |
+| 安全防护体系         | ✅ 完成   | 路径验证/文件操作安全/输入验证/拖放白名单                                                     |
 | 插件系统             | ✅ 完成   | 生命周期/线程包装/12 种权限/热加载，2 个示例插件 + API 文档                                   |
 | 主题系统             | ✅ 完成   | JSON/YAML 外部主题/解析引擎/QSS 生成/预览/ThemeAwareMixin 全局生效/原生标题栏深色             |
 | 集中式版本管理       | ✅ 完成   | `src/__init__.py` 唯一真相源 + `verify_version.py` 一致性验证                                 |
@@ -75,7 +75,7 @@ PanzerNote/
 │   ├── core/                       # ── 核心模块 ──
 │   │   ├── config.py               # 配置管理中枢（settings/workspace 读写 + SavegameManager/SecurityManager 组合委托）
 │   │   ├── config_import_service.py # 配置导入服务（类型校验 + 白名单）
-│   │   ├── savegame_manager.py     # 存档管理器（加载/保存/加密状态/SavegameSaveResult/每日签到）
+│   │   ├── savegame_manager.py     # 存档管理器（加载/保存/每日签到）
 │   │   ├── security_manager.py     # 安全管理器（PathValidator/FileGuard/InputValidator 集成管理）
 │   │   ├── timer_manager.py        # 定时器管理中心
 │   │   ├── event_bus.py            # 事件路由系统
@@ -135,7 +135,6 @@ PanzerNote/
 │   │   ├── path_validator.py       # 路径安全验证
 │   │   ├── file_guard.py           # 文件操作安全控制
 │   │   ├── file_access_context.py  # 文件访问上下文枚举
-│   │   ├── crypto_manager.py       # 存档加密系统（PBKDF2+AES-GCM）
 │   │   └── input_validator.py      # 输入验证框架
 │   │
 │   ├── plugins/                    # ── 插件系统 ──
@@ -496,36 +495,7 @@ FileSecurityError (基类)
 - 枚举值：`USER_DOCUMENT_READ` / `USER_DOCUMENT_SAVE` / `TEMP_AUTOSAVE` / `INTERNAL_CONFIG` / `INTERNAL_SAVEGAME` / `PLUGIN_REQUEST` / `SESSION_RESTORE` / `SETTINGS_IMPORT` / `EXPORT_TARGET`
 - 为每个文件操作提供明确的语义来源，配合 `FileOpenService` 和 `FileGuard` 实现来源感知的权限分级
 
-#### 4.11.4 存档加密系统 (`security/crypto_manager.py`)
-
-- `CryptoManager` — 存档数据加密管理器，基于 PBKDF2 + AES-GCM
-- `encrypt_data(password, data)` / `decrypt_data(password, encrypted)`
-- `encrypt_savegame(password, data)` / `decrypt_savegame(password)`
-- `is_encrypted()` / `verify_password(password)`
-- `migrate_to_encrypted(password)` — 未加密 → 加密格式迁移（自动备份 + 数据验证）
-- `migrate_to_plaintext(password)` — 加密 → 未加密格式迁移
-- `_derive_key(password, salt)` — PBKDF2-HMAC-SHA256 密钥派生（600,000 次迭代，32 字节密钥）
-
-**加密信封格式**：
-
-```json
-{
-  "version": 1,
-  "salt": "<base64>",
-  "nonce": "<base64>",
-  "data": "<base64 AES-GCM ciphertext>"
-}
-```
-
-**安全异常层次**：
-
-```
-CryptoError (基类)
-├── DecryptionError   — 解密失败
-└── MigrationError    — 迁移失败
-```
-
-#### 4.11.5 输入验证框架 (`security/input_validator.py`)
+#### 4.11.4 输入验证框架 (`security/input_validator.py`)
 
 - `InputValidator` — 统一输入验证器，覆盖文件名、搜索内容、设置值
 - `validate_filename(filename)` — 宽松文件名验证（允许空扩展名）
@@ -686,38 +656,20 @@ LOADED → on_unload() → UNLOADED
 
 ### 4.14 存档管理器 (`core/savegame_manager.py`)
 
-从 `Config` 类中拆分出的独立存档管理模块，负责游戏存档的加载、保存和加密状态管理。
+从 `Config` 类中拆分出的独立存档管理模块，负责游戏存档的加载和保存。
 
-- `SavegameManager(gamedata_dir, crypto_manager, logger)` — 存档管理器
-- `load()` — 加载存档（自动检测加密状态，加密存档需先 `set_encryption_password()` 解密）
+- `SavegameManager(file_guard, gamedata_dir)` — 存档管理器
+- `load()` — 从 `savegame.json` 加载存档
 - `save()` — 保存存档，返回 `SavegameSaveResult` 枚举值
-- `set_encryption_password(password)` — 设置加密密码（用于解密和加密保存）
-- `verify_encryption_password(password)` — 验证密码正确性
 - `add_resource(key, amount)` / `get_resources()` — 资源 CRUD
-- `is_encrypted_unread()` — 检测存档是否已加密但未解锁
 - `check_daily_checkin()` — 每日签到检查，首次启动自动发放奖励（燃料/弹药/钢材/铝材各+100）
-- `_backup_encrypted_file()` — 加密存档安全备份（`.encrypted.bak`）
 
 **SavegameSaveResult 枚举**：
 
-| 值                         | 说明                                 |
-| -------------------------- | ------------------------------------ |
-| `SUCCESS`                  | 保存成功                             |
-| `SKIPPED_ENCRYPTED_UNREAD` | 存档已加密但未解锁，跳过保存以防覆写 |
-| `ENCRYPTION_FAILED`        | 加密保存失败，回退到明文保存         |
-
-**加密存档保存流程**：
-
-1. 检查 `_encrypted_unread` 标记，若为 True 则返回 `SKIPPED_ENCRYPTED_UNREAD`
-2. 若有加密密码且存档已加密，尝试加密保存
-3. 加密失败时回退到明文保存并返回 `ENCRYPTION_FAILED`
-4. 非加密存档直接明文保存，返回 `SUCCESS`
-
-**MainWindow 集成**：
-
-- 关闭窗口时检查 `SavegameSaveResult`，若为 `SKIPPED_ENCRYPTED_UNREAD` 则弹出密码输入对话框
-- 用户输入正确密码后解锁存档并重新保存
-- 用户可选择放弃进度
+| 值             | 说明     |
+| -------------- | -------- |
+| `SUCCESS`      | 保存成功 |
+| `WRITE_FAILED` | 写入失败 |
 
 ### 4.15 集中式版本管理
 
@@ -949,10 +901,9 @@ pip install mypy>=1.20                         # 类型检查
 11. **路径安全**：所有文件操作路径必须通过 `PathValidator` 白名单验证，禁止直接使用用户输入构造文件路径。`config.py` 在初始化时将 `_app_dir` 和 `_base_path` 加入白名单
 12. **文件操作安全**：使用 `FileGuard.safe_read()` / `safe_write()` 替代直接 `open()`，确保文件大小和超时控制
 13. **输入验证**：所有用户输入（文件名、搜索内容、设置值）必须通过 `InputValidator` 验证。文件名用 `validate_filename_strict()`，搜索内容用 `validate_search()`，设置值用 `validate_setting()`
-14. **存档加密**：`CryptoManager` 使用 PBKDF2+AES-GCM 加密存档数据，密钥由用户密码派生。迁移操作自动备份并验证数据一致性
-15. **加密存档保存**：`SavegameManager.save()` 返回 `SavegameSaveResult` 枚举，加密但未解锁的存档返回 `SKIPPED_ENCRYPTED_UNREAD` 而非静默跳过。MainWindow 在关闭时检查此状态并提示用户输入密码解锁
-16. **导出安全**：Markdown 转 PDF/HTML 时显式禁用 raw HTML（`MarkdownIt("commonmark", {"html": False})`），python-markdown fallback 仅启用 `tables` 扩展
-17. **日志脱敏**：`ErrorHandler.sanitize()` 自动脱敏 password/token/secret/api_key/key 等敏感字段，日志中不出现明文凭据
+14. **存档保存失败提示**：`SavegameManager.save()` 返回 `SavegameSaveResult` 枚举，写入失败时返回 `WRITE_FAILED`。MainWindow 在关闭时检查此状态并弹出警告
+15. **导出安全**：Markdown 转 PDF/HTML 时显式禁用 raw HTML（`MarkdownIt("commonmark", {"html": False})`），python-markdown fallback 仅启用 `tables` 扩展
+16. **日志脱敏**：`ErrorHandler.sanitize()` 自动脱敏 password/token/secret/api_key/key 等敏感字段，日志中不出现明文凭据
 
 ### 保存与会话约束
 

@@ -19,9 +19,8 @@ from ..utils.exceptions import safe_call
 from ..security.path_validator import PathValidator, PathSecurityError
 from ..security.file_guard import FileGuard, FileSizeExceededError, FileOperationTimeoutError
 from ..security.file_access_context import FileAccessContext
-from ..security.crypto_manager import CryptoManager
 from ..security.input_validator import InputValidator
-from .savegame_manager import SavegameManager
+from .savegame_manager import SavegameManager, SavegameSaveResult
 from .security_manager import SecurityManager
 
 
@@ -129,10 +128,6 @@ class Config:
         if self._base_path:
             self._path_validator.add_allowed_root(self._base_path)
 
-        self._crypto_manager = CryptoManager(
-            self._get_config_dir(), savegame_dir=self._get_gamedata_dir()
-        )
-
         self._security_manager = SecurityManager(
             path_validator=self._path_validator,
             file_guard=self._file_guard,
@@ -141,7 +136,6 @@ class Config:
 
         self._savegame_manager = SavegameManager(
             file_guard=self._file_guard,
-            crypto_manager=self._crypto_manager,
             gamedata_dir=self._get_gamedata_dir(),
         )
 
@@ -250,8 +244,7 @@ class Config:
         os.makedirs(config_dir, exist_ok=True)
         self._save_json(os.path.join(config_dir, "workspace.json"), self._workspace)
 
-    def save_savegame(self) -> Any:
-        from .savegame_manager import SavegameSaveResult
+    def save_savegame(self) -> SavegameSaveResult:
         return self._savegame_manager.save()
 
     # === 路径管理 ===
@@ -497,24 +490,6 @@ class Config:
 
     def get_input_validator(self) -> InputValidator:
         return self._input_validator
-
-    def is_savegame_encrypted(self) -> bool:
-        return self._savegame_manager.is_savegame_encrypted()
-
-    def set_encryption_password(self, password: str) -> None:
-        self._savegame_manager.set_encryption_password(password)
-
-    def has_encryption_password(self) -> bool:
-        return self._savegame_manager.has_encryption_password()
-
-    def enable_encryption(self, password: str) -> bool:
-        return self._savegame_manager.enable_encryption(password)
-
-    def disable_encryption(self, password: str) -> bool:
-        return self._savegame_manager.disable_encryption(password)
-
-    def verify_encryption_password(self, password: str) -> bool:
-        return self._savegame_manager.verify_encryption_password(password)
 
     def validate_setting_value(
         self,

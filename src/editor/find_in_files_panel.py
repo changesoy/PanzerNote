@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
+    QApplication,
 )
 
 from .find_in_files_service import FindInFilesWorker
@@ -264,7 +265,7 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
         match_node.setData(0, Qt.ItemDataRole.UserRole, (filepath, line_num))
 
         font = QFont("Consolas, Courier New, monospace")
-        font.setPointSize(font.pointSize() - 1)
+        font.setPointSize(QApplication.font().pointSize() - 1)
         match_node.setFont(0, font)
 
         file_node.addChild(match_node)

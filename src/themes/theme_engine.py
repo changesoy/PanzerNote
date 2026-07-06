@@ -64,6 +64,9 @@ class ThemeColorScheme:
     game_garage: str = "#FF9800"
     game_collection: str = "#9C27B0"
 
+    bg_codeblock: str = "#EDF3FA"
+    codeblock_border: str = "#D8DEE9"
+
     selection_bg: str = "#BBDEFB"
     selection_fg: str = "#212121"
     hover_bg: str = "#BBDEFB"
@@ -243,6 +246,8 @@ class ThemeEngine(QObject):
                 game_build="#4CAF50",
                 game_garage="#FF9800",
                 game_collection="#9C27B0",
+                bg_codeblock="#2D2D30",
+                codeblock_border="#3E3E42",
                 selection_bg="#264F78",
                 selection_fg="#E0E0E0",
                 hover_bg="#264F78",

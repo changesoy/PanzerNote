@@ -111,24 +111,45 @@ PREVIEW_HTML_TEMPLATE = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <style>
+:root {{
+    --bg-card: var(--css-bg-card, #fff);
+    --text-primary: var(--css-text-primary, #2b2b2b);
+    --text-secondary: var(--css-text-secondary, #555);
+    --text-muted: var(--css-text-muted, #656565);
+    --border: var(--css-border, #d0d0d0);
+    --border-soft: var(--css-border-soft, #d9d9d9);
+    --divider: var(--css-divider, #e0e0e0);
+    --surface: var(--css-surface, #f0f0f0);
+    --surface-soft: var(--css-surface-soft, #f9f9f9);
+    --surface-hover: var(--css-surface-hover, #fafafa);
+    --primary: var(--css-primary, #2470B3);
+    --primary-hover: var(--css-primary-hover, #1a5a96);
+    --bg-codeblock: var(--css-bg-codeblock, #EDF3FA);
+    --codeblock-border: var(--css-codeblock-border, #D8DEE9);
+    --toc-bg: var(--css-toc-bg, #f2f6fc);
+    --scrollbar-track: var(--css-scrollbar-track, #f0f0f0);
+    --scrollbar-thumb: var(--css-scrollbar-thumb, #e0e0e0);
+    --scrollbar-thumb-hover: var(--css-scrollbar-thumb-hover, #bababa);
+}}
+
 /* ========== 基础 ========== */
 body {{
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei UI",
                  "Microsoft YaHei", Helvetica, Arial, sans-serif;
     font-size: 14px;
     line-height: 1.7;
-    color: #2b2b2b;
+    color: var(--text-primary);
     padding: 12px 20px 40px 20px;
     margin: 0;
     max-width: 100%;
-    background: #fff;
+    background: var(--bg-card);
     word-wrap: break-word;
     overflow-wrap: break-word;
 }}
 
 /* ========== 标题 ========== */
 h1, h2, h3, h4, h5, h6 {{
-    color: #2b2b2b;
+    color: var(--text-primary);
     font-weight: bold;
     margin-top: 24px;
     margin-bottom: 12px;
@@ -136,18 +157,18 @@ h1, h2, h3, h4, h5, h6 {{
 }}
 h1 {{
     font-size: 1.85em;
-    border-bottom: 1px solid #d0d0d0;
+    border-bottom: 1px solid var(--border);
     padding-bottom: 6px;
 }}
 h2 {{
     font-size: 1.5em;
-    border-bottom: 1px solid #d9d9d9;
+    border-bottom: 1px solid var(--border-soft);
     padding-bottom: 5px;
 }}
 h3 {{ font-size: 1.3em; }}
 h4 {{ font-size: 1.15em; }}
 h5 {{ font-size: 1.05em; }}
-h6 {{ font-size: 1em; color: #656565; }}
+h6 {{ font-size: 1em; color: var(--text-muted); }}
 
 /* ========== 段落 / 文本 ========== */
 p {{ margin: 8px 0; }}
@@ -157,21 +178,21 @@ em {{ font-style: italic; }}
 /* ========== 行内代码 ========== */
 :not(pre) > code {{
     font-family: "JetBrains Mono", Consolas, "Courier New", "Microsoft YaHei", monospace;
-    background: #f0f0f0;
+    background: var(--surface);
     padding: 1px 5px;
     border-radius: 3px;
     font-size: 0.92em;
-    color: #2b2b2b;
-    border: 1px solid #e0e0e0;
+    color: var(--text-primary);
+    border: 1px solid var(--divider);
 }}
 
 /* ========== 引用 ========== */
 blockquote {{
-    border-left: 3px solid #bababa;
+    border-left: 3px solid var(--scrollbar-thumb-hover);
     padding: 4px 16px;
     margin: 10px 0;
-    background: #f9f9f9;
-    color: #555;
+    background: var(--surface-soft);
+    color: var(--text-secondary);
 }}
 blockquote p {{ margin: 4px 0; }}
 
@@ -182,25 +203,25 @@ table {{
     margin: 12px 0;
 }}
 th, td {{
-    border: 1px solid #d0d0d0;
+    border: 1px solid var(--border);
     padding: 6px 12px;
     text-align: left;
 }}
 th {{
-    background: #f0f0f0;
+    background: var(--surface);
     font-weight: 600;
 }}
-tr:nth-child(even) {{ background: #fafafa; }}
+tr:nth-child(even) {{ background: var(--surface-hover); }}
 
 /* ========== 链接 ========== */
-a {{ color: #2470B3; text-decoration: none; }}
-a:hover {{ text-decoration: underline; color: #1a5a96; }}
+a {{ color: var(--primary); text-decoration: none; }}
+a:hover {{ text-decoration: underline; color: var(--primary-hover); }}
 
 /* ========== 图片 ========== */
 img {{ max-width: 100%; border-radius: 3px; }}
 
 /* ========== 分割线 ========== */
-hr {{ border: none; border-top: 1px solid #d0d0d0; margin: 20px 0; }}
+hr {{ border: none; border-top: 1px solid var(--border); margin: 20px 0; }}
 
 /* ========== 列表 ========== */
 ul, ol {{ padding-left: 26px; margin: 6px 0; }}
@@ -214,7 +235,7 @@ li input[type="checkbox"] {{
 
 /* ========== TOC 目录 ========== */
 .toc {{
-    background: #f2f6fc;
+    background: var(--toc-bg);
     border-radius: 4px;
     padding: 10px 16px;
     margin: 10px 0 20px 0;
@@ -228,8 +249,8 @@ li input[type="checkbox"] {{
 }}
 .toc > ul {{ padding-left: 0; }}
 .toc li {{ margin: 2px 0; }}
-.toc a {{ color: #2470B3; text-decoration: none; }}
-.toc a:hover {{ text-decoration: underline; color: #1a5a96; }}
+.toc a {{ color: var(--primary); text-decoration: none; }}
+.toc a:hover {{ text-decoration: underline; color: var(--primary-hover); }}
 
 /* ========== 代码块容器 ========== */
 .code-container {{
@@ -237,8 +258,8 @@ li input[type="checkbox"] {{
     margin: 16px 0;
     padding: 0;
     border-radius: 6px;
-    background: #EDF3FA;
-    border: 1px solid #D8DEE9;
+    background: var(--bg-codeblock);
+    border: 1px solid var(--codeblock-border);
     overflow: auto;
 }}
 .code-pre {{
@@ -258,7 +279,7 @@ li input[type="checkbox"] {{
     font-size: 14px;
     line-height: 1.55;
     white-space: pre;
-    color: #2b2b2b;
+    color: var(--text-primary);
 }}
 .code-line {{
     display: block;
@@ -322,18 +343,18 @@ section[data-fold-heading].folded {{
     height: 12px;
 }}
 ::-webkit-scrollbar-track {{
-    background: #f0f0f0;
+    background: var(--scrollbar-track);
 }}
 ::-webkit-scrollbar-thumb {{
-    background: #e0e0e0;
+    background: var(--scrollbar-thumb);
     border-radius: 6px;
-    border: 2px solid #f0f0f0;
+    border: 2px solid var(--scrollbar-track);
 }}
 ::-webkit-scrollbar-thumb:hover {{
-    background: #bababa;
+    background: var(--scrollbar-thumb-hover);
 }}
 ::-webkit-scrollbar-corner {{
-    background: #f0f0f0;
+    background: var(--scrollbar-track);
 }}
 </style>
 </head>
@@ -564,44 +585,48 @@ window.updateFoldVisibility = function(collapsedLinesJson) {{
 
 
 # ════════════════════════════════════════════════════════
-#  暗色预览模板（基于浅色模板做颜色替换，带缓存）
+#  预览模板 CSS 变量注入（替代旧的正则颜色替换）
 # ════════════════════════════════════════════════════════
 
-_DARK_COLOR_MAP = {
-    "#EDF3FA": "#2D2D30",
-    "#D8DEE9": "#3E3E42",
-    "#2470B3": "#569CD6",
-    "#1a5a96": "#6CB6FF",
-    "#f2f6fc": "#252526",
-    "#2b2b2b": "#D4D4D4",
-    "#d0d0d0": "#444444",
-    "#d9d9d9": "#444444",
-    "#656565": "#9E9E9E",
-    "#f0f0f0": "#333333",
-    "#e0e0e0": "#555555",
-    "#bababa": "#666666",
-    "#f9f9f9": "#2A2A2A",
-    "#fafafa": "#252525",
-    "#fff": "#1E1E1E",
-    "#555": "#B0B0B0",
-}
+def _build_preview_css_vars(theme_engine=None) -> str:
+    """根据主题引擎构造 :root CSS 变量覆盖块。
 
-_DARK_TEMPLATE_CACHE: Optional[str] = None
+    若 theme_engine 为 None 或无激活主题，返回空字符串（使用模板内联默认值）。
+    """
+    if theme_engine is None:
+        return ""
+    try:
+        c = theme_engine.get_active_theme().colors
+    except Exception:
+        return ""
 
-
-def _get_dark_preview_template() -> str:
-    global _DARK_TEMPLATE_CACHE
-    if _DARK_TEMPLATE_CACHE is None:
-        template = PREVIEW_HTML_TEMPLATE
-        for light, dark in _DARK_COLOR_MAP.items():
-            # 用正则确保颜色值后不跟十六进制字符，避免 #555 破坏 #555555 等子串问题
-            template = re.sub(
-                re.escape(light) + r'(?![0-9a-fA-F])',
-                dark,
-                template
-            )
-        _DARK_TEMPLATE_CACHE = template
-    return _DARK_TEMPLATE_CACHE
+    # 颜色语义映射：CSS 变量名 → 主题 token 值
+    # light/dark 主题 token 已各自配置正确色值，无需再做明暗判断
+    vars_map = {
+        "bg-card": c.background,
+        "text-primary": c.text_primary,
+        "text-secondary": c.text_secondary,
+        "text-muted": c.text_disabled,
+        "border": c.border,
+        "border-soft": c.divider,
+        "divider": c.divider,
+        "surface": c.surface,
+        "surface-soft": c.surface,
+        "surface-hover": c.sidebar_bg,
+        "primary": c.primary,
+        "primary-hover": c.primary_dark,
+        "bg-codeblock": c.bg_codeblock,
+        "codeblock-border": c.codeblock_border,
+        "toc-bg": c.sidebar_bg,
+        "scrollbar-track": c.surface,
+        "scrollbar-thumb": c.border,
+        "scrollbar-thumb-hover": c.text_disabled,
+    }
+    lines = [":root {"]
+    for k, v in vars_map.items():
+        lines.append(f"    --css-{k}: {v};")
+    lines.append("}")
+    return "\n".join(lines)
 
 
 # ════════════════════════════════════════════════════════
@@ -1040,9 +1065,15 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         else:
             theme_engine = getattr(self, '_theme_engine', None)
             is_dark = bool(theme_engine and theme_engine.get_active_theme().is_dark)
-            template = _get_dark_preview_template() if is_dark else PREVIEW_HTML_TEMPLATE
+            css_vars = _build_preview_css_vars(theme_engine)
+            template = PREVIEW_HTML_TEMPLATE
             try:
-                full_html = template.format(content=html_content)
+                if css_vars:
+                    full_html = template.format(content=html_content).replace(
+                        "</style>", css_vars + "\n</style>", 1
+                    )
+                else:
+                    full_html = template.format(content=html_content)
             except Exception as exc:
                 get_logger(__name__).error(
                     "Markdown preview template format failed: %s",

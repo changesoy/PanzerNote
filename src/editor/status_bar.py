@@ -14,11 +14,12 @@ class StatusBarWidget(ThemeAwareMixin, QStatusBar):
 
     eol_toggled = pyqtSignal(str)
 
-    def __init__(self, theme_engine=None, parent=None):
+    def __init__(self, theme_engine, parent=None):
         super().__init__(parent)
+        if theme_engine is None:
+            raise RuntimeError("StatusBar 必须传入 theme_engine，不允许为 None")
         self._init_ui()
-        if theme_engine:
-            self._init_theme(theme_engine)
+        self._init_theme(theme_engine)
 
     def _init_ui(self):
         self._separator_style = ""

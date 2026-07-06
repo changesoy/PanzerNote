@@ -29,6 +29,8 @@ class SidePanelHost(ThemeAwareMixin, QWidget):
 
     def __init__(self, theme_engine, parent: QWidget | None = None):
         QWidget.__init__(self, parent)
+        if theme_engine is None:
+            raise RuntimeError("SidePanelHost 必须传入 theme_engine，不允许为 None")
 
         self._panels: Dict[str, QWidget] = {}
         self._buttons: Dict[str, QToolButton] = {}
@@ -177,10 +179,10 @@ class SidePanelHost(ThemeAwareMixin, QWidget):
 
     def _apply_theme_colors(self, colors) -> None:
         self._last_colors = colors
-        bg = getattr(colors, "sidebar_bg", "#FAFAFA")
-        border = getattr(colors, "border", "#E0E0E0")
-        accent = getattr(colors, "primary", "#2196F3")
-        surface = getattr(colors, "surface", "#F5F5F5")
+        bg = colors.sidebar_bg
+        border = colors.border
+        accent = colors.primary
+        surface = colors.surface
 
         self.setStyleSheet(f"""
             #side_panel_host {{
@@ -204,9 +206,10 @@ class SidePanelHost(ThemeAwareMixin, QWidget):
         c = self._last_colors
         if c is None:
             return
-        text = getattr(c, "text_primary", "#212121")
-        border = getattr(c, "border", "#E0E0E0")
-        accent = getattr(c, "primary", "#2196F3")
+        text = c.text_primary
+        border = c.border
+        accent = c.primary
+        accent_fg = c.accent_fg
         btn.setStyleSheet(f"""
             QToolButton {{
                 background: transparent;
@@ -223,7 +226,7 @@ class SidePanelHost(ThemeAwareMixin, QWidget):
             QToolButton:checked {{
                 background-color: {accent};
                 border-color: {accent};
-                color: #FFFFFF;
+                color: {accent_fg};
             }}
         """)
 

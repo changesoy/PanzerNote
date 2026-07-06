@@ -27,8 +27,10 @@ class ShortcutEditDialog(ThemeAwareMixin, QDialog):
     shortcut_changed = pyqtSignal(str, str)
 
     def __init__(self, action_id: str, action_name: str,
-                 current_shortcut: str, parent=None):
+                 current_shortcut: str, theme_engine, parent=None):
         super().__init__(parent)
+        if theme_engine is None:
+            raise RuntimeError("ShortcutEditDialog 必须传入 theme_engine，不允许为 None")
         self._action_id = action_id
         self._action_name = action_name
 
@@ -84,9 +86,7 @@ class ShortcutEditDialog(ThemeAwareMixin, QDialog):
 
         self._new_shortcut = current_shortcut
 
-        theme_engine = getattr(parent, "_theme_engine", None)
-        if theme_engine:
-            self._init_theme(theme_engine)
+        self._init_theme(theme_engine)
 
     def _apply_theme_colors(self, colors):
         self.setStyleSheet(scale_stylesheet(f"""
@@ -160,13 +160,14 @@ class ShortcutEditDialog(ThemeAwareMixin, QDialog):
 
 class ShortcutPanel(ThemeAwareMixin, QWidget):
 
-    def __init__(self, shortcut_manager, theme_engine=None, parent=None):
+    def __init__(self, shortcut_manager, theme_engine, parent=None):
         super().__init__(parent)
+        if theme_engine is None:
+            raise RuntimeError("ShortcutPanel 必须传入 theme_engine，不允许为 None")
         self._manager = shortcut_manager
         self._edit_callback = None
         self._init_ui()
-        if theme_engine:
-            self._init_theme(theme_engine)
+        self._init_theme(theme_engine)
 
     def set_edit_callback(self, callback):
         self._edit_callback = callback
@@ -383,7 +384,7 @@ class ShortcutPanel(ThemeAwareMixin, QWidget):
         name = item.text(0)
         current_shortcut = self._manager.get_shortcut(action_id) or ""
 
-        dialog = ShortcutEditDialog(action_id, name, current_shortcut, self)
+        dialog = ShortcutEditDialog(action_id, name, current_shortcut, self._theme_engine, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             new_shortcut = dialog.get_new_shortcut()
             if new_shortcut == "__reset__":

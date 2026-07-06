@@ -159,7 +159,7 @@ class ThemePreviewWidget(QWidget):
             swatch.setFixedSize(40, 20)
             swatch.setStyleSheet(
                 f"background-color: {color_hex}; "
-                f"border: 1px solid #999; border-radius: 2px;"
+                f"border: 1px solid {c.border}; border-radius: 2px;"
             )
             hex_label = QLabel(color_hex)
             hex_label.setFont(QFont("Consolas", 9))
@@ -191,7 +191,7 @@ class ThemePreviewWidget(QWidget):
             swatch.setFixedSize(40, 20)
             swatch.setStyleSheet(
                 f"background-color: {color_hex}; "
-                f"border: 1px solid #999; border-radius: 2px;"
+                f"border: 1px solid {c.border}; border-radius: 2px;"
             )
             hex_label = QLabel(color_hex)
             hex_label.setFont(QFont("Consolas", 9))
@@ -224,7 +224,7 @@ class ThemePreviewWidget(QWidget):
             swatch.setFixedSize(40, 20)
             swatch.setStyleSheet(
                 f"background-color: {color_hex}; "
-                f"border: 1px solid #999; border-radius: 2px;"
+                f"border: 1px solid {c.border}; border-radius: 2px;"
             )
             hex_label = QLabel(color_hex)
             hex_label.setFont(QFont("Consolas", 9))
@@ -253,7 +253,7 @@ class ThemePreviewWidget(QWidget):
             swatch.setFixedSize(40, 20)
             swatch.setStyleSheet(
                 f"background-color: {color_hex}; "
-                f"border: 1px solid #999; border-radius: 2px;"
+                f"border: 1px solid {c.border}; border-radius: 2px;"
             )
             label = QLabel(label_text)
             hex_label = QLabel(color_hex)

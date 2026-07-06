@@ -45,12 +45,14 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
     def __init__(
         self,
         get_workspace_root: Callable[[], str],
+        theme_engine,
         get_open_files: Callable[[], list[str]] | None = None,
         get_recent_files: Callable[[], list[str]] | None = None,
-        theme_engine=None,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
+        if theme_engine is None:
+            raise RuntimeError("FindInFilesPanel 必须传入 theme_engine，不允许为 None")
         self._get_workspace_root = get_workspace_root
         self._get_open_files = get_open_files or (lambda: [])
         self._get_recent_files = get_recent_files or (lambda: [])
@@ -74,7 +76,7 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
         # --- 范围选择 ---
         scope_layout = QHBoxLayout()
         self._scope_label = QLabel("范围:")
-        self._scope_label.setStyleSheet("font-size: 11px; color: #757575;")
+        self._scope_label.setStyleSheet("font-size: 11px;")
         scope_layout.addWidget(self._scope_label)
 
         self._scope_combo = QComboBox()
@@ -124,13 +126,12 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
 
         # --- 状态栏 ---
         self._status_label = QLabel("")
-        self._status_label.setStyleSheet("color: #757575; font-size: 11px;")
+        self._status_label.setStyleSheet("font-size: 11px;")
         layout.addWidget(self._status_label)
 
         self.setMinimumWidth(180)
 
-        if theme_engine:
-            self._init_theme(theme_engine)
+        self._init_theme(theme_engine)
 
     def _apply_theme_colors(self, colors):
         self._scope_label.setStyleSheet(f"font-size: 11px; color: {colors.text_secondary};")

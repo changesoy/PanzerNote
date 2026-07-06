@@ -112,24 +112,24 @@ PREVIEW_HTML_TEMPLATE = """<!DOCTYPE html>
 <meta charset="utf-8">
 <style>
 :root {{
-    --bg-card: var(--css-bg-card, #fff);
-    --text-primary: var(--css-text-primary, #2b2b2b);
-    --text-secondary: var(--css-text-secondary, #555);
-    --text-muted: var(--css-text-muted, #656565);
-    --border: var(--css-border, #d0d0d0);
-    --border-soft: var(--css-border-soft, #d9d9d9);
-    --divider: var(--css-divider, #e0e0e0);
-    --surface: var(--css-surface, #f0f0f0);
-    --surface-soft: var(--css-surface-soft, #f9f9f9);
-    --surface-hover: var(--css-surface-hover, #fafafa);
-    --primary: var(--css-primary, #2470B3);
-    --primary-hover: var(--css-primary-hover, #1a5a96);
-    --bg-codeblock: var(--css-bg-codeblock, #EDF3FA);
-    --codeblock-border: var(--css-codeblock-border, #D8DEE9);
-    --toc-bg: var(--css-toc-bg, #f2f6fc);
-    --scrollbar-track: var(--css-scrollbar-track, #f0f0f0);
-    --scrollbar-thumb: var(--css-scrollbar-thumb, #e0e0e0);
-    --scrollbar-thumb-hover: var(--css-scrollbar-thumb-hover, #bababa);
+    --bg-card: var(--css-bg-card);
+    --text-primary: var(--css-text-primary);
+    --text-secondary: var(--css-text-secondary);
+    --text-muted: var(--css-text-muted);
+    --border: var(--css-border);
+    --border-soft: var(--css-border-soft);
+    --divider: var(--css-divider);
+    --surface: var(--css-surface);
+    --surface-soft: var(--css-surface-soft);
+    --surface-hover: var(--css-surface-hover);
+    --primary: var(--css-primary);
+    --primary-hover: var(--css-primary-hover);
+    --bg-codeblock: var(--css-bg-codeblock);
+    --codeblock-border: var(--css-codeblock-border);
+    --toc-bg: var(--css-toc-bg);
+    --scrollbar-track: var(--css-scrollbar-track);
+    --scrollbar-thumb: var(--css-scrollbar-thumb);
+    --scrollbar-thumb-hover: var(--css-scrollbar-thumb-hover);
 }}
 
 /* ========== 基础 ========== */
@@ -588,17 +588,12 @@ window.updateFoldVisibility = function(collapsedLinesJson) {{
 #  预览模板 CSS 变量注入（替代旧的正则颜色替换）
 # ════════════════════════════════════════════════════════
 
-def _build_preview_css_vars(theme_engine=None) -> str:
+def _build_preview_css_vars(theme_engine) -> str:
     """根据主题引擎构造 :root CSS 变量覆盖块。
 
-    若 theme_engine 为 None 或无激活主题，返回空字符串（使用模板内联默认值）。
+    theme_engine 必须传入，不允许为 None。
     """
-    if theme_engine is None:
-        return ""
-    try:
-        c = theme_engine.get_active_theme().colors
-    except Exception:
-        return ""
+    c = theme_engine.get_active_theme().colors
 
     # 颜色语义映射：CSS 变量名 → 主题 token 值
     # light/dark 主题 token 已各自配置正确色值，无需再做明暗判断
@@ -643,8 +638,11 @@ class PreviewBrowser(QTextBrowser):
          垂直范围内，是则在右上角显示浮动 QPushButton
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, theme_engine, parent=None):
         super().__init__(parent)
+        if theme_engine is None:
+            raise RuntimeError("PreviewBrowser 必须传入 theme_engine，不允许为 None")
+        self._theme_engine = theme_engine
         self.setMouseTracking(True)
         self.setOpenLinks(False)
         self.anchorClicked.connect(self._on_anchor_clicked)
@@ -664,19 +662,8 @@ class PreviewBrowser(QTextBrowser):
         self._copy_btn.setToolTip("复制到剪贴板")
         self._copy_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self._copy_btn.hide()
-        self._copy_btn.setStyleSheet(
-            "QPushButton {"
-            "  background: rgba(255,255,255,0.92);"
-            "  border: 1px solid #c0c0c0;"
-            "  border-radius: 3px;"
-            "  font-size: 12px;"
-            "  padding: 0;"
-            "}"
-            "QPushButton:hover {"
-            "  background: #e0e0e0;"
-            "  border-color: #999;"
-            "}"
-        )
+        colors = theme_engine.get_active_theme().colors
+        self._apply_copy_btn_style(colors)
         self._copy_btn.clicked.connect(self._copy_current)
         self._copy_btn.installEventFilter(self)
 
@@ -686,6 +673,22 @@ class PreviewBrowser(QTextBrowser):
         self._hover_timer.setInterval(30)
         self._hover_timer.timeout.connect(self._check_hover)
         self._mouse_pos = QPoint()
+
+    def _apply_copy_btn_style(self, colors) -> None:
+        """使用主题色更新浮动复制按钮样式。"""
+        self._copy_btn.setStyleSheet(
+            f"QPushButton {{"
+            f"  background: {colors.card};"
+            f"  border: 1px solid {colors.border};"
+            f"  border-radius: 3px;"
+            f"  font-size: 12px;"
+            f"  padding: 0;"
+            f"}}"
+            f"QPushButton:hover {{"
+            f"  background: {colors.surface};"
+            f"  border-color: {colors.text_disabled};"
+            f"}}"
+        )
 
     # ──────────── 公开方法 ────────────
 
@@ -826,11 +829,13 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
     def __init__(
         self,
         config: Config,
-        theme_engine=None,
+        theme_engine,
         webengine_runtime: WebEngineRuntime | None = None,
         parent=None,
     ):
         super().__init__(parent)
+        if theme_engine is None:
+            raise RuntimeError("MarkdownPreviewWidget 必须传入 theme_engine，不允许为 None")
         self.config = config
         self._theme_engine = theme_engine
         self._webengine_runtime = webengine_runtime
@@ -901,7 +906,7 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         if HAS_WEBENGINE:
             self.preview = QWebEngineView()
         else:
-            self.preview = PreviewBrowser(self)
+            self.preview = PreviewBrowser(self._theme_engine, self)
             self.preview.setFont(QFont("Microsoft YaHei", 11))
             get_logger(__name__).warning(
                 "QWebEngineView 导入失败，预览回退到 QTextBrowser（源码行号同步不可用）。"
@@ -938,24 +943,11 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         # 拖动分隔条改变预览宽度后，锚点像素位置整体变化，需重新同步
         self.splitter.splitterMoved.connect(lambda *_: self._schedule_resync())
 
-        if self._theme_engine:
-            self._init_theme(self._theme_engine)
+        self._init_theme(self._theme_engine)
 
     def _apply_theme_colors(self, colors):
         if isinstance(self.preview, PreviewBrowser):
-            self.preview._copy_btn.setStyleSheet(
-                f"QPushButton {{"
-                f"  background: {colors.card};"
-                f"  border: 1px solid {colors.border};"
-                f"  border-radius: 3px;"
-                f"  font-size: 12px;"
-                f"  padding: 0;"
-                f"}}"
-                f"QPushButton:hover {{"
-                f"  background: {colors.surface};"
-                f"  border-color: {colors.text_disabled};"
-                f"}}"
-            )
+            self.preview._apply_copy_btn_style(colors)
         # 主题变更时重建预览以应用新 CSS（重置标志让 _push_to_preview 走 setHtml 路径）
         self._html_template_loaded = False
         if getattr(self, 'editor', None) is not None:
@@ -1063,17 +1055,12 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             if page is not None:
                 page.runJavaScript(js)
         else:
-            theme_engine = getattr(self, '_theme_engine', None)
-            is_dark = bool(theme_engine and theme_engine.get_active_theme().is_dark)
-            css_vars = _build_preview_css_vars(theme_engine)
+            css_vars = _build_preview_css_vars(self._theme_engine)
             template = PREVIEW_HTML_TEMPLATE
             try:
-                if css_vars:
-                    full_html = template.format(content=html_content).replace(
-                        "</style>", css_vars + "\n</style>", 1
-                    )
-                else:
-                    full_html = template.format(content=html_content)
+                full_html = template.format(content=html_content).replace(
+                    "</style>", css_vars + "\n</style>", 1
+                )
             except Exception as exc:
                 get_logger(__name__).error(
                     "Markdown preview template format failed: %s",
@@ -1081,16 +1068,12 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
                     exc_info=True,
                 )
 
-                if is_dark:
-                    fallback_bg = "#1E1E1E"
-                    fallback_text = "#D4D4D4"
-                    fallback_code_bg = "#2D2D30"
-                    fallback_border = "#3E3E42"
-                else:
-                    fallback_bg = "#FFFFFF"
-                    fallback_text = "#2B2B2B"
-                    fallback_code_bg = "#EDF3FA"
-                    fallback_border = "#D9D9D9"
+                colors = self._theme_engine.get_active_theme().colors
+                fallback_bg = colors.background
+                fallback_text = colors.text_primary
+                fallback_code_bg = colors.bg_codeblock
+                fallback_border = colors.codeblock_border
+                fallback_link = colors.primary
 
                 full_html = f"""<!DOCTYPE html>
 <html>
@@ -1120,7 +1103,7 @@ code {{
     font-family: Consolas, "Courier New", monospace;
 }}
 a {{
-    color: #569CD6;
+    color: {fallback_link};
 }}
 </style>
 </head>
@@ -1366,9 +1349,7 @@ a {{
         - 深色主题下，历史默认浅色主题 pycharm_light 视为自动；
         - 其它显式主题名保留，尊重用户选择。
         """
-        is_dark = bool(
-            self._theme_engine and self._theme_engine.get_active_theme().is_dark
-        )
+        is_dark = self._theme_engine.get_active_theme().is_dark
         fallback_theme = "vscode_dark" if is_dark else "pycharm_light"
 
         user_theme = self.config.get_editor_setting("code_highlight_theme", None)

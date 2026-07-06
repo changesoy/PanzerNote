@@ -203,8 +203,11 @@ class _TabCloseButton(QWidget):
     让内部小按钮左移，使 × 图标落在文字与 tab 右边界之间。
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, theme_engine, parent=None):
         super().__init__(parent)
+        if theme_engine is None:
+            raise RuntimeError("_TabCloseButton 必须传入 theme_engine，不允许为 None")
+        self._theme_engine = theme_engine
         self.setFixedSize(28, 22)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(4, 1, 10, 1)
@@ -215,14 +218,18 @@ class _TabCloseButton(QWidget):
         self._btn.setFixedSize(15, 16)
         self._btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._btn.setText("×")
-        self._btn.setStyleSheet(
-            "#tabCloseInnerBtn { border: none; background: transparent; border-radius: 2px; padding: 0; }"
-            "#tabCloseInnerBtn:hover { background: rgba(128,128,128,90); }"
-        )
+        colors = theme_engine.get_active_theme().colors
+        self._apply_btn_style(colors)
         layout.addWidget(self._btn)
         layout.addStretch()
 
         self._btn.clicked.connect(self._on_clicked)
+
+    def _apply_btn_style(self, colors) -> None:
+        self._btn.setStyleSheet(
+            f"#tabCloseInnerBtn {{ border: none; background: transparent; border-radius: 2px; padding: 0; }}"
+            f"#tabCloseInnerBtn:hover {{ background: {colors.hover_bg}; }}"
+        )
 
     def _on_clicked(self):
         tab_bar = self.parent()
@@ -258,11 +265,13 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     def __init__(
         self,
         config: Config,
-        theme_engine=None,
+        theme_engine,
         webengine_runtime: WebEngineRuntime | None = None,
         parent=None,
     ):
         super().__init__(parent)
+        if theme_engine is None:
+            raise RuntimeError("EditorTabs 必须传入 theme_engine，不允许为 None")
         self.config = config
         self._theme_engine = theme_engine
         self._webengine_runtime = webengine_runtime
@@ -297,8 +306,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             tb.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
             tb.customContextMenuRequested.connect(self._show_tab_context_menu)
 
-        if theme_engine:
-            self._init_theme(theme_engine)
+        self._init_theme(theme_engine)
 
         # ── 查找替换栏（嵌入在标签内容上方） ──
         # 不在这里创建，而是由 main_window 在 editor_container 中创建
@@ -306,7 +314,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
     def tabInserted(self, index):
         super().tabInserted(index)
-        btn = _TabCloseButton(self)
+        btn = _TabCloseButton(self._theme_engine, self)
         self.tabBar().setTabButton(index, QTabBar.ButtonPosition.RightSide, btn)  # type: ignore[union-attr]
 
     def set_find_bar(self, find_bar: FindReplaceBar):
@@ -842,6 +850,12 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         background-color: {colors.primary_light};
     }}
     """)
+        tab_bar = self.tabBar()
+        if tab_bar is not None:
+            for i in range(tab_bar.count()):
+                btn = tab_bar.tabButton(i, QTabBar.ButtonPosition.RightSide)
+                if isinstance(btn, _TabCloseButton):
+                    btn._apply_btn_style(colors)
 
     def _on_tab_close_requested(self, index: int):
         self._close_tab(index)

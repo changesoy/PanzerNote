@@ -100,15 +100,23 @@ class GameSidebar(ThemeAwareMixin, QWidget):
 
     view_changed = pyqtSignal(str)
 
-    def __init__(self, theme_engine=None, parent=None):
+    def __init__(self, theme_engine, parent=None):
         super().__init__(parent)
+        if theme_engine is None:
+            raise RuntimeError("GameSidebar 必须传入 theme_engine，不允许为 None")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 5, 0, 5)
         layout.setSpacing(5)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        self.back_btn = GameIconButton("back", "返回 (Ctrl+Z / Esc)", "#78909C")
+        colors = theme_engine.get_active_theme().colors
+        back_color = colors.text_disabled
+        build_color = colors.game_build
+        garage_color = colors.game_garage
+        collection_color = colors.game_collection
+
+        self.back_btn = GameIconButton("back", "返回 (Ctrl+Z / Esc)", back_color)
         self.back_btn.clicked.connect(lambda: self.view_changed.emit("back"))
         layout.addWidget(self.back_btn, 0, Qt.AlignmentFlag.AlignHCenter)
 
@@ -118,7 +126,7 @@ class GameSidebar(ThemeAwareMixin, QWidget):
         line1.setFixedWidth(40)
         layout.addWidget(line1, 0, Qt.AlignmentFlag.AlignHCenter)
 
-        self.construction_btn = GameIconButton("construction", "建造 (Ctrl+2)", "#4CAF50")
+        self.construction_btn = GameIconButton("construction", "建造 (Ctrl+2)", build_color)
         self.construction_btn.clicked.connect(lambda: self._on_btn_clicked("construction"))
         layout.addWidget(self.construction_btn, 0, Qt.AlignmentFlag.AlignHCenter)
 
@@ -128,7 +136,7 @@ class GameSidebar(ThemeAwareMixin, QWidget):
         line2.setFixedWidth(40)
         layout.addWidget(line2, 0, Qt.AlignmentFlag.AlignHCenter)
 
-        self.garage_btn = GameIconButton("garage", "车库 (Ctrl+3)", "#FF9800")
+        self.garage_btn = GameIconButton("garage", "车库 (Ctrl+3)", garage_color)
         self.garage_btn.clicked.connect(lambda: self._on_btn_clicked("garage"))
         layout.addWidget(self.garage_btn, 0, Qt.AlignmentFlag.AlignHCenter)
 
@@ -138,7 +146,7 @@ class GameSidebar(ThemeAwareMixin, QWidget):
         line3.setFixedWidth(40)
         layout.addWidget(line3, 0, Qt.AlignmentFlag.AlignHCenter)
 
-        self.collection_btn = GameIconButton("collection", "图鉴 (Ctrl+4)", "#9C27B0")
+        self.collection_btn = GameIconButton("collection", "图鉴 (Ctrl+4)", collection_color)
         self.collection_btn.clicked.connect(lambda: self._on_btn_clicked("collection"))
         layout.addWidget(self.collection_btn, 0, Qt.AlignmentFlag.AlignHCenter)
 
@@ -157,8 +165,7 @@ class GameSidebar(ThemeAwareMixin, QWidget):
             "collection": self.collection_btn
         }
 
-        if theme_engine:
-            self._init_theme(theme_engine)
+        self._init_theme(theme_engine)
 
     def _apply_theme_colors(self, colors):
         self.setStyleSheet(f"""
@@ -180,8 +187,7 @@ class GameSidebar(ThemeAwareMixin, QWidget):
     def set_current_view(self, view: Optional[str]):
         for name, btn in self._buttons.items():
             btn.set_current(name == view)
-        if hasattr(self, '_theme_engine') and self._theme_engine:
-            colors = self._theme_engine.get_active_theme().colors
-            for btn in self._buttons.values():
-                btn.update_style_with_colors(colors)
-            self.back_btn.update_style_with_colors(colors)
+        colors = self._theme_engine.get_active_theme().colors
+        for btn in self._buttons.values():
+            btn.update_style_with_colors(colors)
+        self.back_btn.update_style_with_colors(colors)

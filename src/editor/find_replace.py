@@ -30,22 +30,24 @@ class FindReplaceBar(ThemeAwareMixin, QWidget):
 
     closed = pyqtSignal()
 
-    def __init__(self, theme_engine=None, parent=None):
+    def __init__(self, theme_engine, parent=None):
         super().__init__(parent)
+        if theme_engine is None:
+            raise RuntimeError("FindReplaceBar 必须传入 theme_engine，不允许为 None")
         self._editor = None
         self._matches = []
         self._current_idx = -1
         self._replace_visible = False
 
-        # 高亮颜色（由 _apply_theme_colors 按主题更新）
-        self._match_bg = QColor("#FFEE58")
-        self._current_bg = QColor("#FF9800")
-        self._current_fg = QColor("#FFFFFF")
+        # 高亮颜色从主题 token 取值（由 _apply_theme_colors 按主题更新）
+        colors = theme_engine.get_active_theme().colors
+        self._match_bg = QColor(colors.search_match_bg)
+        self._current_bg = QColor(colors.search_current_bg)
+        self._current_fg = QColor(colors.search_current_fg)
 
         self._init_ui()
         self._connect_signals()
-        if theme_engine:
-            self._init_theme(theme_engine)
+        self._init_theme(theme_engine)
         self.hide()
 
     # ────────────────── UI 初始化 ──────────────────
@@ -336,15 +338,10 @@ class FindReplaceBar(ThemeAwareMixin, QWidget):
     def _update_match_label(self):
         """更新匹配计数标签"""
         total = len(self._matches)
-        if not hasattr(self, '_theme_engine') or self._theme_engine is None:
-            error_color = "#D32F2F"
-            text_color = "#666666"
-            match_border = "#FFEE58"
-        else:
-            colors = self._theme_engine.get_active_theme().colors
-            error_color = colors.error
-            text_color = colors.text_secondary
-            match_border = colors.search_match_bg
+        colors = self._theme_engine.get_active_theme().colors
+        error_color = colors.error
+        text_color = colors.text_secondary
+        match_border = colors.search_match_bg
         if total == 0:
             query = self.search_input.text()
             if query:

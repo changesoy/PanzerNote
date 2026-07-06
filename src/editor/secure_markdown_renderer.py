@@ -113,16 +113,22 @@ def render_plain_text_to_safe_html(text: str) -> str:
     return f"<pre>{html_module.escape(text)}</pre>"
 
 
-def build_export_html_document(body_html: str, title: str = "") -> str:
+def build_export_html_document(body_html: str, colors, title: str = "") -> str:
     """构建完整的导出 HTML 文档
 
     参数：
       body_html：已渲染的安全 HTML 片段
+      colors：ThemeColorScheme 实例，提供主题色值
       title：文档标题（可选）
 
     返回：完整的 HTML 文档字符串
     """
     title_tag = f"<title>{html_module.escape(title)}</title>" if title else ""
+    text_primary = colors.text_primary
+    surface = colors.surface
+    bg_codeblock = colors.bg_codeblock
+    border = colors.border
+    divider = colors.divider
     return f"""<!DOCTYPE html>
 <html>
 <head>
@@ -135,17 +141,17 @@ body {{
     max-width: 800px;
     margin: 0 auto;
     line-height: 1.7;
-    color: #2b2b2b;
+    color: {text_primary};
 }}
 pre {{
     white-space: pre-wrap;
-    background: #f5f5f5;
+    background: {bg_codeblock};
     padding: 10px;
     border-radius: 4px;
     overflow-x: auto;
 }}
 code {{
-    background: #f5f5f5;
+    background: {surface};
     padding: 2px 4px;
     border-radius: 3px;
 }}
@@ -159,28 +165,28 @@ table {{
     margin: 16px 0;
 }}
 th, td {{
-    border: 1px solid #ddd;
+    border: 1px solid {border};
     padding: 8px 12px;
     text-align: left;
 }}
 th {{
-    background: #f5f5f5;
+    background: {surface};
     font-weight: bold;
 }}
 img {{
     max-width: 100%;
 }}
 h1, h2, h3, h4, h5, h6 {{
-    color: #2b2b2b;
+    color: {text_primary};
     margin-top: 24px;
     margin-bottom: 12px;
 }}
 h1 {{
-    border-bottom: 1px solid #d0d0d0;
+    border-bottom: 1px solid {border};
     padding-bottom: 6px;
 }}
 h2 {{
-    border-bottom: 1px solid #d9d9d9;
+    border-bottom: 1px solid {divider};
     padding-bottom: 5px;
 }}
 </style>

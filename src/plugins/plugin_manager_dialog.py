@@ -15,18 +15,18 @@ from ..utils.error_handler import ErrorHandler, ErrorCategory
 
 
 class PluginManagerDialog(ThemeAwareMixin, QDialog):
-    def __init__(self, plugin_manager, secretary, parent=None, theme_engine=None):
+    def __init__(self, plugin_manager, secretary, theme_engine, parent=None):
         super().__init__(parent)
+        if theme_engine is None:
+            raise RuntimeError("PluginManagerDialog 必须传入 theme_engine，不允许为 None")
         self._plugin_manager = plugin_manager
         self._secretary = secretary
-        resolved_theme_engine = theme_engine or getattr(parent, "theme_engine", None)
         self.setObjectName("PluginManagerDialog")
         self.setWindowTitle("插件管理")
         self.setMinimumSize(500, 400)
         self._init_ui()
 
-        if resolved_theme_engine:
-            self._init_theme(resolved_theme_engine)
+        self._init_theme(theme_engine)
 
     def _init_ui(self):
         layout = QVBoxLayout(self)

@@ -76,46 +76,10 @@ class MarkdownHighlighter(QSyntaxHighlighter):
     STATE_NORMAL = -1
     STATE_CODE_BLOCK = 1
 
-    _FALLBACK_LIGHT_COLORS = {
-        "h1_fg": "#000000",
-        "h2_fg": "#000000",
-        "h3_fg": "#000000",
-        "h456_fg": "#2b2b2b",
-        "bold_fg": "#2b2b2b",
-        "italic_fg": "#2b2b2b",
-        "code_fg": "#008000",
-        "code_bg": "#f2f2f2",
-        "link_fg": "#2470B3",
-        "image_fg": "#6A1B9A",
-        "list_fg": "#2b2b2b",
-        "quote_fg": "#808080",
-        "hr_fg": "#AAAAAA",
-        "fence_fg": "#808080",
-        "code_block_fg": "#2b2b2b",
-        "code_block_bg": "#f5f5f5",
-    }
-
-    _FALLBACK_DARK_COLORS = {
-        "h1_fg": "#E0E0E0",
-        "h2_fg": "#E0E0E0",
-        "h3_fg": "#E0E0E0",
-        "h456_fg": "#D4D4D4",
-        "bold_fg": "#D4D4D4",
-        "italic_fg": "#D4D4D4",
-        "code_fg": "#CE9178",
-        "code_bg": "#2D2D2D",
-        "link_fg": "#569CD6",
-        "image_fg": "#C586C0",
-        "list_fg": "#D4D4D4",
-        "quote_fg": "#6A9955",
-        "hr_fg": "#555555",
-        "fence_fg": "#A0A0A0",
-        "code_block_fg": "#D4D4D4",
-        "code_block_bg": "#2D2D30",
-    }
-
-    def __init__(self, document: QTextDocument, is_dark: bool = False, theme_engine=None):
+    def __init__(self, document: QTextDocument, theme_engine, is_dark: bool = False):
         super().__init__(document)
+        if theme_engine is None:
+            raise RuntimeError("MarkdownHighlighter 必须传入 theme_engine，不允许为 None")
         self._is_dark = is_dark
         self._theme_engine = theme_engine
         self._init_formats(is_dark)
@@ -123,17 +87,13 @@ class MarkdownHighlighter(QSyntaxHighlighter):
 
     def _init_formats(self, is_dark: bool):
         """初始化所有格式"""
-        fallback_colors = self._FALLBACK_DARK_COLORS if is_dark else self._FALLBACK_LIGHT_COLORS
-        theme_colors = None
-        if self._theme_engine:
-            theme_colors = self._theme_engine.get_active_theme().colors
+        theme_colors = self._theme_engine.get_active_theme().colors
 
         def get_color(key: str) -> str:
-            if theme_colors is not None:
-                token_key = f"md_{key}"
-                if hasattr(theme_colors, token_key):
-                    return str(getattr(theme_colors, token_key))
-            return fallback_colors.get(key, "#000000")
+            token_key = f"md_{key}"
+            if hasattr(theme_colors, token_key):
+                return str(getattr(theme_colors, token_key))
+            return "#000000"
 
         self.inline_rules = []
 
@@ -271,7 +231,7 @@ class MarkdownHighlighter(QSyntaxHighlighter):
 # ════════════════════════════════════════════════════════
 
 def get_highlighter_for_file(document: QTextDocument, filepath_or_ext: str,
-                             theme_name=None, is_dark: bool = False, theme_engine=None):
+                             theme_engine, theme_name=None, is_dark: bool = False):
     """根据文件类型获取合适的高亮器
 
     Args:

@@ -122,6 +122,35 @@ Move later to:
 If `primary` remains `#BB86FC`, white text is not ideal.
 After palette migration, use VS Code blue or `selection_bg`.
 
+## Target Token Values (VS Code Dark Modern / Dark+)
+
+PanzerNote dark theme targets VS Code Dark Modern / Dark+, not JetBrains Darcula.
+
+| Token                                     |                                    Target | Usage                            |
+| ----------------------------------------- | ----------------------------------------: | -------------------------------- |
+| `bg_window` / `bg_title` / `bg_status`    |                                 `#181818` | Shell, title bar, status bar     |
+| `bg_editor`                               |                                 `#1F1F1F` | Editor viewport                  |
+| `bg_widget`                               |                                 `#202020` | Sidebars, panels                 |
+| `bg_card` / `bg_codeblock`                |                                 `#2B2B2B` | Cards, code blocks               |
+| `bg_input`                                |                                 `#313131` | Input fields                     |
+| `primary`                                 |                                 `#0078D4` | Primary accent                   |
+| `primary_dark` / `hover_bg`               |                                 `#026EC1` | Hover, pressed states            |
+| `selection_bg`                            |                                 `#264F78` | Selection background             |
+| `focus_border`                            |                                 `#0078D4` | Focus ring                       |
+| `search_match_bg`                         |                                 `#3A3D41` | Find match highlight             |
+| `search_current_bg`                       |                                 `#515C6A` | Current find match               |
+| `search_current_fg`                       |                                 `#FFFFFF` | Current find match text          |
+| `editor_bookmark_bg`                      |                                 `#0078D4` | Bookmark gutter marker           |
+| `editor_bookmark_fg`                      |                                 `#FFFFFF` | Bookmark gutter marker text      |
+| `editor_fold_marker`                      |                                 `#808080` | Fold marker (expanded)           |
+| `editor_fold_marker_collapsed`            |                                 `#C5C5C5` | Fold marker (collapsed)          |
+
+### Batch Strategy
+
+- **Batch A**: Add tokens only, with old values as defaults. No visible UI change.
+- **Batch B / C / D**: Gradually wire components to use tokens.
+- **Batch E**: After all components use semantic tokens, switch the built-in dark theme palette to these target values.
+
 ## Migration Batches
 
 ### Batch A: ThemeColorScheme semantic tokens

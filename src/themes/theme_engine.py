@@ -60,6 +60,10 @@ class ThemeColorScheme:
     resource_steel: str = "#9E9E9E"
     resource_bauxite: str = "#2196F3"
 
+    game_build: str = "#4CAF50"
+    game_garage: str = "#FF9800"
+    game_collection: str = "#9C27B0"
+
     selection_bg: str = "#BBDEFB"
     selection_fg: str = "#212121"
     hover_bg: str = "#BBDEFB"
@@ -236,6 +240,9 @@ class ThemeEngine(QObject):
                 resource_ammo="#CF6679",
                 resource_steel="#9E9E9E",
                 resource_bauxite="#64B5F6",
+                game_build="#4CAF50",
+                game_garage="#FF9800",
+                game_collection="#9C27B0",
                 selection_bg="#264F78",
                 selection_fg="#E0E0E0",
                 hover_bg="#264F78",

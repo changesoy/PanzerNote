@@ -71,6 +71,7 @@ class GameIconButton(QToolButton):
                 }}
                 QToolButton:hover {{
                     background-color: {colors.editor_selection};
+                    border-color: {colors.primary};
                 }}
             """)
         else:
@@ -85,6 +86,11 @@ class GameIconButton(QToolButton):
                     border: 2px solid {colors.border};
                 }}
             """)
+
+    def update_color(self, color: str):
+        """更新图标主色并重绘占位图标"""
+        self.color = color
+        self._create_placeholder_icon()
 
     def set_current(self, is_current: bool):
         self._is_current = is_current
@@ -136,6 +142,13 @@ class GameSidebar(ThemeAwareMixin, QWidget):
         self.collection_btn.clicked.connect(lambda: self._on_btn_clicked("collection"))
         layout.addWidget(self.collection_btn, 0, Qt.AlignmentFlag.AlignHCenter)
 
+        # 图标名 → 主题 token 字段名映射
+        self._icon_token_map = {
+            "construction": "game_build",
+            "garage": "game_garage",
+            "collection": "game_collection",
+        }
+
         layout.addStretch()
 
         self._buttons = {
@@ -154,7 +167,10 @@ class GameSidebar(ThemeAwareMixin, QWidget):
                 border-right: 1px solid {colors.border};
             }}
         """)
-        for btn in self._buttons.values():
+        for name, btn in self._buttons.items():
+            token_name = self._icon_token_map.get(name)
+            if token_name and hasattr(colors, token_name):
+                btn.update_color(getattr(colors, token_name))
             btn.update_style_with_colors(colors)
         self.back_btn.update_style_with_colors(colors)
 

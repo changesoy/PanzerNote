@@ -89,15 +89,18 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
         # --- 选项行 ---
         opts_layout = QHBoxLayout()
 
-        self._case_cb = QCheckBox("大小写")
+        self._case_cb = QCheckBox("Aa")
+        self._case_cb.setToolTip("大小写敏感")
         self._case_cb.stateChanged.connect(self._on_option_changed)
         opts_layout.addWidget(self._case_cb)
 
-        self._word_cb = QCheckBox("全词")
+        self._word_cb = QCheckBox("W")
+        self._word_cb.setToolTip("全词匹配")
         self._word_cb.stateChanged.connect(self._on_option_changed)
         opts_layout.addWidget(self._word_cb)
 
-        self._regex_cb = QCheckBox("正则")
+        self._regex_cb = QCheckBox(".*")
+        self._regex_cb.setToolTip("正则表达式")
         self._regex_cb.stateChanged.connect(self._on_option_changed)
         opts_layout.addWidget(self._regex_cb)
 

@@ -74,7 +74,7 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
         # --- 范围选择 ---
         scope_layout = QHBoxLayout()
         self._scope_label = QLabel("范围:")
-        self._scope_label.setStyleSheet("font-size: 11px; color: #888;")
+        self._scope_label.setStyleSheet("font-size: 11px; color: #757575;")
         scope_layout.addWidget(self._scope_label)
 
         self._scope_combo = QComboBox()
@@ -121,7 +121,7 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
 
         # --- 状态栏 ---
         self._status_label = QLabel("")
-        self._status_label.setStyleSheet("color: #888; font-size: 11px;")
+        self._status_label.setStyleSheet("color: #757575; font-size: 11px;")
         layout.addWidget(self._status_label)
 
         self.setMinimumWidth(180)

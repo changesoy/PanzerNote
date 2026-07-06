@@ -60,6 +60,21 @@ class ThemeColorScheme:
     resource_steel: str = "#9E9E9E"
     resource_bauxite: str = "#2196F3"
 
+    selection_bg: str = "#BBDEFB"
+    selection_fg: str = "#212121"
+    hover_bg: str = "#BBDEFB"
+    active_bg: str = "#1976D2"
+    focus_border: str = "#2196F3"
+
+    search_match_bg: str = "#FFEE58"
+    search_current_bg: str = "#FF9800"
+    search_current_fg: str = "#FFFFFF"
+
+    editor_bookmark_bg: str = "#FF9800"
+    editor_bookmark_fg: str = "#FFFFFF"
+    editor_fold_marker: str = "#4CAF50"
+    editor_fold_marker_collapsed: str = "#66BB6A"
+
     def to_dict(self) -> Dict[str, str]:
         return {k: v for k, v in self.__dict__.items() if not k.startswith('_')}
 
@@ -204,6 +219,18 @@ class ThemeEngine(QObject):
                 resource_ammo="#CF6679",
                 resource_steel="#9E9E9E",
                 resource_bauxite="#64B5F6",
+                selection_bg="#264F78",
+                selection_fg="#E0E0E0",
+                hover_bg="#264F78",
+                active_bg="#985EFF",
+                focus_border="#BB86FC",
+                search_match_bg="#6B6B00",
+                search_current_bg="#B47800",
+                search_current_fg="#FFFFFF",
+                editor_bookmark_bg="#BB86FC",
+                editor_bookmark_fg="#FFFFFF",
+                editor_fold_marker="#81C784",
+                editor_fold_marker_collapsed="#A5D6A7",
             ),
         )
         self._themes["dark"] = dark_theme

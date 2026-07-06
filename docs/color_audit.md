@@ -153,22 +153,24 @@ PanzerNote dark theme targets VS Code Dark Modern / Dark+, not JetBrains Darcula
 
 ## Migration Batches
 
-### Batch A: ThemeColorScheme semantic tokens
+### Batch A: ThemeColorScheme semantic tokens ✅ COMPLETED
 
-Add tokens only, with old values as defaults:
+Added tokens with old values as defaults (no UI change):
 
-- `selection_bg`
-- `selection_fg`
-- `hover_bg`
-- `active_bg`
-- `focus_border`
-- `search_match_bg`
-- `search_current_bg`
-- `search_current_fg`
-- `editor_bookmark_bg`
-- `editor_bookmark_fg`
-- `editor_fold_marker`
-- `editor_fold_marker_collapsed`
+- `selection_bg` → light: `#BBDEFB`, dark: `#264F78`
+- `selection_fg` → light: `#212121`, dark: `#E0E0E0`
+- `hover_bg` → light: `#BBDEFB`, dark: `#264F78`
+- `active_bg` → light: `#1976D2`, dark: `#985EFF`
+- `focus_border` → light: `#2196F3`, dark: `#BB86FC`
+- `search_match_bg` → light: `#FFEE58`, dark: `#6B6B00`
+- `search_current_bg` → light: `#FF9800`, dark: `#B47800`
+- `search_current_fg` → light/dark: `#FFFFFF`
+- `editor_bookmark_bg` → light: `#FF9800`, dark: `#BB86FC`
+- `editor_bookmark_fg` → light/dark: `#FFFFFF`
+- `editor_fold_marker` → light: `#4CAF50`, dark: `#81C784`
+- `editor_fold_marker_collapsed` → light: `#66BB6A`, dark: `#A5D6A7`
+
+*Note: Dark theme values match existing hardcoded colors in editor.py/find_replace.py to ensure zero visual change.*
 
 ### Batch B: Editor auxiliary colors
 

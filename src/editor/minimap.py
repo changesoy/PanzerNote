@@ -41,11 +41,12 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
         super().__init__(parent if parent else editor)
         self._editor = editor
         self._dragging = False
-        self._bg_color = "#f8f8f8"
-        self._border_color = "#e0e0e0"
-        self._text_color = "#b0b0b0"
-        self._viewport_color = QColor(100, 140, 200, 30)
-        self._viewport_border_color = QColor(100, 140, 200, 70)
+        self._bg_color = "#F5F5F5"
+        self._border_color = "#E0E0E0"
+        self._text_color = "#BDBDBD"
+        primary_default = QColor("#2196F3")
+        self._viewport_color = QColor(primary_default.red(), primary_default.green(), primary_default.blue(), 30)
+        self._viewport_border_color = QColor(primary_default.red(), primary_default.green(), primary_default.blue(), 70)
 
         self.setFixedWidth(self.MINIMAP_WIDTH)
         self.setCursor(Qt.CursorShape.ArrowCursor)

@@ -76,8 +76,7 @@ class MarkdownHighlighter(QSyntaxHighlighter):
     STATE_NORMAL = -1
     STATE_CODE_BLOCK = 1
 
-    # 浅色主题配色（默认）
-    _LIGHT_COLORS = {
+    _FALLBACK_LIGHT_COLORS = {
         "h1_fg": "#000000",
         "h2_fg": "#000000",
         "h3_fg": "#000000",
@@ -96,8 +95,7 @@ class MarkdownHighlighter(QSyntaxHighlighter):
         "code_block_bg": "#f5f5f5",
     }
 
-    # 暗色主题配色（参考 VSCode Dark+）
-    _DARK_COLORS = {
+    _FALLBACK_DARK_COLORS = {
         "h1_fg": "#E0E0E0",
         "h2_fg": "#E0E0E0",
         "h3_fg": "#E0E0E0",
@@ -116,102 +114,103 @@ class MarkdownHighlighter(QSyntaxHighlighter):
         "code_block_bg": "#2D2D30",
     }
 
-    def __init__(self, document: QTextDocument, is_dark: bool = False):
+    def __init__(self, document: QTextDocument, is_dark: bool = False, theme_engine=None):
         super().__init__(document)
         self._is_dark = is_dark
+        self._theme_engine = theme_engine
         self._init_formats(is_dark)
         self._fence_re = re.compile(r'^```')
 
     def _init_formats(self, is_dark: bool):
         """初始化所有格式"""
-        colors = self._DARK_COLORS if is_dark else self._LIGHT_COLORS
+        fallback_colors = self._FALLBACK_DARK_COLORS if is_dark else self._FALLBACK_LIGHT_COLORS
+        theme_colors = None
+        if self._theme_engine:
+            theme_colors = self._theme_engine.get_active_theme().colors
+
+        def get_color(key: str) -> str:
+            if theme_colors is not None:
+                token_key = f"md_{key}"
+                if hasattr(theme_colors, token_key):
+                    return str(getattr(theme_colors, token_key))
+            return fallback_colors.get(key, "#000000")
+
         self.inline_rules = []
 
-        # 标题
         h1_fmt = QTextCharFormat()
-        h1_fmt.setForeground(QColor(colors["h1_fg"]))
+        h1_fmt.setForeground(QColor(get_color("h1_fg")))
         h1_fmt.setFontWeight(QFont.Weight.Bold)
         h1_fmt.setFontPointSize(20)
         self.h1_format = h1_fmt
 
         h2_fmt = QTextCharFormat()
-        h2_fmt.setForeground(QColor(colors["h2_fg"]))
+        h2_fmt.setForeground(QColor(get_color("h2_fg")))
         h2_fmt.setFontWeight(QFont.Weight.Bold)
         h2_fmt.setFontPointSize(17)
         self.h2_format = h2_fmt
 
         h3_fmt = QTextCharFormat()
-        h3_fmt.setForeground(QColor(colors["h3_fg"]))
+        h3_fmt.setForeground(QColor(get_color("h3_fg")))
         h3_fmt.setFontWeight(QFont.Weight.Bold)
         h3_fmt.setFontPointSize(14)
         self.h3_format = h3_fmt
 
         h456_fmt = QTextCharFormat()
-        h456_fmt.setForeground(QColor(colors["h456_fg"]))
+        h456_fmt.setForeground(QColor(get_color("h456_fg")))
         h456_fmt.setFontWeight(QFont.Weight.Bold)
         h456_fmt.setFontPointSize(12)
         self.h456_format = h456_fmt
 
-        # 粗体
         bold_fmt = QTextCharFormat()
         bold_fmt.setFontWeight(QFont.Weight.Bold)
-        bold_fmt.setForeground(QColor(colors["bold_fg"]))
+        bold_fmt.setForeground(QColor(get_color("bold_fg")))
         self.inline_rules.append((re.compile(r'\*\*[^*]+\*\*'), bold_fmt))
         self.inline_rules.append((re.compile(r'__[^_]+__'), bold_fmt))
 
-        # 斜体
         italic_fmt = QTextCharFormat()
         italic_fmt.setFontItalic(True)
-        italic_fmt.setForeground(QColor(colors["italic_fg"]))
+        italic_fmt.setForeground(QColor(get_color("italic_fg")))
         self.inline_rules.append((re.compile(r'(?<!\*)\*[^*]+\*(?!\*)'), italic_fmt))
         self.inline_rules.append((re.compile(r'(?<!_)_[^_]+_(?!_)'), italic_fmt))
 
-        # 行内代码
         code_fmt = QTextCharFormat()
-        code_fmt.setForeground(QColor(colors["code_fg"]))
+        code_fmt.setForeground(QColor(get_color("code_fg")))
         code_fmt.setFontFamily("Consolas")
-        code_fmt.setBackground(QColor(colors["code_bg"]))
+        code_fmt.setBackground(QColor(get_color("code_bg")))
         self.inline_rules.append((re.compile(r'`[^`\n]+`'), code_fmt))
 
-        # 链接
         link_fmt = QTextCharFormat()
-        link_fmt.setForeground(QColor(colors["link_fg"]))
+        link_fmt.setForeground(QColor(get_color("link_fg")))
         link_fmt.setFontUnderline(True)
         self.inline_rules.append((re.compile(r'\[([^\]]+)\]\([^\)]+\)'), link_fmt))
 
-        # 图片
         img_fmt = QTextCharFormat()
-        img_fmt.setForeground(QColor(colors["image_fg"]))
+        img_fmt.setForeground(QColor(get_color("image_fg")))
         self.inline_rules.append((re.compile(r'!\[([^\]]*)\]\([^\)]+\)'), img_fmt))
 
-        # 列表标记
         list_fmt = QTextCharFormat()
-        list_fmt.setForeground(QColor(colors["list_fg"]))
+        list_fmt.setForeground(QColor(get_color("list_fg")))
         list_fmt.setFontWeight(QFont.Weight.Bold)
         self.inline_rules.append((re.compile(r'^\s*[-*+]\s'), list_fmt))
         self.inline_rules.append((re.compile(r'^\s*\d+\.\s'), list_fmt))
 
-        # 引用
         quote_fmt = QTextCharFormat()
-        quote_fmt.setForeground(QColor(colors["quote_fg"]))
+        quote_fmt.setForeground(QColor(get_color("quote_fg")))
         quote_fmt.setFontItalic(True)
         self.inline_rules.append((re.compile(r'^>\s.*$'), quote_fmt))
 
-        # 水平线
         hr_fmt = QTextCharFormat()
-        hr_fmt.setForeground(QColor(colors["hr_fg"]))
+        hr_fmt.setForeground(QColor(get_color("hr_fg")))
         self.inline_rules.append((re.compile(r'^[-*_]{3,}\s*$'), hr_fmt))
 
-        # 代码块栅栏
         self.fence_format = QTextCharFormat()
-        self.fence_format.setForeground(QColor(colors["fence_fg"]))
+        self.fence_format.setForeground(QColor(get_color("fence_fg")))
         self.fence_format.setFontFamily("Consolas")
 
-        # 代码块内容
         self.code_block_format = QTextCharFormat()
-        self.code_block_format.setForeground(QColor(colors["code_block_fg"]))
+        self.code_block_format.setForeground(QColor(get_color("code_block_fg")))
         self.code_block_format.setFontFamily("Consolas")
-        self.code_block_format.setBackground(QColor(colors["code_block_bg"]))
+        self.code_block_format.setBackground(QColor(get_color("code_block_bg")))
 
     def set_dark_mode(self, is_dark: bool):
         """切换明/暗主题，重新高亮文档"""
@@ -272,7 +271,7 @@ class MarkdownHighlighter(QSyntaxHighlighter):
 # ════════════════════════════════════════════════════════
 
 def get_highlighter_for_file(document: QTextDocument, filepath_or_ext: str,
-                             theme_name=None, is_dark: bool = False):
+                             theme_name=None, is_dark: bool = False, theme_engine=None):
     """根据文件类型获取合适的高亮器
 
     Args:
@@ -280,6 +279,7 @@ def get_highlighter_for_file(document: QTextDocument, filepath_or_ext: str,
         filepath_or_ext: 文件路径或扩展名
         theme_name: 主题名称（None 使用默认）
         is_dark: 是否为暗色主题
+        theme_engine: ThemeEngine 实例，用于 Markdown 高亮主题 token 取值
     Returns:
         (highlighter | None, file_type_str)
     """
@@ -324,7 +324,7 @@ def get_highlighter_for_file(document: QTextDocument, filepath_or_ext: str,
     file_type = EXT_TO_TYPE.get(ext, '纯文本')
 
     if file_type == 'Markdown':
-        return MarkdownHighlighter(document, is_dark=is_dark), file_type
+        return MarkdownHighlighter(document, is_dark=is_dark, theme_engine=theme_engine), file_type
 
     if file_type == '纯文本':
         return None, file_type

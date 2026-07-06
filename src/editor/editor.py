@@ -413,7 +413,8 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         painter = QPainter(self.line_number_area)
         bg_color = self._theme_engine.get_active_theme().colors.sidebar_bg if self._theme_engine else "#f5f5f5"
         text_color = self._theme_engine.get_active_theme().colors.editor_line_number if self._theme_engine else "#999999"
-        bookmark_color = QColor("#FF9800") if not self._theme_engine else QColor(self._theme_engine.get_active_theme().colors.accent if hasattr(self._theme_engine.get_active_theme().colors, 'accent') else "#FF9800")
+        bookmark_bg_color = self._theme_engine.get_active_theme().colors.editor_bookmark_bg if self._theme_engine else "#FF9800"
+        bookmark_fg_color = self._theme_engine.get_active_theme().colors.editor_bookmark_fg if self._theme_engine else "#FFFFFF"
         painter.fillRect(event.rect(), QColor(bg_color))
 
         supports_fold = self._file_type in self._FOLD_SUPPORTED_TYPES
@@ -433,9 +434,9 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
                         0, top,
                         area_width,
                         self.fontMetrics().height(),
-                        bookmark_color
+                        QColor(bookmark_bg_color)
                     )
-                    painter.setPen(QColor("#FFFFFF"))
+                    painter.setPen(QColor(bookmark_fg_color))
                 else:
                     painter.setPen(QColor(text_color))
 
@@ -451,15 +452,9 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
                 # 折叠标记 — 手绘三角（大小一致，不受行高影响）
                 if supports_fold and self._folding.is_foldable(block_number):
                     collapsed = (block_number + 1) in self._folding._collapsed_blocks
-                    # 绿色系：浅色主题用 Material Green，暗色主题用 Green 200/300
-                    bg_luminance = QColor(bg_color).lightness()
-                    if bg_luminance < 128:
-                        fold_color_expanded = QColor("#81C784")
-                        fold_color_collapsed = QColor("#A5D6A7")
-                    else:
-                        fold_color_expanded = QColor("#4CAF50")
-                        fold_color_collapsed = QColor("#66BB6A")
-                    painter.setBrush(fold_color_collapsed if collapsed else fold_color_expanded)
+                    fold_color_expanded_name = self._theme_engine.get_active_theme().colors.editor_fold_marker if self._theme_engine else "#4CAF50"
+                    fold_color_collapsed_name = self._theme_engine.get_active_theme().colors.editor_fold_marker_collapsed if self._theme_engine else "#66BB6A"
+                    painter.setBrush(QColor(fold_color_collapsed_name if collapsed else fold_color_expanded_name))
                     painter.setPen(Qt.PenStyle.NoPen)
                     tri_size = 8  # 三角边长 px
                     cx = float(area_width - marker_width // 2 - 2)  # 三角中心 x
@@ -641,7 +636,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             # 根据明/暗主题自动选择代码高亮主题
             theme_name = "vscode_dark" if is_dark else "pycharm_light"
         self._highlighter, self._file_type = get_highlighter_for_file(
-            doc, filepath_or_ext, theme_name=theme_name, is_dark=is_dark
+            doc, filepath_or_ext, theme_name=theme_name, is_dark=is_dark, theme_engine=self._theme_engine
         )
 
         self._lazy_highlight.set_highlighter(self._highlighter)

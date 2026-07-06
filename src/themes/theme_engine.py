@@ -75,6 +75,23 @@ class ThemeColorScheme:
     editor_fold_marker: str = "#4CAF50"
     editor_fold_marker_collapsed: str = "#66BB6A"
 
+    md_h1_fg: str = "#000000"
+    md_h2_fg: str = "#000000"
+    md_h3_fg: str = "#000000"
+    md_h456_fg: str = "#2b2b2b"
+    md_bold_fg: str = "#2b2b2b"
+    md_italic_fg: str = "#2b2b2b"
+    md_code_fg: str = "#008000"
+    md_code_bg: str = "#f2f2f2"
+    md_link_fg: str = "#2470B3"
+    md_image_fg: str = "#6A1B9A"
+    md_list_fg: str = "#2b2b2b"
+    md_quote_fg: str = "#808080"
+    md_hr_fg: str = "#AAAAAA"
+    md_fence_fg: str = "#808080"
+    md_code_block_fg: str = "#2b2b2b"
+    md_code_block_bg: str = "#f5f5f5"
+
     def to_dict(self) -> Dict[str, str]:
         return {k: v for k, v in self.__dict__.items() if not k.startswith('_')}
 
@@ -231,6 +248,22 @@ class ThemeEngine(QObject):
                 editor_bookmark_fg="#FFFFFF",
                 editor_fold_marker="#81C784",
                 editor_fold_marker_collapsed="#A5D6A7",
+                md_h1_fg="#E0E0E0",
+                md_h2_fg="#E0E0E0",
+                md_h3_fg="#E0E0E0",
+                md_h456_fg="#D4D4D4",
+                md_bold_fg="#D4D4D4",
+                md_italic_fg="#D4D4D4",
+                md_code_fg="#CE9178",
+                md_code_bg="#2D2D2D",
+                md_link_fg="#569CD6",
+                md_image_fg="#C586C0",
+                md_list_fg="#D4D4D4",
+                md_quote_fg="#6A9955",
+                md_hr_fg="#555555",
+                md_fence_fg="#A0A0A0",
+                md_code_block_fg="#D4D4D4",
+                md_code_block_bg="#2D2D30",
             ),
         )
         self._themes["dark"] = dark_theme

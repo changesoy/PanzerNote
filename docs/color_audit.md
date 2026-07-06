@@ -172,9 +172,14 @@ Added tokens with old values as defaults (no UI change):
 
 *Note: Dark theme values match existing hardcoded colors in editor.py/find_replace.py to ensure zero visual change.*
 
-### Batch B: Editor auxiliary colors
+### Batch B: Editor auxiliary colors ✅ COMPLETED
 
-Migrate `editor.py` gutter/bookmark/fold colors and `find_replace.py` search highlights.
+Migrated:
+- `editor.py`: fold markers → `editor_fold_marker` / `editor_fold_marker_collapsed`; bookmarks → `editor_bookmark_bg` / `editor_bookmark_fg`
+- `syntax_highlighter.py`: Markdown semantic highlighter now reads from `md_*` theme tokens (h1-h6, code, link, quote, etc.)
+- `minimap.py`: fallback colors aligned with theme defaults (`minimap_bg`, `border`, `text_disabled`, `primary`)
+
+*Note: `find_replace.py` search highlights moved to Batch C (search tokens).*
 
 ### Batch C: Sidebar and command surfaces
 

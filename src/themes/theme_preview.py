@@ -267,6 +267,105 @@ class ThemePreviewWidget(QWidget):
         resources_group.setLayout(res_layout)
         self._preview_layout.addWidget(resources_group)
 
+        def _add_color_section(title, items):
+            group = QGroupBox(title)
+            layout = QVBoxLayout()
+            for label_text, color_hex in items:
+                row = QHBoxLayout()
+                swatch = QLabel()
+                swatch.setFixedSize(40, 20)
+                swatch.setStyleSheet(
+                    f"background-color: {color_hex}; "
+                    f"border: 1px solid {c.border}; border-radius: 2px;"
+                )
+                label = QLabel(label_text)
+                hex_label = QLabel(color_hex)
+                hex_label.setFont(QFont("Consolas", 9))
+                row.addWidget(swatch)
+                row.addWidget(label)
+                row.addStretch()
+                row.addWidget(hex_label)
+                layout.addLayout(row)
+            group.setLayout(layout)
+            self._preview_layout.addWidget(group)
+
+        _add_color_section("交互状态", [
+            ("强调色前景", c.accent_fg),
+            ("悬停背景", c.hover_bg),
+            ("激活背景", c.active_bg),
+            ("聚焦边框", c.focus_border),
+            ("选区背景", c.selection_bg),
+            ("选区前景", c.selection_fg),
+        ])
+
+        _add_color_section("搜索高亮", [
+            ("查找命中背景", c.search_match_bg),
+            ("当前命中背景", c.search_current_bg),
+            ("当前命中前景", c.search_current_fg),
+        ])
+
+        _add_color_section("书签与折叠", [
+            ("书签背景", c.editor_bookmark_bg),
+            ("书签前景", c.editor_bookmark_fg),
+            ("折叠标记", c.editor_fold_marker),
+            ("折叠标记(已折叠)", c.editor_fold_marker_collapsed),
+        ])
+
+        _add_color_section("代码块", [
+            ("代码块背景", c.bg_codeblock),
+            ("代码块边框", c.codeblock_border),
+        ])
+
+        _add_color_section("游戏图标", [
+            ("建造图标", c.game_build),
+            ("车库图标", c.game_garage),
+            ("图鉴图标", c.game_collection),
+        ])
+
+        _add_color_section("Markdown 高亮", [
+            ("标题 H1", c.md_h1_fg),
+            ("标题 H2", c.md_h2_fg),
+            ("标题 H3", c.md_h3_fg),
+            ("标题 H4-6", c.md_h456_fg),
+            ("粗体", c.md_bold_fg),
+            ("斜体", c.md_italic_fg),
+            ("行内代码", c.md_code_fg),
+            ("行内代码背景", c.md_code_bg),
+            ("链接", c.md_link_fg),
+            ("图片", c.md_image_fg),
+            ("列表", c.md_list_fg),
+            ("引用", c.md_quote_fg),
+            ("分隔线", c.md_hr_fg),
+            ("代码围栏", c.md_fence_fg),
+            ("代码块文字", c.md_code_block_fg),
+            ("代码块背景", c.md_code_block_bg),
+        ])
+
+        _add_color_section("语法高亮", [
+            ("关键字", c.syntax_keyword),
+            ("类型关键字", c.syntax_keyword_type),
+            ("内置名称", c.syntax_builtin),
+            ("类名", c.syntax_class),
+            ("函数名", c.syntax_function),
+            ("变量", c.syntax_variable),
+            ("标签", c.syntax_tag),
+            ("命名空间", c.syntax_namespace),
+            ("字符串", c.syntax_string),
+            ("字符串转义", c.syntax_string_escape),
+            ("字符串前缀", c.syntax_string_affix),
+            ("文档字符串", c.syntax_string_doc),
+            ("数字", c.syntax_number),
+            ("注释", c.syntax_comment),
+            ("运算符", c.syntax_operator),
+            ("标点", c.syntax_punctuation),
+            ("文本", c.syntax_text),
+            ("错误", c.syntax_error),
+            ("已删除", c.syntax_deleted),
+            ("已插入", c.syntax_inserted),
+            ("标题", c.syntax_heading),
+            ("输出", c.syntax_output),
+        ])
+
         self._preview_layout.addStretch()
 
         self._info_label.setText(

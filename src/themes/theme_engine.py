@@ -226,112 +226,32 @@ class ThemeEngine(QObject):
         return os.path.join(app_dir, self.BUILTIN_THEMES_DIR)
 
     def _load_builtin_themes(self) -> None:
-        light_theme = ThemeDefinition(
-            id="light",
-            name="浅色主题",
-            is_dark=False,
+        builtin_dir = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "..", "..", "themes", "builtin"
         )
-        self._themes["light"] = light_theme
+        builtin_dir = os.path.normpath(builtin_dir)
+        if not os.path.isdir(builtin_dir):
+            self._logger.warning("内置主题目录不存在: %s", builtin_dir)
+            self._themes["light"] = ThemeDefinition(id="light", name="浅色主题", is_dark=False)
+            return
 
-        dark_theme = ThemeDefinition(
-            id="dark",
-            name="深色主题",
-            is_dark=True,
-            colors=ThemeColorScheme(
-                primary="#0078D4",
-                primary_dark="#026EC1",
-                primary_light="#264F78",
-                accent="#03DAC6",
-                accent_fg="#FFFFFF",
-                background="#181818",
-                surface="#181818",
-                card="#2B2B2B",
-                text_primary="#E0E0E0",
-                text_secondary="#A0A0A0",
-                text_disabled="#7A7A7A",
-                border="#3C3C3C",
-                divider="#2B2B2B",
-                error="#CF6679",
-                warning="#FFB74D",
-                success="#81C784",
-                info="#64B5F6",
-                sidebar_bg="#202020",
-                editor_bg="#1F1F1F",
-                editor_line_number="#858585",
-                editor_current_line="#2A2D2E",
-                editor_selection="#264F78",
-                editor_bracket_match_bg="#1A3A3A",
-                editor_bracket_match_fg="#E0E0E0",
-                editor_bracket_unmatched="#F44747",
-                minimap_bg="#1F1F1F",
-                minimap_viewport="#3C3C3C",
-                statusbar_bg="#181818",
-                menubar_bg="#181818",
-                dialog_bg="#2B2B2B",
-                secretary_bubble_bg="#2B2B2B",
-                secretary_bubble_border="#3C3C3C",
-                resource_fuel="#81C784",
-                resource_ammo="#CF6679",
-                resource_steel="#9E9E9E",
-                resource_bauxite="#64B5F6",
-                game_build="#4CAF50",
-                game_garage="#FF9800",
-                game_collection="#9C27B0",
-                bg_codeblock="#2D2D30",
-                codeblock_border="#3E3E42",
-                selection_bg="#264F78",
-                selection_fg="#E0E0E0",
-                hover_bg="#026EC1",
-                active_bg="#026EC1",
-                focus_border="#0078D4",
-                search_match_bg="#3A3D41",
-                search_current_bg="#515C6A",
-                search_current_fg="#FFFFFF",
-                editor_bookmark_bg="#0078D4",
-                editor_bookmark_fg="#FFFFFF",
-                editor_fold_marker="#808080",
-                editor_fold_marker_collapsed="#C5C5C5",
-                md_h1_fg="#E0E0E0",
-                md_h2_fg="#E0E0E0",
-                md_h3_fg="#E0E0E0",
-                md_h456_fg="#D4D4D4",
-                md_bold_fg="#D4D4D4",
-                md_italic_fg="#D4D4D4",
-                md_code_fg="#CE9178",
-                md_code_bg="#2D2D30",
-                md_link_fg="#569CD6",
-                md_image_fg="#C586C0",
-                md_list_fg="#D4D4D4",
-                md_quote_fg="#6A9955",
-                md_hr_fg="#555555",
-                md_fence_fg="#A0A0A0",
-                md_code_block_fg="#D4D4D4",
-                md_code_block_bg="#2D2D30",
-                syntax_keyword="#C586C0",
-                syntax_keyword_type="#4EC9B0",
-                syntax_builtin="#DCDCAA",
-                syntax_class="#4EC9B0",
-                syntax_function="#DCDCAA",
-                syntax_variable="#9CDCFE",
-                syntax_tag="#569CD6",
-                syntax_namespace="#D4D4D4",
-                syntax_string="#CE9178",
-                syntax_string_escape="#D7BA7D",
-                syntax_string_affix="#C586C0",
-                syntax_string_doc="#6A9955",
-                syntax_number="#B5CEA8",
-                syntax_comment="#6A9955",
-                syntax_operator="#D4D4D4",
-                syntax_punctuation="#D4D4D4",
-                syntax_text="#D4D4D4",
-                syntax_error="#F44747",
-                syntax_deleted="#F44747",
-                syntax_inserted="#6A9955",
-                syntax_heading="#D4D4D4",
-                syntax_output="#D4D4D4",
-            ),
-        )
-        self._themes["dark"] = dark_theme
+        for filename in sorted(os.listdir(builtin_dir)):
+            filepath = os.path.join(builtin_dir, filename)
+            if not os.path.isfile(filepath):
+                continue
+            if not filename.endswith('.json'):
+                continue
+            try:
+                theme = self._load_theme_file(filepath)
+                if theme and theme.id not in self._themes:
+                    self._themes[theme.id] = theme
+                    self._logger.info("加载内置主题: %s (%s)", theme.name, theme.id)
+            except Exception as e:
+                self._logger.warning("加载内置主题文件 %s 失败: %s", filename, e)
+
+        if "light" not in self._themes:
+            self._themes["light"] = ThemeDefinition(id="light", name="浅色主题", is_dark=False)
 
     def load_external_themes(self) -> List[str]:
         themes_dir = self._get_themes_dir()

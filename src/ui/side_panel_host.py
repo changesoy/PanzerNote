@@ -181,7 +181,7 @@ class SidePanelHost(ThemeAwareMixin, QWidget):
         self._last_colors = colors
         bg = colors.sidebar_bg
         border = colors.border
-        accent = colors.primary
+        accent = colors.accent
         surface = colors.surface
 
         self.setStyleSheet(f"""
@@ -208,7 +208,7 @@ class SidePanelHost(ThemeAwareMixin, QWidget):
             return
         text = c.text_primary
         border = c.border
-        accent = c.primary
+        accent = c.accent
         accent_fg = c.accent_fg
         btn.setStyleSheet(f"""
             QToolButton {{

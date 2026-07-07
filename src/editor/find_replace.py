@@ -313,7 +313,7 @@ class FindReplaceBar(ThemeAwareMixin, QWidget):
                 color: {colors.text_primary};
                 font-size: 12px;
             }}
-            QLineEdit:focus {{ border-color: {colors.primary}; }}
+            QLineEdit:focus {{ border-color: {colors.focus_border}; }}
             QPushButton, QToolButton {{
                 padding: 3px 8px;
                 border: 1px solid {colors.border};

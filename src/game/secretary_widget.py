@@ -73,7 +73,7 @@ class SpeechBubble(QFrame):
         self.setStyleSheet(f"""
             QFrame {{
                 background-color: {colors.secretary_bubble_bg};
-                border: 2px solid {colors.success};
+                border: 2px solid {colors.secretary_bubble_border};
                 border-radius: 12px;
             }}
         """)

@@ -431,7 +431,7 @@ QPushButton:hover {{
     background-color: {c.primary_dark};
 }}
 QPushButton:pressed {{
-    background-color: {c.primary_dark};
+    background-color: {c.active_bg};
 }}
 QLineEdit {{
     border: 1px solid {c.border};
@@ -440,7 +440,7 @@ QLineEdit {{
     color: {c.text_primary};
 }}
 QLineEdit:focus {{
-    border-color: {c.primary};
+    border-color: {c.focus_border};
 }}
 QCheckBox {{
     color: {c.text_primary};

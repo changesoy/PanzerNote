@@ -100,6 +100,35 @@ class ThemeColorScheme:
     md_code_block_fg: str = "#2b2b2b"
     md_code_block_bg: str = "#f5f5f5"
 
+    # ── 语法高亮 token ──
+    syntax_keyword: str = "#0033B3"
+    syntax_keyword_type: str = "#0033B3"
+    syntax_builtin: str = "#8000FF"
+    syntax_class: str = "#000000"
+    syntax_function: str = "#00627A"
+    syntax_variable: str = "#660E7A"
+    syntax_tag: str = "#000080"
+    syntax_namespace: str = "#000000"
+
+    syntax_string: str = "#067D17"
+    syntax_string_escape: str = "#0037A6"
+    syntax_string_affix: str = "#0033B3"
+    syntax_string_doc: str = "#067D17"
+    syntax_number: str = "#1750EB"
+
+    syntax_comment: str = "#8C8C8C"
+
+    syntax_operator: str = "#000000"
+    syntax_punctuation: str = "#000000"
+    syntax_text: str = "#2b2b2b"
+    syntax_error: str = "#FF0000"
+
+    # ── 语法高亮装饰（bold/italic 由 highlight_themes.py 控制）──
+    syntax_deleted: str = "#A31515"
+    syntax_inserted: str = "#067D17"
+    syntax_heading: str = "#000000"
+    syntax_output: str = "#2b2b2b"
+
     def to_dict(self) -> Dict[str, str]:
         return {k: v for k, v in self.__dict__.items() if not k.startswith('_')}
 
@@ -278,6 +307,28 @@ class ThemeEngine(QObject):
                 md_fence_fg="#A0A0A0",
                 md_code_block_fg="#D4D4D4",
                 md_code_block_bg="#2D2D30",
+                syntax_keyword="#C586C0",
+                syntax_keyword_type="#4EC9B0",
+                syntax_builtin="#DCDCAA",
+                syntax_class="#4EC9B0",
+                syntax_function="#DCDCAA",
+                syntax_variable="#9CDCFE",
+                syntax_tag="#569CD6",
+                syntax_namespace="#D4D4D4",
+                syntax_string="#CE9178",
+                syntax_string_escape="#D7BA7D",
+                syntax_string_affix="#C586C0",
+                syntax_string_doc="#6A9955",
+                syntax_number="#B5CEA8",
+                syntax_comment="#6A9955",
+                syntax_operator="#D4D4D4",
+                syntax_punctuation="#D4D4D4",
+                syntax_text="#D4D4D4",
+                syntax_error="#F44747",
+                syntax_deleted="#F44747",
+                syntax_inserted="#6A9955",
+                syntax_heading="#D4D4D4",
+                syntax_output="#D4D4D4",
             ),
         )
         self._themes["dark"] = dark_theme

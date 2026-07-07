@@ -18,7 +18,7 @@ try:
 except ImportError:
     HAS_PYGMENTS = False
 
-from .highlight_themes import get_editor_formats, get_theme, build_format
+from .highlight_themes import get_editor_formats, build_format
 
 
 # ════════════════════════════════════════════════════════
@@ -31,10 +31,10 @@ class PygmentsHighlighter(QSyntaxHighlighter):
     支持Python、C/C++、Java、JavaScript、JSON、HTML、CSS、XML等
     """
 
-    def __init__(self, document: QTextDocument, lexer, theme_name=None):
+    def __init__(self, document: QTextDocument, lexer, theme_engine):
         super().__init__(document)
         self._lexer = lexer
-        self._formats = get_editor_formats(theme_name)
+        self._formats = get_editor_formats(theme_engine)
 
     def _get_format(self, token_type):
         """获取token类型对应的格式，沿继承链向上查找"""
@@ -231,7 +231,7 @@ class MarkdownHighlighter(QSyntaxHighlighter):
 # ════════════════════════════════════════════════════════
 
 def get_highlighter_for_file(document: QTextDocument, filepath_or_ext: str,
-                             theme_engine, theme_name=None, is_dark: bool = False):
+                             theme_engine, is_dark: bool = False):
     """根据文件类型获取合适的高亮器
 
     Args:
@@ -292,7 +292,7 @@ def get_highlighter_for_file(document: QTextDocument, filepath_or_ext: str,
     if HAS_PYGMENTS:
         try:
             lexer = get_lexer_for_filename(filename, stripnl=False, stripall=False)
-            return PygmentsHighlighter(document, lexer, theme_name), file_type
+            return PygmentsHighlighter(document, lexer, theme_engine), file_type
         except Exception:
             get_logger(__name__).debug("无法为文件 %s 创建 Pygments 高亮器", filename)
 

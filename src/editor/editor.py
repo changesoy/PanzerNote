@@ -622,10 +622,8 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         doc = self.document()
         assert doc is not None
         is_dark = self._theme_engine.get_active_theme().is_dark
-        # 根据明/暗主题自动选择代码高亮主题
-        theme_name = "vscode_dark" if is_dark else "pycharm_light"
         self._highlighter, self._file_type = get_highlighter_for_file(
-            doc, filepath_or_ext, theme_name=theme_name, is_dark=is_dark, theme_engine=self._theme_engine
+            doc, filepath_or_ext, theme_engine=self._theme_engine, is_dark=is_dark
         )
 
         self._lazy_highlight.set_highlighter(self._highlighter)

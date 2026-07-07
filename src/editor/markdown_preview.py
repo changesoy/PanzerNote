@@ -1341,37 +1341,18 @@ a {{
 
     # ──────────── 代码块后处理 ────────────
 
-    def _get_code_highlight_theme(self) -> Optional[str]:
-        """根据当前明/暗主题选择 Markdown 预览代码高亮主题。
+    def _get_code_highlight_theme(self):
+        """获取代码高亮用的 ThemeEngine 实例。
 
         兼容旧配置：
-        - 空值 / auto / default / none / null 视为自动；
-        - 深色主题下，历史默认浅色主题 pycharm_light 视为自动；
-        - 其它显式主题名保留，尊重用户选择。
+        - 空值 / auto / default / none / null 视为自动，使用当前主题；
+        - 其它显式主题名保留但对旧用户透明——始终使用当前主题引擎。
         """
-        is_dark = self._theme_engine.get_active_theme().is_dark
-        fallback_theme = "vscode_dark" if is_dark else "pycharm_light"
-
-        user_theme = self.config.get_editor_setting("code_highlight_theme", None)
-        user_theme_name = str(user_theme).strip() if user_theme is not None else ""
-
-        if not user_theme_name:
-            return fallback_theme
-
-        normalized = user_theme_name.lower()
-
-        if normalized in {"auto", "default", "none", "null"}:
-            return fallback_theme
-
-        if is_dark and normalized == "pycharm_light":
-            return "vscode_dark"
-
-        return user_theme_name
+        return self._theme_engine
 
     def _process_code_blocks(self, html: str) -> str:
         """替换所有 <pre><code> 块：语法高亮 + 浅蓝容器 + 嵌入位置标记"""
         self._code_blocks = []
-        theme = self._get_code_highlight_theme()
 
         def _replace(m):
             code_attrs = m.group("code_attrs") or ""
@@ -1388,7 +1369,7 @@ a {{
                 if idx < len(self._code_block_source_lines):
                     source_line = self._code_block_source_lines[idx]
 
-            highlighted = highlight_code_html(raw, lang, theme)
+            highlighted = highlight_code_html(raw, lang, self._theme_engine)
             return self._build_container(idx, highlighted, source_line)
 
         return _CODEBLOCK_RE.sub(_replace, html)
@@ -1396,7 +1377,6 @@ a {{
     def _process_code_blocks_async(self, html: str) -> str:
         """异步版本的代码块处理：先渲染占位符，再异步替换高亮结果"""
         self._code_blocks = []
-        theme = self._get_code_highlight_theme()
 
         if self._pending_async_task:
             if self._async_renderer is not None:
@@ -1427,7 +1407,7 @@ a {{
             task_id = self._async_renderer.render(
                 "\n---SEPARATOR---\n".join(self._code_blocks),
                 "auto",
-                theme,
+                self._theme_engine,
                 callback=self._on_async_highlight_done,
             )
             self._pending_async_task = task_id

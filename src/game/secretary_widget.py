@@ -174,6 +174,7 @@ class SecretaryWidget(ThemeAwareMixin, QWidget):
     def __init__(self, config: Config, theme_engine, parent=None):
         super().__init__(parent)
         self.config = config
+        self._theme_engine = theme_engine
         self._lines = self.DEFAULT_LINES.copy()
         self._parent_widget = parent
         self._position_dirty = False

@@ -649,7 +649,7 @@ LOADED → on_unload() → UNLOADED
 }
 ```
 
-> token 完整列表参考 `themes/builtin/light.json` 和 `themes/builtin/vscode_dark.json` 中的 `colors` 对象。
+> token 完整列表参考 `themes/builtin/light.json` 和 `themes/builtin/vscode_dark.json` 中的 `colors` 对象。每个 token 的代码位置与影响范围见 [`themes/token_mapping.md`](../themes/token_mapping.md)。
 
 #### 4.13.2 主题预览 (`themes/theme_preview.py`)
 

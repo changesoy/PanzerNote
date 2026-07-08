@@ -402,11 +402,13 @@ Config 类是整个应用的配置中枢，通过组合方式委托 `SavegameMan
 
 ### 4.6 代码高亮主题 (`editor/highlight_themes.py`)
 
-- `THEMES` 字典：每个主题 = `{Token: {color, bold, italic, underline, background}}`
-- 编辑器端：`get_editor_formats()` → `{Token: QTextCharFormat}`
-- 预览端：`highlight_code_html()` → Pygments HtmlFormatter + 内联 style
-- 新增主题只需在 `THEMES` 中增加条目 + `settings.json` 中 `editor.code_highlight_theme` 切换
-- 深色主题下默认使用 VS Code Dark+ 风格代码高亮（详见 [color_audit.md](color_audit.md)）
+- **颜色来源统一**：所有语法高亮颜色从 `ThemeColorScheme` 的 24 个 `syntax_*` token 读取，不再保留独立的 `THEMES` 字典
+- **`TOKEN_MAP` 映射表**：60+ 条 `{Pygments Token → syntax_* 属性名}` 映射，覆盖 Keyword/Name/Literal/Comment/Operator/Punctuation/Text/Error/Generic 等所有 Pygments token 层级
+- **跨主题装饰**：`_TOKEN_BOLD` / `_TOKEN_ITALIC` frozenset 统一管理粗体/斜体装饰，不随主题切换变化
+- **编辑器端**：`get_editor_formats(theme_engine)` → 从当前主题的 `ThemeColorScheme` 动态构建 `{Token: QTextCharFormat}`
+- **预览端**：`highlight_code_html(code, language, theme_engine)` → 从主题颜色生成 Pygments style class，输出内联样式 HTML
+- **预览 CSS**：`get_preview_css(theme_engine)` → 从主题颜色生成代码高亮 CSS 变量，注入 Markdown 预览
+- 切换主题时语法高亮颜色无需任何额外处理——`theme_changed` 信号触发所有订阅组件重新读取 `ThemeColorScheme`，颜色自动跟随（详见 [color_audit.md](color_audit.md)）
 
 ### 4.7 小秘书 (`game/secretary_widget.py`)
 
@@ -619,32 +621,41 @@ LOADED → on_unload() → UNLOADED
 
 #### 4.13.1 主题引擎 (`themes/theme_engine.py`)
 
-- 支持 JSON/YAML 两种格式的外部主题文件
-- 解析颜色方案（主色/背景/前景/强调色/边框等）
-- 自动生成 QSS 样式表，覆盖所有 UI 元素
+- **内置主题**：从 `themes/builtin/` 目录加载 JSON 主题文件（`light.json` / `vscode_dark.json`），零硬编码色值
+- 支持 JSON/YAML 两种格式的外部主题文件（从用户数据目录 `themes/` 加载）
+- **主题持久化**：通过 `config.get_view_setting("theme", "light")` 恢复上次保存的主题
+- **QSS 生成**：`generate_stylesheet()` 从 `ThemeColorScheme` 生成完整 QSS 样式表，覆盖所有 UI 元素（QMainWindow/QMenuBar/QMenu/QTabBar/QTreeView/QStatusBar/QLabel/QPushButton/QLineEdit 等）
 - 主题切换即时生效，无需重启
 
-**主题文件格式示例**：
+**主题文件格式（91 个 color token，按功能分组）**：
 
 ```json
 {
-  "name": "dark_theme",
-  "display_name": "暗黑主题",
-  "version": "1.0.0",
+  "id": "light",
+  "name": "浅色主题",
+  "version": "2.0",
+  "is_dark": false,
   "colors": {
-    "background": "#1e1e2e",
-    "foreground": "#cdd6f4",
-    "accent": "#89b4fa",
-    "border": "#45475a"
+    "primary": "#2196F3",
+    "background": "#FFFFFF",
+    "surface": "#F5F5F5",
+    "editor_bg": "#FFFFFF",
+    "sidebar_bg": "#FAFAFA",
+    "syntax_keyword": "#0033B3",
+    "syntax_string": "#067D17",
+    "syntax_comment": "#8C8C8C",
+    "…": "… (共 91 个 token)"
   }
 }
 ```
 
+> token 完整列表参考 `themes/builtin/light.json` 和 `themes/builtin/vscode_dark.json` 中的 `colors` 对象。
+
 #### 4.13.2 主题预览 (`themes/theme_preview.py`)
 
 - `ThemePreviewDialog` — 主题预览对话框，接入 ThemeAwareMixin，深色样式已补齐
-- 实时预览主题效果
-- 支持主题选择和切换
+- 11 个颜色分组展示全部 91 个 token：通用颜色 / 编辑器颜色 / UI 区域颜色 / 资源颜色 / 交互状态 / 搜索高亮 / 书签与折叠 / 代码块 / 游戏图标 / Markdown 高亮 / 语法高亮
+- 实时预览主题效果，支持主题选择和切换
 
 #### 4.13.3 主题感知混入 (`themes/theme_aware_mixin.py`)
 

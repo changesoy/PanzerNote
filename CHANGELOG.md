@@ -2,6 +2,40 @@
 
 本文件记录 PanzerNote 各版本的变更。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
 
+## v1.8.3
+
+**Wave 1 主题迁移：语法高亮并入语义 token、内置主题 JSON 化**
+
+**语法高亮颜色并入 ThemeColorScheme**
+
+- **24 个 `syntax_*` token**：新增 keyword/keyword_type/builtin/class/function/variable/tag/namespace/string/string_escape/string_affix/string_doc/number/comment/operator/punctuation/text/error/deleted/inserted/heading/output 等语法高亮颜色 token，默认值为 PyCharm Light 色值
+- **TOKEN_MAP 替换 THEMES 字典**：`highlight_themes.py` 删除约 200 行硬编码 `THEMES` 字典，改为 60+ 条 `{Pygments Token → syntax_* 属性名}` 映射表。所有签名从 `theme_name: str` 改为 `theme_engine`
+- **粗体/斜体装饰集中管理**：新增 `_TOKEN_BOLD` 和 `_TOKEN_ITALIC` frozenset，统一管理跨主题的粗体/斜体装饰（基于 PyCharm Light 装饰规则，暗色主题复用）
+- **调用方更新**：`syntax_highlighter.py`、`editor.py`、`markdown_preview.py`、`async_highlight.py` 全部接入 theme_engine 对象
+
+**内置主题迁移到 JSON 文件**
+
+- **新建 `themes/builtin/light.json`**：68 个 color token，浅色主题零硬编码
+- **新建 `themes/builtin/vscode_dark.json`**：94 个 color token，深色主题零硬编码，对标 VS Code Dark Modern 配色
+- **加载机制**：`_load_builtin_themes()` 改为扫描 `themes/builtin/` 目录，自动加载所有 JSON 主题文件
+- 所有颜色变更只需编辑 JSON 文件，无需修改 Python 代码
+
+**主题管理界面完善**
+
+- 主题预览从 4 个分组 35 个 token 扩展为 11 个分组 91 个 token（100% 覆盖）
+- 新增分组：交互状态 / 搜索高亮 / 书签与折叠 / 代码块 / 游戏图标 / Markdown 高亮 / 语法高亮
+- 新增 `themes/token_mapping.md`：每个 token 的代码位置与影响范围速查表
+
+**未使用 token 清理与接线**
+
+- 删除 9 个从未使用的 token（4 个接入实际位置：`accent` → 侧栏、`secretary_bubble_border` → 小秘书、`active_bg` → QPushButton:pressed、`focus_border` → QLineEdit:focus）
+- 确认 16 个 `md_*` token 正被编辑器 Markdown 语法高亮使用，予以保留
+
+**兼容性说明**
+
+- `highlight_themes.py` 公共 API 签名变更：`get_editor_formats(theme_name)` → `get_editor_formats(theme_engine)`；`highlight_code_html(code, language, theme_name)` → `highlight_code_html(code, language, theme_engine)`。所有调用方已同步更新
+- 用户自定义 `theme.json` 中若缺少新增的 `syntax_*` 或 `md_*` token，`ThemeColorScheme.from_dict()` 自动回退到 dataclass 默认值
+
 ## v1.8.2
 
 **Markdown 预览代码块复制功能迁移至 QWebEngineView**

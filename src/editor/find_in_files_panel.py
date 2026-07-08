@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
+    QApplication,
 )
 
 from .find_in_files_service import FindInFilesWorker
@@ -44,12 +45,14 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
     def __init__(
         self,
         get_workspace_root: Callable[[], str],
+        theme_engine,
         get_open_files: Callable[[], list[str]] | None = None,
         get_recent_files: Callable[[], list[str]] | None = None,
-        theme_engine=None,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
+        if theme_engine is None:
+            raise RuntimeError("FindInFilesPanel 必须传入 theme_engine，不允许为 None")
         self._get_workspace_root = get_workspace_root
         self._get_open_files = get_open_files or (lambda: [])
         self._get_recent_files = get_recent_files or (lambda: [])
@@ -73,7 +76,7 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
         # --- 范围选择 ---
         scope_layout = QHBoxLayout()
         self._scope_label = QLabel("范围:")
-        self._scope_label.setStyleSheet("font-size: 11px; color: #888;")
+        self._scope_label.setStyleSheet("font-size: 11px;")
         scope_layout.addWidget(self._scope_label)
 
         self._scope_combo = QComboBox()
@@ -88,15 +91,18 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
         # --- 选项行 ---
         opts_layout = QHBoxLayout()
 
-        self._case_cb = QCheckBox("大小写")
+        self._case_cb = QCheckBox("Aa")
+        self._case_cb.setToolTip("大小写敏感")
         self._case_cb.stateChanged.connect(self._on_option_changed)
         opts_layout.addWidget(self._case_cb)
 
-        self._word_cb = QCheckBox("全词")
+        self._word_cb = QCheckBox("W")
+        self._word_cb.setToolTip("全词匹配")
         self._word_cb.stateChanged.connect(self._on_option_changed)
         opts_layout.addWidget(self._word_cb)
 
-        self._regex_cb = QCheckBox("正则")
+        self._regex_cb = QCheckBox(".*")
+        self._regex_cb.setToolTip("正则表达式")
         self._regex_cb.stateChanged.connect(self._on_option_changed)
         opts_layout.addWidget(self._regex_cb)
 
@@ -120,13 +126,12 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
 
         # --- 状态栏 ---
         self._status_label = QLabel("")
-        self._status_label.setStyleSheet("color: #888; font-size: 11px;")
+        self._status_label.setStyleSheet("font-size: 11px;")
         layout.addWidget(self._status_label)
 
         self.setMinimumWidth(180)
 
-        if theme_engine:
-            self._init_theme(theme_engine)
+        self._init_theme(theme_engine)
 
     def _apply_theme_colors(self, colors):
         self._scope_label.setStyleSheet(f"font-size: 11px; color: {colors.text_secondary};")
@@ -264,7 +269,7 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
         match_node.setData(0, Qt.ItemDataRole.UserRole, (filepath, line_num))
 
         font = QFont("Consolas, Courier New, monospace")
-        font.setPointSize(font.pointSize() - 1)
+        font.setPointSize(QApplication.font().pointSize() - 1)
         match_node.setFont(0, font)
 
         file_node.addChild(match_node)

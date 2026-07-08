@@ -971,7 +971,8 @@ class MainWindow(QMainWindow):
             def on_pdf_ready(pdf_data):
                 self._on_pdf_generated(pdf_data, filepath)
 
-            ExportService.export_pdf(content, is_md, self, on_pdf_ready)
+            ExportService.export_pdf(content, is_md, self, on_pdf_ready,
+                                     self.theme_engine.get_active_theme().colors)
         except RuntimeError as e:
             QMessageBox.warning(self, "导出失败", str(e))
 
@@ -1003,7 +1004,8 @@ class MainWindow(QMainWindow):
         is_md = ExportService.is_markdown_content(content, widget_type)
 
         try:
-            ExportService.export_html(content, is_md, filepath)
+            ExportService.export_html(content, is_md, filepath,
+                                     self.theme_engine.get_active_theme().colors)
             self.secretary.show_message(f"已导出HTML: {os.path.basename(filepath)}")
         except Exception as e:
             QMessageBox.warning(self, "导出失败", str(e))
@@ -1782,5 +1784,5 @@ class MainWindow(QMainWindow):
 
     def _show_plugin_manager(self):
         from .plugins.plugin_manager_dialog import PluginManagerDialog
-        dialog = PluginManagerDialog(self.plugin_manager, self.secretary, parent=self)
+        dialog = PluginManagerDialog(self.plugin_manager, self.secretary, self.theme_engine, parent=self)
         dialog.exec()

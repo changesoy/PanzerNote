@@ -61,8 +61,10 @@ class ResourceItem(QWidget):
 
 class ResourceBar(ThemeAwareMixin, QWidget):
 
-    def __init__(self, config: Config, theme_engine=None, parent=None):
+    def __init__(self, config: Config, theme_engine, parent=None):
         super().__init__(parent)
+        if theme_engine is None:
+            raise RuntimeError("ResourceBar 必须传入 theme_engine，不允许为 None")
         self.config = config
 
         self.setFixedHeight(36)
@@ -102,8 +104,7 @@ class ResourceBar(ThemeAwareMixin, QWidget):
         self.typing_label.setFont(QFont("Microsoft YaHei", 10))
         layout.addWidget(self.typing_label)
 
-        if theme_engine:
-            self._init_theme(theme_engine)
+        self._init_theme(theme_engine)
 
         self.refresh()
 

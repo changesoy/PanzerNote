@@ -67,83 +67,62 @@ Excluded paths:
 
 ### 1. Mixed Material and VS Code accent systems
 
-Current dark theme mixes Material-like `#BB86FC` / `#03DAC6` with VS Code-like editor, selection and code colors.
+~~Current dark theme mixes Material-like `#BB86FC` / `#03DAC6` with VS Code-like editor, selection and code colors.~~
 
-Recommendation:
-Future palette migration should move to VS Code blue:
-
-- `primary`: `#0078D4`
-- `primary_dark`: `#026EC1`
-- `selection_bg`: `#264F78`
-- `focus_border`: `#0078D4`
-
-Do not change this in the audit commit.
+**RESOLVED (Batch E)**: Dark theme `primary` switched to VS Code blue `#0078D4`, `primary_dark`/`hover_bg` to `#026EC1`, `focus_border` to `#0078D4`.
 
 ### 2. `primary_light` is semantically overloaded
 
-`primary_light` currently behaves like selection background.
-Future migration should introduce:
-
-- `selection_bg`
-- `selection_fg`
-- `hover_bg`
-- `active_bg`
+~~`primary_light` currently behaves like selection background.~~
+**RESOLVED**: `selection_bg`, `selection_fg`, `hover_bg`, `active_bg` tokens added and wired.
 
 ### 3. Dark surface layers are too flat
 
-Many surfaces use `#1E1E1E`.
-Future migration should introduce separate levels:
+~~Many surfaces use `#1E1E1E`.~~
+**RESOLVED (Batch E)**: Dark theme now uses separate levels:
 
 - window / title / status: `#181818`
-- editor: `#1F1F1F` or `#1E1E1E`
-- widget: `#202020`
-- card / code block: `#2B2B2B`
-- input: `#313131`
+- editor: `#1F1F1F`
+- widget (sidebar): `#202020`
+- card: `#2B2B2B`
 
 ### 4. Search highlight colors live in `find_replace.py`
 
-Move later to:
-
-- `search_match_bg`
-- `search_current_bg`
-- `search_current_fg`
+~~Move later to: `search_match_bg`, `search_current_bg`, `search_current_fg`~~
+**RESOLVED (Batch C)**: `find_replace.py` and `find_in_files_panel.py` now read from search tokens.
 
 ### 5. Gutter bookmark and fold marker colors live in `editor.py`
 
-Move later to:
-
-- `editor_bookmark_bg`
-- `editor_bookmark_fg`
-- `editor_fold_marker`
-- `editor_fold_marker_collapsed`
+~~Move later to: `editor_bookmark_bg`, `editor_bookmark_fg`, `editor_fold_marker`, `editor_fold_marker_collapsed`~~
+**RESOLVED (Batch B)**: `editor.py` now reads from bookmark/fold tokens.
 
 ### 6. Side panel selected state depends on `primary`
 
-If `primary` remains `#BB86FC`, white text is not ideal.
-After palette migration, use VS Code blue or `selection_bg`.
+~~If `primary` remains `#BB86FC`, white text is not ideal.~~
+**RESOLVED (Batch E)**: `primary` is now VS Code blue `#0078D4`; white text on blue is the intended contrast.
 
 ## Target Token Values (VS Code Dark Modern / Dark+)
 
 PanzerNote dark theme targets VS Code Dark Modern / Dark+, not JetBrains Darcula.
 
-| Token                                     |                                    Target | Usage                            |
-| ----------------------------------------- | ----------------------------------------: | -------------------------------- |
-| `bg_window` / `bg_title` / `bg_status`    |                                 `#181818` | Shell, title bar, status bar     |
-| `bg_editor`                               |                                 `#1F1F1F` | Editor viewport                  |
-| `bg_widget`                               |                                 `#202020` | Sidebars, panels                 |
-| `bg_card` / `bg_codeblock`                |                                 `#2B2B2B` | Cards, code blocks               |
-| `bg_input`                                |                                 `#313131` | Input fields                     |
-| `primary`                                 |                                 `#0078D4` | Primary accent                   |
-| `primary_dark` / `hover_bg`               |                                 `#026EC1` | Hover, pressed states            |
-| `selection_bg`                            |                                 `#264F78` | Selection background             |
-| `focus_border`                            |                                 `#0078D4` | Focus ring                       |
-| `search_match_bg`                         |                                 `#3A3D41` | Find match highlight             |
-| `search_current_bg`                       |                                 `#515C6A` | Current find match               |
-| `search_current_fg`                       |                                 `#FFFFFF` | Current find match text          |
-| `editor_bookmark_bg`                      |                                 `#0078D4` | Bookmark gutter marker           |
-| `editor_bookmark_fg`                      |                                 `#FFFFFF` | Bookmark gutter marker text      |
-| `editor_fold_marker`                      |                                 `#808080` | Fold marker (expanded)           |
-| `editor_fold_marker_collapsed`            |                                 `#C5C5C5` | Fold marker (collapsed)          |
+| Token                                  |    Target | Usage                        |
+| -------------------------------------- | --------: | ---------------------------- |
+| `bg_window` / `bg_title` / `bg_status` | `#181818` | Shell, title bar, status bar |
+| `bg_editor`                            | `#1F1F1F` | Editor viewport              |
+| `bg_widget`                            | `#202020` | Sidebars, panels             |
+| `bg_card` / `bg_codeblock`             | `#2B2B2B` | Cards, code blocks           |
+| `bg_input`                             | `#313131` | Input fields                 |
+| `primary`                              | `#0078D4` | Primary accent               |
+| `primary_dark` / `hover_bg`            | `#026EC1` | Hover, pressed states        |
+| `selection_bg`                         | `#264F78` | Selection background         |
+| `focus_border`                         | `#0078D4` | Focus ring                   |
+| `search_match_bg`                      | `#3A3D41` | Find match highlight         |
+| `search_current_bg`                    | `#515C6A` | Current find match           |
+| `search_current_fg`                    | `#FFFFFF` | Current find match text      |
+| `editor_bookmark_bg`                   | `#0078D4` | Bookmark gutter marker       |
+| `editor_bookmark_fg`                   | `#FFFFFF` | Bookmark gutter marker text  |
+| `editor_fold_marker`                   | `#808080` | Fold marker (expanded)       |
+| `editor_fold_marker_collapsed`         | `#C5C5C5` | Fold marker (collapsed)      |
 
 ### Batch Strategy
 
@@ -153,40 +132,68 @@ PanzerNote dark theme targets VS Code Dark Modern / Dark+, not JetBrains Darcula
 
 ## Migration Batches
 
-### Batch A: ThemeColorScheme semantic tokens
+### Batch A: ThemeColorScheme semantic tokens ✅ COMPLETED
 
-Add tokens only, with old values as defaults:
+Added tokens with old values as defaults (no UI change):
 
-- `selection_bg`
-- `selection_fg`
-- `hover_bg`
-- `active_bg`
-- `focus_border`
-- `search_match_bg`
-- `search_current_bg`
-- `search_current_fg`
-- `editor_bookmark_bg`
-- `editor_bookmark_fg`
-- `editor_fold_marker`
-- `editor_fold_marker_collapsed`
+- `selection_bg` → light: `#BBDEFB`, dark: `#264F78`
+- `selection_fg` → light: `#212121`, dark: `#E0E0E0`
+- `hover_bg` → light: `#BBDEFB`, dark: `#264F78`
+- `active_bg` → light: `#1976D2`, dark: `#985EFF`
+- `focus_border` → light: `#2196F3`, dark: `#BB86FC`
+- `search_match_bg` → light: `#FFEE58`, dark: `#6B6B00`
+- `search_current_bg` → light: `#FF9800`, dark: `#B47800`
+- `search_current_fg` → light/dark: `#FFFFFF`
+- `editor_bookmark_bg` → light: `#FF9800`, dark: `#BB86FC`
+- `editor_bookmark_fg` → light/dark: `#FFFFFF`
+- `editor_fold_marker` → light: `#4CAF50`, dark: `#81C784`
+- `editor_fold_marker_collapsed` → light: `#66BB6A`, dark: `#A5D6A7`
 
-### Batch B: Editor auxiliary colors
+_Note: Dark theme values match existing hardcoded colors in editor.py/find_replace.py to ensure zero visual change._
 
-Migrate `editor.py` gutter/bookmark/fold colors and `find_replace.py` search highlights.
+### Batch B: Editor auxiliary colors ✅ COMPLETED
 
-### Batch C: Sidebar and command surfaces
+Migrated:
 
-Migrate `side_panel_host.py`, `command_palette.py`, `find_in_files_panel.py`.
+- `editor.py`: fold markers → `editor_fold_marker` / `editor_fold_marker_collapsed`; bookmarks → `editor_bookmark_bg` / `editor_bookmark_fg`
+- `syntax_highlighter.py`: Markdown semantic highlighter now reads from `md_*` theme tokens (h1-h6, code, link, quote, etc.)
+- `minimap.py`: fallback colors aligned with theme defaults (`minimap_bg`, `border`, `text_disabled`, `primary`)
 
-### Batch D: Legacy Markdown renderer decision
+_Note: `find_replace.py` search highlights moved to Batch C (search tokens)._
 
-Decide whether `secure_markdown_renderer.py` is still used.
-If yes, align it with `markdown_preview.py`.
-If no, deprecate or isolate it.
+### Batch C: Sidebar and command surfaces ✅ COMPLETED
 
-### Batch E: Palette normalization
+Migrated:
 
-Only after all components use semantic tokens, adjust the built-in dark theme toward VS Code Dark Modern / Dark+.
+- `side_panel_host.py`: audited, already fully token-driven (no hardcoded colors)
+- `command_palette.py`: hint label fallback aligned with `text_secondary` default
+- `find_in_files_panel.py`: text fallbacks aligned with `text_secondary`
+- `game_sidebar.py`: `GameIconButton` colors wired to `game_build`/`game_garage`/`game_collection` tokens
+
+### Batch D: Legacy Markdown renderer decision ✅ COMPLETED
+
+`secure_markdown_renderer.py` still has active call paths (export_service, markdown_preview fallback). Kept as-is.
+`markdown_preview.py` CSS refactored: `PREVIEW_HTML_TEMPLATE` hardcoded colors replaced with CSS variables; `_DARK_COLOR_MAP` and `_get_dark_preview_template` removed; `_build_preview_css_vars` injects `:root` overrides from theme tokens.
+
+### Batch E: Palette normalization ✅ COMPLETED
+
+Switched built-in dark theme palette to VS Code Dark Modern / Dark+ target values:
+
+- `background`/`surface`: `#1E1E1E` → `#181818`
+- `editor_bg`: `#1E1E1E` → `#1F1F1F`
+- `sidebar_bg`: `#1E1E1E` → `#202020`
+- `card`: `#2D2D2D` → `#2B2B2B`
+- `primary`: `#BB86FC` → `#0078D4`
+- `primary_dark`/`hover_bg`/`active_bg`: `#985EFF`/`#264F78` → `#026EC1`
+- `focus_border`: `#BB86FC` → `#0078D4`
+- `search_match_bg`: `#6B6B00` → `#3A3D41`
+- `search_current_bg`: `#B47800` → `#515C6A`
+- `editor_bookmark_bg`: `#BB86FC` → `#0078D4`
+- `editor_fold_marker`: `#81C784` → `#808080`
+- `editor_fold_marker_collapsed`: `#A5D6A7` → `#C5C5C5`
+- `statusbar_bg`/`menubar_bg`: `#1E1E1E` → `#181818`
+
+Light theme palette unchanged.
 
 ## Verification Checklist
 

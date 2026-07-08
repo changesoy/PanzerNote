@@ -70,26 +70,27 @@ class ExportService:
         return render_plain_text_to_safe_html(content)
 
     @staticmethod
-    def export_html(content: str, is_markdown: bool, filepath: str, title: str = "") -> None:
+    def export_html(content: str, is_markdown: bool, filepath: str, colors, title: str = "") -> None:
         """导出为 HTML 文件
 
         参数：
           content：原始文本
           is_markdown：是否按 Markdown 渲染
           filepath：导出文件路径
+          colors：ThemeColorScheme 实例，提供主题色值
           title：文档标题
 
         异常：文件写入失败时抛出 IOError
         """
         body_html = ExportService.render_content(content, is_markdown)
-        full_html = build_export_html_document(body_html, title)
+        full_html = build_export_html_document(body_html, colors, title)
 
         with open(filepath, 'w', encoding='utf-8') as f:
             f.write(full_html)
 
     @staticmethod
     def export_pdf(content: str, is_markdown: bool, parent_widget,
-                   on_pdf_generated, title: str = "") -> object:
+                   on_pdf_generated, colors, title: str = "") -> object:
         """导出为 PDF 文件
 
         参数：
@@ -97,6 +98,7 @@ class ExportService:
           is_markdown：是否按 Markdown 渲染
           parent_widget：父 widget（用于 QWebEngineView 的 parent）
           on_pdf_generated：回调函数 (pdf_data: bytes, filepath: str) -> None
+          colors：ThemeColorScheme 实例，提供主题色值
           title：文档标题
 
         返回：QWebEngineView 实例（调用方不应持有，由内部自动清理）
@@ -107,7 +109,7 @@ class ExportService:
             raise RuntimeError("导出PDF需要QtWebEngine组件")
 
         body_html = ExportService.render_content(content, is_markdown)
-        full_html = build_export_html_document(body_html, title)
+        full_html = build_export_html_document(body_html, colors, title)
 
         web_view = QWebEngineView(parent_widget)
 

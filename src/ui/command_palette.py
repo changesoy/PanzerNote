@@ -31,9 +31,11 @@ class CommandPalette(ThemeAwareMixin, QDialog):
     # 上次关闭时的位置（类级记忆）
     _last_known_pos: Optional[QPoint] = None
 
-    def __init__(self, commands: List[CommandEntry], shortcut: str = "",
-                 theme_engine=None, parent: Optional[QWidget] = None):
+    def __init__(self, commands: List[CommandEntry], theme_engine, shortcut: str = "",
+                 parent: Optional[QWidget] = None):
         super().__init__(parent)
+        if theme_engine is None:
+            raise RuntimeError("CommandPalette 必须传入 theme_engine，不允许为 None")
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.Dialog
@@ -77,14 +79,13 @@ class CommandPalette(ThemeAwareMixin, QDialog):
         self._hint_label = QLabel(f"↑↓ 导航  Enter 执行  {close_keys} 关闭  拖拽搜索栏移动")
         self._hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._hint_label.setFont(QFont("Microsoft YaHei", 8))
-        self._hint_label.setStyleSheet("color: #999; padding: 4px;")
+        self._hint_label.setStyleSheet("padding: 4px;")
         layout.addWidget(self._hint_label)
 
         self._populate()
         self._search.setFocus()
 
-        if theme_engine:
-            self._init_theme(theme_engine)
+        self._init_theme(theme_engine)
 
     def _apply_theme_colors(self, colors):
         self.setStyleSheet(f"""
@@ -222,7 +223,7 @@ class CommandPalette(ThemeAwareMixin, QDialog):
         super().paintEvent(event)
         from PyQt6.QtGui import QPainter, QPen
         painter = QPainter(self)
-        border_color = getattr(self, '_border_color', '#C0C0C0')
+        border_color = self._border_color
         painter.setPen(QPen(QColor(border_color), 1))
         painter.drawRect(self.rect().adjusted(0, 0, -1, -1))
         painter.end()

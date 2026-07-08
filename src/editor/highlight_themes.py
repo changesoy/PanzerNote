@@ -4,14 +4,14 @@
 统一管理编辑器（左侧）和 Markdown 预览（右侧）的代码配色方案
 
 使用方式：
-    编辑器：  get_editor_formats(theme_name) → {Token: QTextCharFormat}
-    预览CSS： get_preview_css(theme_name)     → str (注入到 HTML <style>)
+    编辑器：  get_editor_formats(theme_engine) → {Token: QTextCharFormat}
+    预览CSS： get_preview_css(theme_engine)     → str (注入到 HTML <style>)
 
-在 settings.json → editor.code_highlight_theme 中切换主题。
-新增主题只需在 THEMES 字典中增加一个条目即可。
+颜色值统一由 ThemeEngine 的 ThemeColorScheme 管理。
+Token → syntax_* 映射、bold/italic 装饰在此定义。
 """
 
-from typing import cast
+from typing import Optional, cast
 
 from PyQt6.QtGui import QTextCharFormat, QColor, QFont
 
@@ -27,242 +27,137 @@ except ImportError:
 
 
 # ════════════════════════════════════════════════════════
-#  主题定义
-#  每个主题包含 name / description / styles 三个字段
-#  styles 为 {Token: {"color","bold","italic","underline","background"}} 字典
+#  Token → syntax_* 映射表
+#  所有 Pygments Token 到 ThemeColorScheme 语义 token 属性的映射
 # ════════════════════════════════════════════════════════
 
 if HAS_PYGMENTS:
-    THEMES = {
-        # ────── VSCode Dark+ ──────
-        "vscode_dark": {
-            "name": "VSCode Dark+",
-            "description": "仿 VSCode Dark+ 暗色主题",
-            "styles": {
-                # ── 关键字 ── 紫色
-                Token.Keyword:                  {"color": "#C586C0"},
-                Token.Keyword.Constant:         {"color": "#C586C0"},
-                Token.Keyword.Declaration:      {"color": "#C586C0"},
-                Token.Keyword.Namespace:        {"color": "#C586C0"},
-                Token.Keyword.Pseudo:           {"color": "#C586C0"},
-                Token.Keyword.Reserved:         {"color": "#C586C0"},
-                Token.Keyword.Type:             {"color": "#4EC9B0"},
+    TOKEN_MAP = {
+        # ── 关键字 ──
+        Token.Keyword:                     "syntax_keyword",
+        Token.Keyword.Constant:            "syntax_keyword",
+        Token.Keyword.Declaration:         "syntax_keyword",
+        Token.Keyword.Namespace:           "syntax_keyword",
+        Token.Keyword.Pseudo:              "syntax_keyword",
+        Token.Keyword.Reserved:            "syntax_keyword",
+        Token.Keyword.Type:                "syntax_keyword_type",
+        Token.Operator.Word:               "syntax_keyword",
 
-                # ── 名称 ──
-                Token.Name.Builtin:             {"color": "#DCDCAA"},
-                Token.Name.Builtin.Pseudo:      {"color": "#DCDCAA"},
-                Token.Name.Class:               {"color": "#4EC9B0", "bold": True},
-                Token.Name.Function:            {"color": "#DCDCAA"},
-                Token.Name.Function.Magic:      {"color": "#DCDCAA"},
-                Token.Name.Decorator:           {"color": "#DCDCAA"},
-                Token.Name.Exception:           {"color": "#4EC9B0", "bold": True},
-                Token.Name.Tag:                 {"color": "#569CD6"},
-                Token.Name.Attribute:           {"color": "#9CDCFE"},
-                Token.Name.Namespace:           {"color": "#D4D4D4"},
-                Token.Name.Variable:            {"color": "#9CDCFE"},
-                Token.Name.Variable.Class:      {"color": "#9CDCFE"},
-                Token.Name.Variable.Global:     {"color": "#9CDCFE"},
-                Token.Name.Variable.Instance:   {"color": "#9CDCFE"},
-                Token.Name.Constant:            {"color": "#9CDCFE", "italic": True},
-                Token.Name.Label:               {"color": "#D4D4D4"},
-                Token.Name.Entity:              {"color": "#9CDCFE"},
+        # ── 名称 ──
+        Token.Name.Builtin:                "syntax_builtin",
+        Token.Name.Builtin.Pseudo:         "syntax_builtin",
+        Token.Name.Class:                  "syntax_class",
+        Token.Name.Exception:              "syntax_class",
+        Token.Name.Function:               "syntax_function",
+        Token.Name.Function.Magic:         "syntax_function",
+        Token.Name.Decorator:              "syntax_function",
+        Token.Name.Tag:                    "syntax_tag",
+        Token.Name.Attribute:              "syntax_variable",
+        Token.Name.Namespace:              "syntax_namespace",
+        Token.Name.Variable:               "syntax_variable",
+        Token.Name.Variable.Class:         "syntax_variable",
+        Token.Name.Variable.Global:        "syntax_variable",
+        Token.Name.Variable.Instance:      "syntax_variable",
+        Token.Name.Constant:               "syntax_variable",
+        Token.Name.Label:                  "syntax_namespace",
+        Token.Name.Entity:                 "syntax_variable",
 
-                # ── 字面量：字符串 ── 橙红色
-                Token.Literal.String:           {"color": "#CE9178"},
-                Token.Literal.String.Affix:     {"color": "#C586C0"},
-                Token.Literal.String.Backtick:  {"color": "#CE9178"},
-                Token.Literal.String.Char:      {"color": "#CE9178"},
-                Token.Literal.String.Delimiter: {"color": "#CE9178"},
-                Token.Literal.String.Doc:       {"color": "#6A9955", "italic": True},
-                Token.Literal.String.Double:    {"color": "#CE9178"},
-                Token.Literal.String.Escape:    {"color": "#D7BA7D"},
-                Token.Literal.String.Heredoc:   {"color": "#CE9178"},
-                Token.Literal.String.Interpol:  {"color": "#C586C0"},
-                Token.Literal.String.Other:     {"color": "#CE9178"},
-                Token.Literal.String.Regex:     {"color": "#CE9178"},
-                Token.Literal.String.Single:    {"color": "#CE9178"},
-                Token.Literal.String.Symbol:    {"color": "#CE9178"},
+        # ── 字面量：字符串 ──
+        Token.Literal.String:              "syntax_string",
+        Token.Literal.String.Backtick:     "syntax_string",
+        Token.Literal.String.Char:         "syntax_string",
+        Token.Literal.String.Delimiter:    "syntax_string",
+        Token.Literal.String.Double:       "syntax_string",
+        Token.Literal.String.Heredoc:      "syntax_string",
+        Token.Literal.String.Other:        "syntax_string",
+        Token.Literal.String.Regex:        "syntax_string",
+        Token.Literal.String.Single:       "syntax_string",
+        Token.Literal.String.Symbol:       "syntax_string",
+        Token.Literal.String.Affix:        "syntax_string_affix",
+        Token.Literal.String.Interpol:     "syntax_string_affix",
+        Token.Literal.String.Doc:          "syntax_string_doc",
+        Token.Literal.String.Escape:       "syntax_string_escape",
 
-                # ── 字面量：数字 ── 浅绿色
-                Token.Literal.Number:           {"color": "#B5CEA8"},
-                Token.Literal.Number.Bin:       {"color": "#B5CEA8"},
-                Token.Literal.Number.Float:     {"color": "#B5CEA8"},
-                Token.Literal.Number.Hex:       {"color": "#B5CEA8"},
-                Token.Literal.Number.Integer:   {"color": "#B5CEA8"},
-                Token.Literal.Number.Integer.Long: {"color": "#B5CEA8"},
-                Token.Literal.Number.Oct:       {"color": "#B5CEA8"},
+        # ── 字面量：数字 ──
+        Token.Literal.Number:              "syntax_number",
+        Token.Literal.Number.Bin:          "syntax_number",
+        Token.Literal.Number.Float:        "syntax_number",
+        Token.Literal.Number.Hex:          "syntax_number",
+        Token.Literal.Number.Integer:      "syntax_number",
+        Token.Literal.Number.Integer.Long: "syntax_number",
+        Token.Literal.Number.Oct:          "syntax_number",
 
-                # ── 注释 ── 绿色
-                Token.Comment:                  {"color": "#6A9955", "italic": True},
-                Token.Comment.Hashbang:         {"color": "#6A9955", "italic": True},
-                Token.Comment.Multiline:        {"color": "#6A9955", "italic": True},
-                Token.Comment.Preproc:          {"color": "#6A9955", "italic": True},
-                Token.Comment.PreprocFile:      {"color": "#6A9955", "italic": True},
-                Token.Comment.Single:           {"color": "#6A9955", "italic": True},
-                Token.Comment.Special:          {"color": "#6A9955", "italic": True, "bold": True},
+        # ── 注释 ──
+        Token.Comment:                     "syntax_comment",
+        Token.Comment.Hashbang:            "syntax_comment",
+        Token.Comment.Multiline:           "syntax_comment",
+        Token.Comment.Preproc:             "syntax_comment",
+        Token.Comment.PreprocFile:         "syntax_comment",
+        Token.Comment.Single:              "syntax_comment",
+        Token.Comment.Special:             "syntax_comment",
 
-                # ── 运算符 / 标点 ──
-                Token.Operator:                 {"color": "#D4D4D4"},
-                Token.Operator.Word:            {"color": "#C586C0"},
-                Token.Punctuation:              {"color": "#D4D4D4"},
+        # ── 运算符 / 标点 ──
+        Token.Operator:                    "syntax_operator",
+        Token.Punctuation:                 "syntax_punctuation",
 
-                # ── 泛型 ──
-                Token.Generic.Heading:          {"color": "#D4D4D4", "bold": True},
-                Token.Generic.Subheading:       {"color": "#D4D4D4", "bold": True},
-                Token.Generic.Emph:             {"italic": True},
-                Token.Generic.Strong:           {"bold": True},
-                Token.Generic.Deleted:          {"color": "#F44747"},
-                Token.Generic.Inserted:         {"color": "#6A9955"},
-                Token.Generic.Error:            {"color": "#F44747"},
-                Token.Generic.Traceback:        {"color": "#F44747"},
-                Token.Generic.Output:           {"color": "#D4D4D4"},
-                Token.Generic.Prompt:           {"color": "#D4D4D4", "bold": True},
+        # ── 泛型 ──
+        Token.Generic.Heading:             "syntax_heading",
+        Token.Generic.Subheading:          "syntax_heading",
+        Token.Generic.Deleted:             "syntax_deleted",
+        Token.Generic.Inserted:            "syntax_inserted",
+        Token.Generic.Error:               "syntax_error",
+        Token.Generic.Traceback:           "syntax_error",
+        Token.Generic.Output:              "syntax_output",
+        Token.Generic.Prompt:              "syntax_output",
 
-                # ── 其他 ──
-                Token.Text:                     {"color": "#D4D4D4"},
-                Token.Error:                    {"color": "#F44747"},
-            }
-        },
-        # ────── PyCharm / IntelliJ Light ──────
-        "pycharm_light": {
-            "name": "PyCharm Light",
-            "description": "仿 JetBrains IntelliJ / PyCharm Light 主题",
-            "styles": {
-                # ── 关键字 ── 深蓝加粗
-                Token.Keyword:                  {"color": "#0033B3", "bold": True},
-                Token.Keyword.Constant:         {"color": "#0033B3", "bold": True},
-                Token.Keyword.Declaration:      {"color": "#0033B3", "bold": True},
-                Token.Keyword.Namespace:        {"color": "#0033B3", "bold": True},
-                Token.Keyword.Pseudo:           {"color": "#0033B3", "bold": True},
-                Token.Keyword.Reserved:         {"color": "#0033B3", "bold": True},
-                Token.Keyword.Type:             {"color": "#0033B3"},
-
-                # ── 名称 ──
-                Token.Name.Builtin:             {"color": "#8000FF"},
-                Token.Name.Builtin.Pseudo:      {"color": "#94558D"},
-                Token.Name.Class:               {"color": "#000000", "bold": True},
-                Token.Name.Function:            {"color": "#00627A"},
-                Token.Name.Function.Magic:      {"color": "#00627A"},
-                Token.Name.Decorator:           {"color": "#BBB529"},
-                Token.Name.Exception:           {"color": "#000000", "bold": True},
-                Token.Name.Tag:                 {"color": "#000080"},
-                Token.Name.Attribute:           {"color": "#660E7A"},
-                Token.Name.Namespace:           {"color": "#000000"},
-                Token.Name.Variable:            {"color": "#660E7A"},
-                Token.Name.Variable.Class:      {"color": "#660E7A"},
-                Token.Name.Variable.Global:     {"color": "#660E7A"},
-                Token.Name.Variable.Instance:   {"color": "#660E7A"},
-                Token.Name.Constant:            {"color": "#660E7A", "italic": True},
-                Token.Name.Label:               {"color": "#000000"},
-                Token.Name.Entity:              {"color": "#660E7A"},
-
-                # ── 字面量：字符串 ── 绿色
-                Token.Literal.String:           {"color": "#067D17"},
-                Token.Literal.String.Affix:     {"color": "#0033B3", "bold": True},
-                Token.Literal.String.Backtick:  {"color": "#067D17"},
-                Token.Literal.String.Char:      {"color": "#067D17"},
-                Token.Literal.String.Delimiter: {"color": "#067D17"},
-                Token.Literal.String.Doc:       {"color": "#067D17", "italic": True},
-                Token.Literal.String.Double:    {"color": "#067D17"},
-                Token.Literal.String.Escape:    {"color": "#0037A6", "bold": True},
-                Token.Literal.String.Heredoc:   {"color": "#067D17"},
-                Token.Literal.String.Interpol:  {"color": "#0033B3", "bold": True},
-                Token.Literal.String.Other:     {"color": "#067D17"},
-                Token.Literal.String.Regex:     {"color": "#067D17"},
-                Token.Literal.String.Single:    {"color": "#067D17"},
-                Token.Literal.String.Symbol:    {"color": "#067D17"},
-
-                # ── 字面量：数字 ── 蓝色
-                Token.Literal.Number:           {"color": "#1750EB"},
-                Token.Literal.Number.Bin:       {"color": "#1750EB"},
-                Token.Literal.Number.Float:     {"color": "#1750EB"},
-                Token.Literal.Number.Hex:       {"color": "#1750EB"},
-                Token.Literal.Number.Integer:   {"color": "#1750EB"},
-                Token.Literal.Number.Integer.Long: {"color": "#1750EB"},
-                Token.Literal.Number.Oct:       {"color": "#1750EB"},
-
-                # ── 注释 ── 灰色斜体
-                Token.Comment:                  {"color": "#8C8C8C", "italic": True},
-                Token.Comment.Hashbang:         {"color": "#8C8C8C", "italic": True},
-                Token.Comment.Multiline:        {"color": "#8C8C8C", "italic": True},
-                Token.Comment.Preproc:          {"color": "#8C8C8C", "italic": True},
-                Token.Comment.PreprocFile:      {"color": "#8C8C8C", "italic": True},
-                Token.Comment.Single:           {"color": "#8C8C8C", "italic": True},
-                Token.Comment.Special:          {"color": "#8C8C8C", "italic": True, "bold": True},
-
-                # ── 运算符 / 标点 ──
-                Token.Operator:                 {"color": "#000000"},
-                Token.Operator.Word:            {"color": "#0033B3", "bold": True},
-                Token.Punctuation:              {"color": "#000000"},
-
-                # ── 泛型 ──
-                Token.Generic.Heading:          {"color": "#000000", "bold": True},
-                Token.Generic.Subheading:       {"color": "#000000", "bold": True},
-                Token.Generic.Emph:             {"italic": True},
-                Token.Generic.Strong:           {"bold": True},
-                Token.Generic.Deleted:          {"color": "#A31515"},
-                Token.Generic.Inserted:         {"color": "#067D17"},
-                Token.Generic.Error:            {"color": "#FF0000"},
-                Token.Generic.Traceback:        {"color": "#FF0000"},
-                Token.Generic.Output:           {"color": "#2b2b2b"},
-                Token.Generic.Prompt:           {"color": "#000000", "bold": True},
-
-                # ── 其他 ──
-                Token.Text:                     {"color": "#2b2b2b"},
-                Token.Error:                    {"color": "#FF0000"},
-            }
-        },
+        # ── 文本 / 错误 ──
+        Token.Text:                        "syntax_text",
+        Token.Error:                       "syntax_error",
     }
-else:
-    THEMES = {}
 
-DEFAULT_THEME = "pycharm_light"
+    # ── bold / italic 装饰（跨主题统一）──
+    _TOKEN_BOLD = frozenset({
+        Token.Keyword,
+        Token.Keyword.Constant,
+        Token.Keyword.Declaration,
+        Token.Keyword.Namespace,
+        Token.Keyword.Pseudo,
+        Token.Keyword.Reserved,
+        Token.Name.Class,
+        Token.Name.Exception,
+        Token.Name.Decorator,
+        Token.Operator.Word,
+        Token.Literal.String.Affix,
+        Token.Literal.String.Interpol,
+        Token.Literal.String.Escape,
+        Token.Comment.Special,
+        Token.Generic.Heading,
+        Token.Generic.Subheading,
+        Token.Generic.Emph,
+        Token.Generic.Strong,
+        Token.Generic.Prompt,
+    })
+
+    _TOKEN_ITALIC = frozenset({
+        Token.Name.Constant,
+        Token.Literal.String.Doc,
+        Token.Comment,
+        Token.Comment.Hashbang,
+        Token.Comment.Multiline,
+        Token.Comment.Preproc,
+        Token.Comment.PreprocFile,
+        Token.Comment.Single,
+        Token.Comment.Special,
+        Token.Generic.Emph,
+    })
+else:
+    TOKEN_MAP = {}
+    _TOKEN_BOLD = frozenset()
+    _TOKEN_ITALIC = frozenset()
 
 
 # ════════════════════════════════════════════════════════
 #  公开接口
-# ════════════════════════════════════════════════════════
-
-def get_available_themes():
-    """返回可用主题名称列表
-
-    Returns:
-        list[str]: 如 ["pycharm_light"]
-    """
-    return list(THEMES.keys())
-
-
-def get_theme(name=None):
-    """获取主题样式字典 {Token: style_dict}
-
-    Args:
-        name: 主题名称，None 则使用默认
-    Returns:
-        dict: {Token: {"color": ..., "bold": ..., ...}}
-    """
-    if not HAS_PYGMENTS:
-        return {}
-    name = name or DEFAULT_THEME
-    theme = THEMES.get(name, THEMES.get(DEFAULT_THEME, {}))
-    return theme.get("styles", {})
-
-
-def get_theme_info(name=None):
-    """获取主题元信息
-
-    Returns:
-        dict: {"name": "...", "description": "..."}
-    """
-    name = name or DEFAULT_THEME
-    theme = THEMES.get(name, {})
-    return {
-        "name": theme.get("name", name),
-        "description": theme.get("description", ""),
-    }
-
-
-# ════════════════════════════════════════════════════════
-#  编辑器用：QTextCharFormat
 # ════════════════════════════════════════════════════════
 
 def build_format(style: dict) -> QTextCharFormat:
@@ -279,70 +174,81 @@ def build_format(style: dict) -> QTextCharFormat:
     return fmt
 
 
-def get_editor_formats(theme_name=None):
+def _build_format_from_token(token, colors) -> QTextCharFormat:
+    """从主题 colors + TOKEN_MAP 构建单个 Token 的 QTextCharFormat"""
+    attr_name = TOKEN_MAP.get(token)
+    if attr_name is None:
+        return QTextCharFormat()
+    color = getattr(colors, attr_name)
+    fmt = QTextCharFormat()
+    fmt.setForeground(QColor(color))
+    if token in _TOKEN_BOLD:
+        fmt.setFontWeight(QFont.Weight.Bold)
+    if token in _TOKEN_ITALIC:
+        fmt.setFontItalic(True)
+    return fmt
+
+
+# ════════════════════════════════════════════════════════
+#  编辑器用：QTextCharFormat
+# ════════════════════════════════════════════════════════
+
+def get_editor_formats(theme_engine):
     """获取编辑器用的 {Token: QTextCharFormat} 字典
 
     Args:
-        theme_name: 主题名称，None 使用默认
+        theme_engine: ThemeEngine 实例
     Returns:
         dict: {Token: QTextCharFormat}
     """
-    styles = get_theme(theme_name)
-    return {token: build_format(style) for token, style in styles.items()}
+    if not HAS_PYGMENTS:
+        return {}
+    colors = theme_engine.get_active_theme().colors
+    return {token: _build_format_from_token(token, colors) for token in TOKEN_MAP}
 
 
 # ════════════════════════════════════════════════════════
 #  预览用：CSS
 # ════════════════════════════════════════════════════════
 
-def _style_dict_to_pygments_str(style_dict):
-    """将 style_dict 转换为 Pygments Style 字符串格式
-
-    示例: {"color": "#0033B3", "bold": True} → "bold #0033B3"
-    """
+def _style_to_pygments_str(token, colors) -> str:
+    """从主题 colors 构建单个 Token 的 Pygments style 字符串"""
+    attr_name = TOKEN_MAP.get(token)
+    if attr_name is None:
+        return ""
+    color = getattr(colors, attr_name)
     parts = []
-    if style_dict.get("bold"):
+    if token in _TOKEN_BOLD:
         parts.append("bold")
-    if style_dict.get("italic"):
+    if token in _TOKEN_ITALIC:
         parts.append("italic")
-    if style_dict.get("underline"):
-        parts.append("underline")
-    if "color" in style_dict:
-        parts.append(style_dict["color"])
-    if "background" in style_dict:
-        parts.append(f"bg:{style_dict['background']}")
+    parts.append(color)
     return " ".join(parts)
 
 
-def get_preview_css(theme_name=None, css_class="codehilite"):
+def get_preview_css(theme_engine, css_class="codehilite"):
     """生成 Markdown 预览用的代码高亮 CSS
 
-    通过 Pygments HtmlFormatter 自动将主题映射为
-    ``.codehilite .xx`` 选择器的 CSS 规则。
-
     Args:
-        theme_name: 主题名称
+        theme_engine: ThemeEngine 实例
         css_class: codehilite 外层 CSS class 名
     Returns:
         str: CSS 文本；Pygments 不可用时返回空字符串
     """
     if not HAS_PYGMENTS:
         return ""
-
-    styles = get_theme(theme_name)
-    if not styles:
-        return ""
-
-    # 动态创建 Pygments Style 子类
+    colors = theme_engine.get_active_theme().colors
     pygments_styles = {}
-    for token, style_dict in styles.items():
-        pygments_styles[token] = _style_dict_to_pygments_str(style_dict)
-
+    for token in TOKEN_MAP:
+        s = _style_to_pygments_str(token, colors)
+        if s:
+            pygments_styles[token] = s
+    if not pygments_styles:
+        return ""
     CustomStyle = type("CustomStyle", (PygmentsStyle,), {
         "default_style": "",
         "styles": pygments_styles,
     })
-
     formatter = HtmlFormatter(style=CustomStyle)
     return formatter.get_style_defs(f".{css_class}")
 
@@ -351,7 +257,7 @@ def get_preview_css(theme_name=None, css_class="codehilite"):
 #  预览用：内联样式高亮（适用于 QTextBrowser）
 # ════════════════════════════════════════════════════════
 
-def _get_pygments_style_class(theme_name=None):
+def _get_pygments_style_class(theme_engine):
     """从主题定义动态创建 Pygments Style 子类
 
     Returns:
@@ -359,31 +265,27 @@ def _get_pygments_style_class(theme_name=None):
     """
     if not HAS_PYGMENTS:
         return None
-
-    styles = get_theme(theme_name)
-    if not styles:
-        return None
-
+    colors = theme_engine.get_active_theme().colors
     pygments_styles = {}
-    for token, style_dict in styles.items():
-        pygments_styles[token] = _style_dict_to_pygments_str(style_dict)
-
+    for token in TOKEN_MAP:
+        s = _style_to_pygments_str(token, colors)
+        if s:
+            pygments_styles[token] = s
+    if not pygments_styles:
+        return None
     return type("PanzerNoteStyle", (PygmentsStyle,), {
         "default_style": "",
         "styles": pygments_styles,
     })
 
 
-def highlight_code_html(code: str, language: str, theme_name=None) -> str:
+def highlight_code_html(code: str, language: str, theme_engine) -> str:
     """将源代码高亮并返回包含内联样式的 HTML 片段
-
-    生成 ``<span style="...">`` 标签，无需外部 CSS，
-    可在 QTextBrowser 和 QWebEngineView 中直接渲染。
 
     Args:
         code:       原始源代码文本
         language:   编程语言名称（如 "python"、"javascript"），为空则不高亮
-        theme_name: 主题名称，None 使用默认
+        theme_engine: ThemeEngine 实例
     Returns:
         str: 含内联样式的 HTML 文本；高亮失败时回退为 HTML 转义纯文本
     """
@@ -395,7 +297,7 @@ def highlight_code_html(code: str, language: str, theme_name=None) -> str:
     if not HAS_PYGMENTS:
         return _html.escape(code)
 
-    StyleClass = _get_pygments_style_class(theme_name)
+    StyleClass = _get_pygments_style_class(theme_engine)
     if StyleClass is None:
         return _html.escape(code)
 
@@ -406,11 +308,10 @@ def highlight_code_html(code: str, language: str, theme_name=None) -> str:
         lexer = get_lexer_by_name(language.strip(), stripnl=False, stripall=False)
         formatter = HtmlFormatter(
             style=StyleClass,
-            noclasses=True,   # 生成内联 style 而非 CSS class
-            nowrap=True,      # 不包裹 <pre>/<div>，我们自己控制容器
+            noclasses=True,
+            nowrap=True,
         )
         result = cast(str, _pygments_highlight(code, lexer, formatter))
-        # 移除 Pygments 附加的尾部换行
         if result.endswith('\n'):
             result = result[:-1]
         return result

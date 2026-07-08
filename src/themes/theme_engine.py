@@ -28,6 +28,7 @@ class ThemeColorScheme:
     primary_dark: str = "#1976D2"
     primary_light: str = "#BBDEFB"
     accent: str = "#FF9800"
+    accent_fg: str = "#FFFFFF"
     background: str = "#FFFFFF"
     surface: str = "#F5F5F5"
     card: str = "#FFFFFF"
@@ -59,6 +60,74 @@ class ThemeColorScheme:
     resource_ammo: str = "#F44336"
     resource_steel: str = "#9E9E9E"
     resource_bauxite: str = "#2196F3"
+
+    game_build: str = "#4CAF50"
+    game_garage: str = "#FF9800"
+    game_collection: str = "#9C27B0"
+
+    bg_codeblock: str = "#EDF3FA"
+    codeblock_border: str = "#D8DEE9"
+
+    selection_bg: str = "#BBDEFB"
+    selection_fg: str = "#212121"
+    hover_bg: str = "#BBDEFB"
+    active_bg: str = "#1976D2"
+    focus_border: str = "#2196F3"
+
+    search_match_bg: str = "#FFEE58"
+    search_current_bg: str = "#FF9800"
+    search_current_fg: str = "#FFFFFF"
+
+    editor_bookmark_bg: str = "#FF9800"
+    editor_bookmark_fg: str = "#FFFFFF"
+    editor_fold_marker: str = "#4CAF50"
+    editor_fold_marker_collapsed: str = "#66BB6A"
+
+    md_h1_fg: str = "#000000"
+    md_h2_fg: str = "#000000"
+    md_h3_fg: str = "#000000"
+    md_h456_fg: str = "#2b2b2b"
+    md_bold_fg: str = "#2b2b2b"
+    md_italic_fg: str = "#2b2b2b"
+    md_code_fg: str = "#008000"
+    md_code_bg: str = "#f2f2f2"
+    md_link_fg: str = "#2470B3"
+    md_image_fg: str = "#6A1B9A"
+    md_list_fg: str = "#2b2b2b"
+    md_quote_fg: str = "#808080"
+    md_hr_fg: str = "#AAAAAA"
+    md_fence_fg: str = "#808080"
+    md_code_block_fg: str = "#2b2b2b"
+    md_code_block_bg: str = "#f5f5f5"
+
+    # ── 语法高亮 token ──
+    syntax_keyword: str = "#0033B3"
+    syntax_keyword_type: str = "#0033B3"
+    syntax_builtin: str = "#8000FF"
+    syntax_class: str = "#000000"
+    syntax_function: str = "#00627A"
+    syntax_variable: str = "#660E7A"
+    syntax_tag: str = "#000080"
+    syntax_namespace: str = "#000000"
+
+    syntax_string: str = "#067D17"
+    syntax_string_escape: str = "#0037A6"
+    syntax_string_affix: str = "#0033B3"
+    syntax_string_doc: str = "#067D17"
+    syntax_number: str = "#1750EB"
+
+    syntax_comment: str = "#8C8C8C"
+
+    syntax_operator: str = "#000000"
+    syntax_punctuation: str = "#000000"
+    syntax_text: str = "#2b2b2b"
+    syntax_error: str = "#FF0000"
+
+    # ── 语法高亮装饰（bold/italic 由 highlight_themes.py 控制）──
+    syntax_deleted: str = "#A31515"
+    syntax_inserted: str = "#067D17"
+    syntax_heading: str = "#000000"
+    syntax_output: str = "#2b2b2b"
 
     def to_dict(self) -> Dict[str, str]:
         return {k: v for k, v in self.__dict__.items() if not k.startswith('_')}
@@ -157,56 +226,32 @@ class ThemeEngine(QObject):
         return os.path.join(app_dir, self.BUILTIN_THEMES_DIR)
 
     def _load_builtin_themes(self) -> None:
-        light_theme = ThemeDefinition(
-            id="light",
-            name="浅色主题",
-            is_dark=False,
+        builtin_dir = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "..", "..", "themes", "builtin"
         )
-        self._themes["light"] = light_theme
+        builtin_dir = os.path.normpath(builtin_dir)
+        if not os.path.isdir(builtin_dir):
+            self._logger.warning("内置主题目录不存在: %s", builtin_dir)
+            self._themes["light"] = ThemeDefinition(id="light", name="浅色主题", is_dark=False)
+            return
 
-        dark_theme = ThemeDefinition(
-            id="dark",
-            name="深色主题",
-            is_dark=True,
-            colors=ThemeColorScheme(
-                primary="#BB86FC",
-                primary_dark="#985EFF",
-                primary_light="#264F78",
-                accent="#03DAC6",
-                background="#1E1E1E",
-                surface="#1E1E1E",
-                card="#2D2D2D",
-                text_primary="#E0E0E0",
-                text_secondary="#A0A0A0",
-                text_disabled="#7A7A7A",
-                border="#3C3C3C",
-                divider="#2D2D2D",
-                error="#CF6679",
-                warning="#FFB74D",
-                success="#81C784",
-                info="#64B5F6",
-                sidebar_bg="#1E1E1E",
-                editor_bg="#1E1E1E",
-                editor_line_number="#858585",
-                editor_current_line="#2A2D2E",
-                editor_selection="#264F78",
-                editor_bracket_match_bg="#1A3A3A",
-                editor_bracket_match_fg="#E0E0E0",
-                editor_bracket_unmatched="#F44747",
-                minimap_bg="#1E1E1E",
-                minimap_viewport="#3C3C3C",
-                statusbar_bg="#1E1E1E",
-                menubar_bg="#1E1E1E",
-                dialog_bg="#2D2D2D",
-                secretary_bubble_bg="#2D2D2D",
-                secretary_bubble_border="#3C3C3C",
-                resource_fuel="#81C784",
-                resource_ammo="#CF6679",
-                resource_steel="#9E9E9E",
-                resource_bauxite="#64B5F6",
-            ),
-        )
-        self._themes["dark"] = dark_theme
+        for filename in sorted(os.listdir(builtin_dir)):
+            filepath = os.path.join(builtin_dir, filename)
+            if not os.path.isfile(filepath):
+                continue
+            if not filename.endswith('.json'):
+                continue
+            try:
+                theme = self._load_theme_file(filepath)
+                if theme and theme.id not in self._themes:
+                    self._themes[theme.id] = theme
+                    self._logger.info("加载内置主题: %s (%s)", theme.name, theme.id)
+            except Exception as e:
+                self._logger.warning("加载内置主题文件 %s 失败: %s", filename, e)
+
+        if "light" not in self._themes:
+            self._themes["light"] = ThemeDefinition(id="light", name="浅色主题", is_dark=False)
 
     def load_external_themes(self) -> List[str]:
         themes_dir = self._get_themes_dir()
@@ -357,7 +402,7 @@ QPushButton:hover {{
     background-color: {c.primary_dark};
 }}
 QPushButton:pressed {{
-    background-color: {c.primary_dark};
+    background-color: {c.active_bg};
 }}
 QLineEdit {{
     border: 1px solid {c.border};
@@ -366,7 +411,7 @@ QLineEdit {{
     color: {c.text_primary};
 }}
 QLineEdit:focus {{
-    border-color: {c.primary};
+    border-color: {c.focus_border};
 }}
 QCheckBox {{
     color: {c.text_primary};

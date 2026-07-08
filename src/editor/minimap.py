@@ -37,15 +37,19 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
     TOP_MARGIN = 2
     MIN_LINE_HEIGHT = 0.8
 
-    def __init__(self, editor, theme_engine=None, parent=None):
+    def __init__(self, editor, theme_engine, parent=None):
         super().__init__(parent if parent else editor)
+        if theme_engine is None:
+            raise RuntimeError("Minimap 必须传入 theme_engine，不允许为 None")
         self._editor = editor
         self._dragging = False
-        self._bg_color = "#f8f8f8"
-        self._border_color = "#e0e0e0"
-        self._text_color = "#b0b0b0"
-        self._viewport_color = QColor(100, 140, 200, 30)
-        self._viewport_border_color = QColor(100, 140, 200, 70)
+        colors = theme_engine.get_active_theme().colors
+        self._bg_color = colors.minimap_bg
+        self._border_color = colors.border
+        self._text_color = colors.text_disabled
+        primary = QColor(colors.primary)
+        self._viewport_color = QColor(primary.red(), primary.green(), primary.blue(), 30)
+        self._viewport_border_color = QColor(primary.red(), primary.green(), primary.blue(), 70)
 
         self.setFixedWidth(self.MINIMAP_WIDTH)
         self.setCursor(Qt.CursorShape.ArrowCursor)
@@ -67,8 +71,7 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
         editor.verticalScrollBar().valueChanged.connect(self.update)
         editor.blockCountChanged.connect(self._on_content_changed)
 
-        if theme_engine:
-            self._init_theme(theme_engine)
+        self._init_theme(theme_engine)
 
     def _apply_theme_colors(self, colors):
         self._bg_color = colors.minimap_bg

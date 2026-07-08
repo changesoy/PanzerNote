@@ -73,7 +73,7 @@ class SpeechBubble(QFrame):
         self.setStyleSheet(f"""
             QFrame {{
                 background-color: {colors.secretary_bubble_bg};
-                border: 2px solid {colors.success};
+                border: 2px solid {colors.secretary_bubble_border};
                 border-radius: 12px;
             }}
         """)
@@ -171,9 +171,10 @@ class SecretaryWidget(ThemeAwareMixin, QWidget):
         ]
     }
 
-    def __init__(self, config: Config, theme_engine=None, parent=None):
+    def __init__(self, config: Config, theme_engine, parent=None):
         super().__init__(parent)
         self.config = config
+        self._theme_engine = theme_engine
         self._lines = self.DEFAULT_LINES.copy()
         self._parent_widget = parent
         self._position_dirty = False
@@ -195,8 +196,9 @@ class SecretaryWidget(ThemeAwareMixin, QWidget):
 
         self._init_ui()
 
-        if theme_engine:
-            self._init_theme(theme_engine)
+        if theme_engine is None:
+            raise RuntimeError("SecretaryWidget 必须传入 theme_engine，不允许为 None")
+        self._init_theme(theme_engine)
 
         if parent:
             parent.installEventFilter(self)
@@ -365,8 +367,8 @@ class SecretaryWidget(ThemeAwareMixin, QWidget):
         painter = QPainter(placeholder)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        bg_color = self._theme_engine.get_active_theme().colors.border if hasattr(self, '_theme_engine') and self._theme_engine else "#E0E0E0"
-        text_color = self._theme_engine.get_active_theme().colors.text_secondary if hasattr(self, '_theme_engine') and self._theme_engine else "#757575"
+        bg_color = self._theme_engine.get_active_theme().colors.border
+        text_color = self._theme_engine.get_active_theme().colors.text_secondary
         painter.setBrush(QColor(bg_color))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(10, 10, w - 20, h - 20, 10, 10)

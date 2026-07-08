@@ -26,12 +26,12 @@ class HighlightWorker(QThread):
     error = pyqtSignal(str, str)
 
     def __init__(self, task_id: str, code: str, language: str,
-                 theme_name: Optional[str] = None):
+                 theme_engine):
         super().__init__()
         self._task_id = task_id
         self._code = code
         self._language = language
-        self._theme_name = theme_name
+        self._theme_engine = theme_engine
         self._cancelled = False
 
     def run(self):
@@ -40,7 +40,7 @@ class HighlightWorker(QThread):
 
         try:
             from .highlight_themes import highlight_code_html
-            result = highlight_code_html(self._code, self._language, self._theme_name)
+            result = highlight_code_html(self._code, self._language, self._theme_engine)
             if not self._cancelled:
                 self.finished.emit(self._task_id, result, self._language)
         except Exception as e:
@@ -78,23 +78,24 @@ class AsyncHighlightRenderer(QObject):
         self._timeout_timer.start()
 
     def render(self, code: str, language: str,
-               theme_name: Optional[str] = None,
+               theme_engine,
                priority: int = 0,
                callback: Optional[Callable] = None) -> Optional[str]:
         if not is_enabled("async_highlight"):
-            return self.render_sync(code, language, theme_name)
-        return self.render_async(code, language, theme_name, priority, callback)
+            return self.render_sync(code, language, theme_engine)
+        return self.render_async(code, language, theme_engine, priority, callback)
 
     def render_sync(self, code: str, language: str,
-                    theme_name: Optional[str] = None) -> str:
+                    theme_engine) -> str:
         from .highlight_themes import highlight_code_html
-        return str(highlight_code_html(code, language, theme_name))
+        return str(highlight_code_html(code, language, theme_engine))
 
     def render_async(self, code: str, language: str,
-                     theme_name: Optional[str] = None,
+                     theme_engine,
                      priority: int = 0,
                      callback: Optional[Callable] = None) -> Optional[str]:
-        cache_key = f"{language}:{hash(code)}:{theme_name}"
+        theme_id = theme_engine.get_active_theme().id if hasattr(theme_engine, 'get_active_theme') else "light"
+        cache_key = f"{language}:{hash(code)}:{theme_id}"
         if cache_key in self._results_cache:
             cached = self._results_cache[cache_key]
             if callback:
@@ -105,7 +106,7 @@ class AsyncHighlightRenderer(QObject):
         self._tasks[task_id] = {
             "code": code,
             "language": language,
-            "theme_name": theme_name,
+            "theme_engine": theme_engine,
             "priority": priority,
             "callback": callback,
             "cache_key": cache_key,
@@ -140,7 +141,7 @@ class AsyncHighlightRenderer(QObject):
                 continue
 
             worker = HighlightWorker(
-                task_id, task["code"], task["language"], task["theme_name"]
+                task_id, task["code"], task["language"], task["theme_engine"]
             )
             worker.finished.connect(  # type: ignore[call-arg]
                 self._on_worker_finished, Qt.ConnectionType.QueuedConnection

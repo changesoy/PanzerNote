@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QColor, QPalette
-from PyQt6.QtWidgets import QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget, QLabel
+from PyQt6.QtWidgets import QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget, QLabel, QApplication
 
 from src.editor.outline_parser import parse_headings, Heading
 
@@ -87,7 +87,7 @@ class OutlinePanel(QWidget):
     def _build_tree(self, headings: list[Heading]) -> None:
         self._tree.clear()
 
-        font_base = QFont()
+        font_base = QFont(QApplication.font())
         font_base.setPointSize(font_base.pointSize() + 1)
 
         for level, line_num, title in headings:

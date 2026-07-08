@@ -120,8 +120,10 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         '\u3008': '\u3009',  # 〈〉
     }
 
-    def __init__(self, config: Config, theme_engine=None, parent=None):
+    def __init__(self, config: Config, theme_engine, parent=None):
         super().__init__(parent)
+        if theme_engine is None:
+            raise RuntimeError("Editor 必须传入 theme_engine，不允许为 None")
         self.config = config
         self._theme_engine = theme_engine
         self.tab_id: Optional[int] = None
@@ -196,16 +198,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self.set_wrap_mode(wrap_mode)
 
         # 设置样式（由 _apply_theme_colors 管理）
-        if self._theme_engine:
-            self._init_theme(self._theme_engine)
-        else:
-            self.setStyleSheet("""
-                QPlainTextEdit {
-                    border: none;
-                    background-color: white;
-                    selection-background-color: #bbdefb;
-                }
-            """)
+        self._init_theme(self._theme_engine)
 
         # 高亮当前行
         if self.config.get_editor_setting("highlight_current_line", True):
@@ -234,7 +227,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         """)
         # 更新高亮器的主题
         if self._highlighter and self._filepath_or_ext:
-            is_dark = self._theme_engine.get_active_theme().is_dark if self._theme_engine else False
+            is_dark = self._theme_engine.get_active_theme().is_dark
             if hasattr(self._highlighter, 'set_dark_mode'):
                 # Markdown 高亮器
                 self._highlighter.set_dark_mode(is_dark)
@@ -411,9 +404,10 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
     def line_number_area_paint_event(self, event):
         """绘制行号 + 折叠标记"""
         painter = QPainter(self.line_number_area)
-        bg_color = self._theme_engine.get_active_theme().colors.sidebar_bg if self._theme_engine else "#f5f5f5"
-        text_color = self._theme_engine.get_active_theme().colors.editor_line_number if self._theme_engine else "#999999"
-        bookmark_color = QColor("#FF9800") if not self._theme_engine else QColor(self._theme_engine.get_active_theme().colors.accent if hasattr(self._theme_engine.get_active_theme().colors, 'accent') else "#FF9800")
+        bg_color = self._theme_engine.get_active_theme().colors.sidebar_bg
+        text_color = self._theme_engine.get_active_theme().colors.editor_line_number
+        bookmark_bg_color = self._theme_engine.get_active_theme().colors.editor_bookmark_bg
+        bookmark_fg_color = self._theme_engine.get_active_theme().colors.editor_bookmark_fg
         painter.fillRect(event.rect(), QColor(bg_color))
 
         supports_fold = self._file_type in self._FOLD_SUPPORTED_TYPES
@@ -433,9 +427,9 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
                         0, top,
                         area_width,
                         self.fontMetrics().height(),
-                        bookmark_color
+                        QColor(bookmark_bg_color)
                     )
-                    painter.setPen(QColor("#FFFFFF"))
+                    painter.setPen(QColor(bookmark_fg_color))
                 else:
                     painter.setPen(QColor(text_color))
 
@@ -451,15 +445,9 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
                 # 折叠标记 — 手绘三角（大小一致，不受行高影响）
                 if supports_fold and self._folding.is_foldable(block_number):
                     collapsed = (block_number + 1) in self._folding._collapsed_blocks
-                    # 绿色系：浅色主题用 Material Green，暗色主题用 Green 200/300
-                    bg_luminance = QColor(bg_color).lightness()
-                    if bg_luminance < 128:
-                        fold_color_expanded = QColor("#81C784")
-                        fold_color_collapsed = QColor("#A5D6A7")
-                    else:
-                        fold_color_expanded = QColor("#4CAF50")
-                        fold_color_collapsed = QColor("#66BB6A")
-                    painter.setBrush(fold_color_collapsed if collapsed else fold_color_expanded)
+                    fold_color_expanded_name = self._theme_engine.get_active_theme().colors.editor_fold_marker
+                    fold_color_collapsed_name = self._theme_engine.get_active_theme().colors.editor_fold_marker_collapsed
+                    painter.setBrush(QColor(fold_color_collapsed_name if collapsed else fold_color_expanded_name))
                     painter.setPen(Qt.PenStyle.NoPen)
                     tri_size = 8  # 三角边长 px
                     cx = float(area_width - marker_width // 2 - 2)  # 三角中心 x
@@ -493,7 +481,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             self._selection_manager.clear_layer("current_line")
         else:
             selection = QTextEdit.ExtraSelection()
-            line_color_name = self._theme_engine.get_active_theme().colors.editor_current_line if self._theme_engine else "#FFFDE7"
+            line_color_name = self._theme_engine.get_active_theme().colors.editor_current_line
             line_color = QColor(line_color_name)
             selection.format.setBackground(line_color)
             selection.format.setProperty(QTextFormat.Property.FullWidthSelection, True)
@@ -515,11 +503,10 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             self._selection_manager.refresh()
             return
 
-        # 从主题取颜色（带回退）
-        colors = self._theme_engine.get_active_theme().colors if self._theme_engine else None
-        match_bg = colors.editor_bracket_match_bg if colors else "#E6F2E6"
-        match_fg = colors.editor_bracket_match_fg if colors else "#1A1A1A"
-        unmatched = colors.editor_bracket_unmatched if colors else "#E06C75"
+        colors = self._theme_engine.get_active_theme().colors
+        match_bg = colors.editor_bracket_match_bg
+        match_fg = colors.editor_bracket_match_fg
+        unmatched = colors.editor_bracket_unmatched
 
         selections: list[QTextEdit.ExtraSelection] = []
 
@@ -634,14 +621,9 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self._filepath_or_ext = filepath_or_ext
         doc = self.document()
         assert doc is not None
-        is_dark = False
-        theme_name = None
-        if self._theme_engine:
-            is_dark = self._theme_engine.get_active_theme().is_dark
-            # 根据明/暗主题自动选择代码高亮主题
-            theme_name = "vscode_dark" if is_dark else "pycharm_light"
+        is_dark = self._theme_engine.get_active_theme().is_dark
         self._highlighter, self._file_type = get_highlighter_for_file(
-            doc, filepath_or_ext, theme_name=theme_name, is_dark=is_dark
+            doc, filepath_or_ext, theme_engine=self._theme_engine, is_dark=is_dark
         )
 
         self._lazy_highlight.set_highlighter(self._highlighter)

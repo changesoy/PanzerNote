@@ -122,12 +122,13 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
     file_open_requested = pyqtSignal(str)
     file_move_requested = pyqtSignal(str, str)
 
-    def __init__(self, config: Config, theme_engine=None, parent=None):
+    def __init__(self, config: Config, theme_engine, parent=None):
         super().__init__(parent)
+        if theme_engine is None:
+            raise RuntimeError("FileTreeWidget 必须传入 theme_engine，不允许为 None")
         self.config = config
         self._init_ui()
-        if theme_engine:
-            self._init_theme(theme_engine)
+        self._init_theme(theme_engine)
 
     def _init_ui(self):
         layout = QVBoxLayout(self)

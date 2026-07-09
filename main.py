@@ -7,6 +7,7 @@ PanzerNote - 战车少女主题记事本
 
 import sys
 import os
+import shutil
 import traceback
 from datetime import datetime
 
@@ -19,13 +20,17 @@ sys.path.insert(0, APP_DIR)
 
 _original_excepthook = sys.excepthook
 
+# crash log 写入目录：excepthook 在 Config 就绪前就要注册（否则 Config 自身崩溃无日志），
+# 那时还不知道 base_path，只能回退到 APP_DIR；Config 就绪后由 _activate_crash_log_dir() 切换。
+_crash_log_dir = os.path.join(APP_DIR, "data", "logs")
+MAX_CRASH_LOGS = 15
+
 
 def _crash_excepthook(exc_type, exc_value, exc_tb):
     try:
-        logs_dir = os.path.join(APP_DIR, "data", "logs")
-        os.makedirs(logs_dir, exist_ok=True)
+        os.makedirs(_crash_log_dir, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        crash_file = os.path.join(logs_dir, f"crash_{timestamp}.log")
+        crash_file = os.path.join(_crash_log_dir, f"crash_{timestamp}.log")
         with open(crash_file, "w", encoding="utf-8") as f:
             f.write(f"PanzerNote Crash Log\n")
             f.write(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
@@ -40,6 +45,44 @@ def _crash_excepthook(exc_type, exc_value, exc_tb):
 
 
 sys.excepthook = _crash_excepthook
+
+
+def _migrate_crash_logs(old_dir, new_dir):
+    """把早期 crash log 从 old_dir 迁移到 new_dir（跨盘用 copy+delete，同名跳过）"""
+    if not os.path.isdir(old_dir):
+        return
+    os.makedirs(new_dir, exist_ok=True)
+    for name in os.listdir(old_dir):
+        if name.startswith("crash_") and name.endswith(".log"):
+            src = os.path.join(old_dir, name)
+            dst = os.path.join(new_dir, name)
+            try:
+                if not os.path.exists(dst):
+                    shutil.move(src, dst)
+            except OSError:
+                pass
+
+
+def _cleanup_crash_logs(log_dir, keep=MAX_CRASH_LOGS):
+    """仅保留最近 keep 个 crash log，按文件名时间戳倒序删除旧的"""
+    if not os.path.isdir(log_dir):
+        return
+    logs = [f for f in os.listdir(log_dir) if f.startswith("crash_") and f.endswith(".log")]
+    logs.sort(reverse=True)
+    for name in logs[keep:]:
+        try:
+            os.remove(os.path.join(log_dir, name))
+        except OSError:
+            pass
+
+
+def _activate_crash_log_dir(new_dir):
+    """切换 crash log 写入目录到用户数据目录：迁移早期日志、清理过期文件、更新 hook 目标"""
+    global _crash_log_dir
+    if os.path.normpath(_crash_log_dir) != os.path.normpath(new_dir):
+        _migrate_crash_logs(_crash_log_dir, new_dir)
+    _cleanup_crash_logs(new_dir)
+    _crash_log_dir = new_dir
 
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
@@ -124,6 +167,8 @@ def main():
     profiler.begin_phase(PHASE_LOG_INIT)
     log_dir = os.path.join(config.get_base_path(), "data", "logs")
     setup_logging(log_dir=log_dir)
+    # crash hook 在 Config 就绪前已注册并写 APP_DIR，此处切换到用户数据目录并迁移早期日志
+    _activate_crash_log_dir(log_dir)
     logger = get_logger(__name__)
     logger.info("PanzerNote 启动，版本 %s", __version__)
 

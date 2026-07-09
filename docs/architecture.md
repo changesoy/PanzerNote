@@ -540,13 +540,13 @@ ValidationError (基类)
 
 #### 4.11.7 安全模块集成点
 
-| 集成文件                 | 集成方式                                                                                                                                                                       |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `core/config.py`         | 初始化 `SecurityManager`（内含 PathValidator/FileGuard/InputValidator）和 `CryptoManager`；所有 JSON 读写通过 `FileGuard`；存档支持加密/解密；设置值通过 `InputValidator` 验证 |
-| `editor/editor_tabs.py`  | 文件打开通过 `FileGuard.safe_read()` 读取；处理 `FileSizeExceededError`/`FileOperationTimeoutError`                                                                            |
-| `editor/file_tree.py`    | 新建文件/文件夹通过 `InputValidator.validate_filename_strict()` 验证；文件创建通过 `FileGuard.safe_write()`                                                                    |
-| `editor/find_replace.py` | 搜索内容通过 `InputValidator.validate_search()` 验证，拒绝注入模式                                                                                                             |
-| `main_window.py`         | 拖放文件通过 `_SUPPORTED_DROP_EXTS` 白名单校验；PDF/HTML 导出均显式禁用 raw HTML                                                                                               |
+| 集成文件                 | 集成方式                                                                                                                                  |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `core/config.py`         | 初始化 `SecurityManager`（内含 PathValidator/FileGuard/InputValidator）；所有 JSON 读写通过 `FileGuard`；设置值通过 `InputValidator` 验证 |
+| `editor/editor_tabs.py`  | 文件打开通过 `FileGuard.safe_read()` 读取；处理 `FileSizeExceededError`/`FileOperationTimeoutError`                                       |
+| `editor/file_tree.py`    | 新建文件/文件夹通过 `InputValidator.validate_filename_strict()` 验证；文件创建通过 `FileGuard.safe_write()`                               |
+| `editor/find_replace.py` | 搜索内容通过 `InputValidator.validate_search()` 验证，拒绝注入模式                                                                        |
+| `main_window.py`         | 拖放文件通过 `_SUPPORTED_DROP_EXTS` 白名单校验；PDF/HTML 导出均显式禁用 raw HTML                                                          |
 
 #### 4.11.8 拖放文件类型白名单
 
@@ -873,7 +873,7 @@ DraggableTabBar.mouseMoveEvent (鼠标离开标签栏)
 ### 运行依赖
 
 ```bash
-pip install PyQt6>=6.8 PyQt6-WebEngine>=6.8 Pygments>=2.19 markdown>=3.8 Pillow>=12.2.0 cryptography>=48.0.0 send2trash>=2.1.0 markdown-it-py>=3.0.0
+pip install PyQt6>=6.8 PyQt6-WebEngine>=6.8 Pygments>=2.19 markdown>=3.8 Pillow>=12.2.0 send2trash>=2.1.0 markdown-it-py>=3.0.0
 python main.py
 ```
 

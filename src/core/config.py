@@ -12,7 +12,7 @@ v1.6.4 改动：
 
 import os
 import json
-from typing import Optional, Dict, Any, List, cast
+from typing import Optional, Dict, Any, List, Mapping, cast
 
 from ..utils.logger import get_logger
 from ..utils.exceptions import safe_call
@@ -437,8 +437,11 @@ class Config:
     def savegame_manager(self) -> SavegameManager:
         return self._savegame_manager
 
-    def get_savegame(self) -> Dict:
+    def get_savegame(self) -> Mapping[str, Any]:
         return self._savegame_manager.get_savegame()
+
+    def set_savegame_field(self, key: str, value: Any) -> None:
+        self._savegame_manager.set_savegame_field(key, value)
 
     def get_resources(self) -> Dict[str, int]:
         return self._savegame_manager.get_resources()

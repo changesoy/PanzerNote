@@ -8,7 +8,8 @@ import json
 import os
 from datetime import datetime
 from enum import Enum, auto
-from typing import Any, Dict, Optional, cast
+from types import MappingProxyType
+from typing import Any, Dict, Mapping, Optional, cast
 
 from ..utils.logger import get_logger
 from ..utils.exceptions import safe_call
@@ -109,8 +110,12 @@ class SavegameManager:
 
     # === 存档数据访问 ===
 
-    def get_savegame(self) -> Dict:
-        return self._savegame
+    def get_savegame(self) -> Mapping[str, Any]:
+        """返回存档数据的只读视图，防止外部直接修改内部 dict"""
+        return MappingProxyType(self._savegame)
+
+    def set_savegame_field(self, key: str, value: Any) -> None:
+        self._savegame[key] = value
 
     def get_resources(self) -> Dict[str, int]:
         default: Dict[str, int] = {"fuel": 0, "ammo": 0, "steel": 0, "bauxite": 0}

@@ -48,7 +48,7 @@ class GameEngine:
         else:
             bauxite = 0
 
-        self._config.get_savegame()["bauxite_counter"] = self._bauxite_counter
+        self._config.set_savegame_field("bauxite_counter", self._bauxite_counter)
 
         return {"fuel": fuel, "ammo": ammo, "steel": steel, "bauxite": bauxite}
 

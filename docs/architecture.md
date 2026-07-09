@@ -266,7 +266,7 @@ Config 类是整个应用的配置中枢，通过组合方式委托 `SavegameMan
 **挂机机制**（由 `GameEngine` 计算）：
 
 - **在线**：每分钟 fuel/ammo/steel +5，bauxite 每3分钟+5（用 `bauxite_counter` 计数）
-- **离线**：启动时 `GameEngine.calculate_offline_rewards()` 根据 `last_login` 计算时间差，收益 = 在线的 1/3（向大取整），上限24h，最少5分钟
+- **离线**：启动时 `GameEngine.calculate_offline_reward()` 根据 `last_login` 计算时间差，收益 = 在线的 1/3（向大取整），上限24h，最少5分钟
 
 **窗口启动与会话恢复**：
 
@@ -689,7 +689,7 @@ LOADED → on_unload() → UNLOADED
 **版本传播链路**：
 
 ```
-src/__init__.py (__version__ = "1.8.0")
+src/__init__.py (__version__ = "1.8.3")
   ├─→ main.py                    (from src import __version__)
   ├─→ src/main_window.py         (from . import __version__)
   ├─→ src/plugins/plugin_base.py (from .. import __version__ as _app_version)
@@ -959,4 +959,4 @@ pip install mypy>=1.20                         # 类型检查
 
 ---
 
-_本文档基于 PanzerNote v1.8.0 源码整理。版本变更见 [../CHANGELOG.md](../CHANGELOG.md)，未完成规划见 [roadmap.md](roadmap.md)。_
+_本文档基于 PanzerNote v1.8.3 源码整理。版本变更见 [../CHANGELOG.md](../CHANGELOG.md)，未完成规划见 [roadmap.md](roadmap.md)。_

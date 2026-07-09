@@ -29,7 +29,7 @@ def _crash_excepthook(exc_type, exc_value, exc_tb):
         with open(crash_file, "w", encoding="utf-8") as f:
             f.write(f"PanzerNote Crash Log\n")
             f.write(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"Version: {__version__ if '__version__' in dir() else 'unknown'}\n")
+            f.write(f"Version: {globals().get('__version__', 'unknown')}\n")
             f.write(f"Python: {sys.version}\n")
             f.write(f"OS: {sys.platform}\n")
             f.write(f"\n{'='*60}\n\n")

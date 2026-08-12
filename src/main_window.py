@@ -43,6 +43,7 @@ from .editor.outline_panel import OutlinePanel
 from .ui.side_panel_host import SidePanelHost
 from .editor.editor_settings_dialog import EditorSettingsDialog
 from .editor.file_open_service import FileOpenService, FileOpenSource, FileOpenSecurityError, _is_inside_root
+from .editor.file_action_controller import FileActionController
 from .plugins.plugin_manager import PluginManager
 from .themes.theme_engine import ThemeEngine
 from .themes.theme_preview import ThemePreviewDialog
@@ -114,6 +115,12 @@ class MainWindow(QMainWindow):
         self._save_notify_timer.timeout.connect(self._do_save_notify)
 
         self._init_ui()
+        self._file_action_controller = FileActionController(
+            self.editor_tabs,
+            config.workspace_store,
+            config.path_resolver,
+            self._file_open_service,
+        )
         self._init_menubar()
         self._init_statusbar()
         self._init_timers()
@@ -699,54 +706,26 @@ class MainWindow(QMainWindow):
 
     def _open_file_dialog(self):
         """打开文件对话框"""
-        filepath, _ = QFileDialog.getOpenFileName(
-            self,
-            "打开文件",
-            self.config.get_notebooks_path(),
-            "所有支持的文件 (*.txt *.md *.py *.c *.cpp *.h *.java *.js *.json *.html *.css *.xml);;"
-            "文本文件 (*.txt);;"
-            "Markdown (*.md);;"
-            "Python (*.py);;"
-            "C/C++ (*.c *.cpp *.h);;"
-            "Java (*.java);;"
-            "Web (*.html *.css *.js);;"
-            "所有文件 (*.*)"
-        )
+        filepath = self._file_action_controller.show_open_dialog(self)
         if filepath:
             self._open_file(filepath)
 
     def _open_file(self, filepath: str):
-        """打开文件（统一走 FileOpenService 安全入口）"""
+        """打开文件（编排委托 FileActionController）"""
         try:
-            validated = self._file_open_service.validate_open_request(
-                filepath, FileOpenSource.USER_DIALOG
-            )
+            _, is_external = self._file_action_controller.open_file(filepath)
         except FileOpenSecurityError as e:
             QMessageBox.warning(self, "无法打开文件", str(e))
             return
-
-        notebooks_path = os.path.normpath(self.config.get_notebooks_path())
-        filepath_norm = os.path.normpath(validated)
-
-        if not _is_inside_root(filepath_norm, notebooks_path):
-            self.config.add_external_file(validated)
+        if is_external:
             self.file_tree.refresh_external_files()
-
-        self.editor_tabs.open_file(validated)
-        self.config.add_recent_file(validated)
         self._update_recent_menu()
 
     def _open_file_bypass_service(self, filepath: str):
         """由拖放等已通过 FileOpenService 校验后调用，不再重复校验"""
-        notebooks_path = os.path.normpath(self.config.get_notebooks_path())
-        filepath_norm = os.path.normpath(filepath)
-
-        if not _is_inside_root(filepath_norm, notebooks_path):
-            self.config.add_external_file(filepath)
+        _, is_external = self._file_action_controller.open_file_bypass_service(filepath)
+        if is_external:
             self.file_tree.refresh_external_files()
-
-        self.editor_tabs.open_file(filepath)
-        self.config.add_recent_file(filepath)
         self._update_recent_menu()
 
     def _save_current(self):
@@ -840,14 +819,9 @@ class MainWindow(QMainWindow):
         self.secretary.show_message("已释放内存占用")
 
     def _update_recent_menu(self):
-        """更新最近打开菜单"""
+        """更新最近打开菜单（数据过滤委托服务，菜单构建保留）"""
+        recent_files = self._file_action_controller.refresh_recent_files()
         self.recent_menu.clear()
-        recent_files = self.config.get_recent_files()
-
-        valid_files = [f for f in recent_files if os.path.exists(f)]
-        if valid_files != recent_files:
-            self.config.set_recent_files(valid_files)
-            recent_files = valid_files
 
         if not recent_files:
             action = QAction("(空)", self)

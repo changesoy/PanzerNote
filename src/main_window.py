@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
     QLineEdit
 )
 from PyQt6.QtCore import Qt, QTimer, QEvent, pyqtSignal, QPoint
-from PyQt6.QtGui import QIcon, QCloseEvent, QAction, QTextCursor
+from PyQt6.QtGui import QIcon, QCloseEvent, QAction
 from typing import List, Optional, cast
 
 from . import __version__
@@ -614,27 +614,18 @@ class MainWindow(QMainWindow):
                 index = self.editor_tabs.open_file(validated)
                 if index >= 0:
                     widget = self.editor_tabs.widget(index)
-                    editor = self.editor_tabs._get_editor_from_widget(widget)
-                    if editor:
-                        cursor = editor.textCursor()
-                        cursor.select(QTextCursor.SelectionType.Document)
-                        cursor.insertText(content)
-                        tab_id = getattr(widget, 'tab_id', None)
-                        if tab_id is not None:
-                            self.editor_tabs._save_manager.mark_dirty(tab_id)
+                    tab_id = getattr(widget, 'tab_id', None) if widget is not None else None
+                    if tab_id is not None:
+                        self.editor_tabs.set_tab_content(tab_id, content)
+                        self.editor_tabs.mark_tab_dirty(tab_id)
             else:
                 index = self.editor_tabs.new_file()
                 if index >= 0:
                     widget = self.editor_tabs.widget(index)
-                    if hasattr(widget, 'tab_id'):
-                        editor = self.editor_tabs._get_editor_from_widget(widget)
-                        if editor:
-                            cursor = editor.textCursor()
-                            cursor.select(QTextCursor.SelectionType.Document)
-                            cursor.insertText(content)
-                            tab_id = getattr(widget, 'tab_id', None)
-                            if tab_id is not None:
-                                self.editor_tabs._save_manager.mark_dirty(tab_id)
+                    tab_id = getattr(widget, 'tab_id', None) if widget is not None else None
+                    if tab_id is not None:
+                        self.editor_tabs.set_tab_content(tab_id, content)
+                        self.editor_tabs.mark_tab_dirty(tab_id)
 
         session_mgr.remove_recovered_session(session_dir)
 

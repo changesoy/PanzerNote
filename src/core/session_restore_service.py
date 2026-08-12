@@ -153,10 +153,21 @@ class SessionRestoreService:
                 cursor.setPosition(min(cursor_pos, len(editor.toPlainText())))
                 editor.setTextCursor(cursor)
             if scroll_pos:
-                from PyQt6.QtCore import QTimer
                 vbar = editor.verticalScrollBar()
                 if vbar is not None:
-                    QTimer.singleShot(0, lambda v=scroll_pos, sb=vbar: sb.setValue(v))
+                    vbar.setValue(scroll_pos)
+                    if vbar.value() != scroll_pos:
+                        # 首帧布局未完成时 setValue 会被 clamp：
+                        # 等待滚动范围就绪后重试一次（文档加载/窗口尺寸变化会触发 rangeChanged）
+                        def _apply_scroll(vmin, vmax):
+                            if vmax >= scroll_pos:
+                                vbar.setValue(scroll_pos)
+                                try:
+                                    vbar.rangeChanged.disconnect(_apply_scroll)
+                                except TypeError:
+                                    pass
+
+                        vbar.rangeChanged.connect(_apply_scroll)
 
     # === 崩溃恢复 ===
 

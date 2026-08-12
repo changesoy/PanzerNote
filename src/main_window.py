@@ -660,17 +660,34 @@ class MainWindow(QMainWindow):
             self.file_tree.refresh_external_files()
         self._update_recent_menu()
 
+    def _focused_editor_tabs(self) -> Optional[EditorTabWidget]:
+        """返回当前焦点所在的 EditorTabWidget（主面板或分屏），无则 None。
+
+        分屏聚焦时按 Ctrl+S 应保存分屏中正在编辑的文件，而非固定主面板。
+        """
+        focus = QApplication.focusWidget()
+        if focus is None:
+            return None
+        for tabs in [self.editor_tabs, *self._split_tabs]:
+            if tabs is focus or tabs.isAncestorOf(focus):
+                return tabs
+        return None
+
     def _save_current(self):
-        """保存当前文件"""
-        self.editor_tabs.save_current()
+        """保存当前文件（焦点在分屏时保存分屏）"""
+        tabs = self._focused_editor_tabs() or self.editor_tabs
+        tabs.save_current()
 
     def _save_as(self):
-        """另存为"""
-        self.editor_tabs.save_current_as()
+        """另存为（焦点在分屏时另存为分屏）"""
+        tabs = self._focused_editor_tabs() or self.editor_tabs
+        tabs.save_current_as()
 
     def _save_all(self):
-        """保存所有文件"""
+        """保存所有文件（主面板 + 全部分屏）"""
         self.editor_tabs.save_all()
+        for tabs in self._split_tabs:
+            tabs.save_all()
 
     def _export_pdf(self):
         """导出当前文档为 PDF（委托 ExportActionController）"""

@@ -277,12 +277,25 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 
 | 模块                          | 职责                                                                             |
 | ----------------------------- | -------------------------------------------------------------------------------- |
-| `main_window.py`              | 布局组装、菜单动作代理、状态管理、插件/主题集成、统一窗口显示入口（`present()`） |
+| `main_window.py`              | 主窗口协调者（~1255 行）：两阶段关闭、会话恢复协调、信号回调、拖放/键盘事件、命令面板、插件/主题集成、统一窗口显示入口（`present()`）；动作经控制器一行委托 |
+| `ui/main_window_ui.py`        | `MainWindowUIBuilder`：顶层 widget 创建与布局（17 个组件经 `BuiltUI` 返回），不连接业务信号 |
+| `ui/view_coordinator.py`      | `ViewCoordinator`：视图/分屏/面板切换编排；`_current_view`/`_split_tabs` 状态；依赖全构造注入，回调（信号连接/菜单同步）由 MainWindow 注入 |
+| `ui/selection_clear_filter.py`| `SelectionClearFilter`：应用级事件过滤器，点击列表外空白清除选中高亮 |
+| `editor/edit_action_controller.py` | `EditActionController`：22 个编辑动作（撤销/剪贴板/查找/行操作/大小写/书签/折叠） |
+| `editor/export_action_controller.py` | `ExportActionController`：PDF/HTML 导出（HTML 经 FileGuard 安全写入） |
+| `editor/settings_action_controller.py` | `SettingsActionController`：设置动作编排（对话框应用/导出/导入/保存/重置，show 与 apply 共享 `_apply_editor_dict`） |
 | `editor/webengine_runtime.py` | WebEngine 启动锚点管理：首个预览挂载前预初始化 Qt WebEngine，挂载后释放锚点      |
 | `core/timer_manager.py`       | 定时器生命周期管理（自动保存/统计/挂机奖励）                                     |
 | `core/event_bus.py`           | 信号连接集中管理，解耦模块间通信                                                 |
 | `core/menu_builder.py`        | 菜单栏构建逻辑，已接入 ShortcutManager                                           |
 | `game/game_engine.py`         | 挂机收益计算（在线/离线奖励、打字奖励、资源上限检查）                            |
+
+**行数基线**（Wave 3 A~E 五分支完成后的记录）：
+
+- `main_window.py`：1669 行（重构前）→ **1255 行**（A~E 后，超出方案预期 1000~1150，属 Qt 主窗口协调者合理规模）。
+- 拆分收益：编辑+导出区块（-120）、设置区块（-145）、视图/分屏区块（-150）、SelectionClearFilter（-85）、UI 组装（-110），动作均为控制器一行委托。
+- 可单测控制器 5 个 + 独立 QObject 1 个：`EditActionController` / `ExportActionController` / `SettingsActionController` / `ViewCoordinator` / `MainWindowUIBuilder` / `SelectionClearFilter`。
+- 明确保留不拆的职责块（详见《Wave3剩余分支重构方案.md》第 6 节）：信号回调群、两阶段关闭流程、会话恢复协调、拖放处理、命令面板、插件回调等。
 
 **定时器**（由 `TimerManager` 管理）：
 

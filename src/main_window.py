@@ -44,6 +44,7 @@ from .ui.side_panel_host import SidePanelHost
 from .editor.editor_settings_dialog import EditorSettingsDialog
 from .editor.file_open_service import FileOpenService, FileOpenSource, FileOpenSecurityError, _is_inside_root
 from .editor.file_action_controller import FileActionController
+from .editor.export_action_controller import ExportActionController
 from .plugins.plugin_manager import PluginManager
 from .themes.theme_engine import ThemeEngine
 from .themes.theme_preview import ThemePreviewDialog
@@ -210,6 +211,12 @@ class MainWindow(QMainWindow):
             self.app_context.workspace_store,
             self.app_context.path_resolver,
             self._file_open_service,
+        )
+        self.export_actions = ExportActionController(
+            self.editor_tabs,
+            self.theme_engine,
+            self.secretary,
+            self,
         )
         self._init_menubar()
         self._init_statusbar()
@@ -838,63 +845,12 @@ class MainWindow(QMainWindow):
         self.editor_tabs.save_all()
 
     def _export_pdf(self):
-        from .editor.export_service import ExportService
-        try:
-            editor = self.editor_tabs.current_editor()
-            if not editor:
-                return
-            filepath, _ = QFileDialog.getSaveFileName(
-                self, "导出PDF", "", "PDF文件 (*.pdf)"
-            )
-            if not filepath:
-                return
-
-            content = editor.toPlainText()
-            widget = self.editor_tabs.currentWidget()
-            widget_type = type(widget).__name__ if widget else ""
-            is_md = ExportService.is_markdown_content(content, widget_type)
-
-            def on_pdf_ready(pdf_data):
-                self._on_pdf_generated(pdf_data, filepath)
-
-            ExportService.export_pdf(content, is_md, self, on_pdf_ready,
-                                     self.theme_engine.get_active_theme().colors)
-        except RuntimeError as e:
-            QMessageBox.warning(self, "导出失败", str(e))
-
-    def _on_pdf_generated(self, pdf_data, filepath):
-        if pdf_data:
-            try:
-                with open(filepath, 'wb') as f:
-                    f.write(pdf_data)
-                self.secretary.show_message(f"已导出PDF: {os.path.basename(filepath)}")
-            except Exception as e:
-                ErrorHandler.show_from_exception(e, ErrorCategory.FILE, f"写入PDF文件失败：{os.path.basename(filepath)}")
-        else:
-            QMessageBox.warning(self, "导出失败", "PDF生成失败")
+        """导出当前文档为 PDF（委托 ExportActionController）"""
+        self.export_actions.export_pdf()
 
     def _export_html(self):
-        from .editor.export_service import ExportService
-        editor = self.editor_tabs.current_editor()
-        if not editor:
-            return
-        filepath, _ = QFileDialog.getSaveFileName(
-            self, "导出HTML", "", "HTML文件 (*.html)"
-        )
-        if not filepath:
-            return
-
-        content = editor.toPlainText()
-        widget = self.editor_tabs.currentWidget()
-        widget_type = type(widget).__name__ if widget else ""
-        is_md = ExportService.is_markdown_content(content, widget_type)
-
-        try:
-            ExportService.export_html(content, is_md, filepath,
-                                     self.theme_engine.get_active_theme().colors)
-            self.secretary.show_message(f"已导出HTML: {os.path.basename(filepath)}")
-        except Exception as e:
-            QMessageBox.warning(self, "导出失败", str(e))
+        """导出当前文档为 HTML（委托 ExportActionController）"""
+        self.export_actions.export_html()
 
     def _close_current_tab(self):
         """关闭当前标签"""

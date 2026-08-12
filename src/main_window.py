@@ -45,6 +45,7 @@ from .editor.editor_settings_dialog import EditorSettingsDialog
 from .editor.file_open_service import FileOpenService, FileOpenSource, FileOpenSecurityError, _is_inside_root
 from .editor.file_action_controller import FileActionController
 from .editor.export_action_controller import ExportActionController
+from .editor.edit_action_controller import EditActionController
 from .plugins.plugin_manager import PluginManager
 from .themes.theme_engine import ThemeEngine
 from .themes.theme_preview import ThemePreviewDialog
@@ -217,6 +218,10 @@ class MainWindow(QMainWindow):
             self.theme_engine,
             self.secretary,
             self,
+        )
+        self.edit_actions = EditActionController(
+            self.editor_tabs,
+            self.secretary,
         )
         self._init_menubar()
         self._init_statusbar()
@@ -893,91 +898,84 @@ class MainWindow(QMainWindow):
 
     def _undo(self):
         """撤销"""
-        if not self.editor_tabs.undo():
-            self.secretary.show_message("当前没有可撤销的操作")
+        self.edit_actions.undo()
 
     def _redo(self):
         """重做"""
-        self.editor_tabs.redo()
+        self.edit_actions.redo()
 
     def _cut(self):
         """剪切"""
-        self.editor_tabs.cut()
+        self.edit_actions.cut()
 
     def _copy(self):
         """复制"""
-        self.editor_tabs.copy()
+        self.edit_actions.copy()
 
     def _paste(self):
         """粘贴"""
-        self.editor_tabs.paste()
+        self.edit_actions.paste()
 
     def _select_all(self):
         """全选"""
-        self.editor_tabs.select_all()
+        self.edit_actions.select_all()
 
     def _find(self):
         """查找"""
-        self.editor_tabs.show_find_dialog()
+        self.edit_actions.find()
 
     def _replace(self):
         """替换"""
-        self.editor_tabs.show_replace_dialog()
+        self.edit_actions.replace()
 
     # === 行操作 ===
 
     def _delete_current_line(self):
-        self.editor_tabs.delete_current_line()
+        self.edit_actions.delete_current_line()
 
     def _move_line_up(self):
-        self.editor_tabs.move_line_up()
+        self.edit_actions.move_line_up()
 
     def _move_line_down(self):
-        self.editor_tabs.move_line_down()
+        self.edit_actions.move_line_down()
 
     def _copy_line(self):
-        self.editor_tabs.copy_line()
+        self.edit_actions.copy_line()
 
     def _paste_line(self):
-        self.editor_tabs.paste_line()
+        self.edit_actions.paste_line()
 
     def _goto_line(self):
-        self.editor_tabs.show_goto_line_dialog()
+        self.edit_actions.goto_line()
 
     # === 大小写转换 ===
 
     def _toggle_case(self):
-        self.editor_tabs.toggle_case()
+        self.edit_actions.toggle_case()
 
     def _to_uppercase(self):
-        self.editor_tabs.to_uppercase()
+        self.edit_actions.to_uppercase()
 
     def _to_lowercase(self):
-        self.editor_tabs.to_lowercase()
+        self.edit_actions.to_lowercase()
 
     def _to_titlecase(self):
-        self.editor_tabs.to_titlecase()
+        self.edit_actions.to_titlecase()
+
+    # === 书签与折叠 ===
 
     def _toggle_bookmark(self):
-        editor = self.editor_tabs.current_editor()
-        if editor:
-            editor.toggle_bookmark()
+        self.edit_actions.toggle_bookmark()
 
     def _next_bookmark(self):
-        editor = self.editor_tabs.current_editor()
-        if editor:
-            editor.next_bookmark()
+        self.edit_actions.next_bookmark()
 
     def _prev_bookmark(self):
-        editor = self.editor_tabs.current_editor()
-        if editor:
-            editor.prev_bookmark()
+        self.edit_actions.prev_bookmark()
 
     def _toggle_fold_all(self):
         """折叠/展开全部 Markdown 标题。"""
-        editor = self.editor_tabs.current_editor()
-        if editor:
-            editor.toggle_fold_all()
+        self.edit_actions.toggle_fold_all()
 
     # === 视图操作 ===
 

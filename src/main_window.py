@@ -843,14 +843,7 @@ class MainWindow(QMainWindow):
         failed_tabs = save_mgr.get_failed_tab_ids()
         if failed_tabs:
             self._closing_pending_save = False
-            failed_files = []
-            for tab_id in failed_tabs:
-                info = self.editor_tabs._tab_info.get(tab_id, {})
-                filepath = info.get("filepath", "")
-                if filepath:
-                    failed_files.append(os.path.basename(filepath))
-                else:
-                    failed_files.append("未知文件")
+            failed_files = self.editor_tabs.get_failed_filenames(failed_tabs)
             file_list = "\n".join([f"• {f}" for f in failed_files[:5]])
             if len(failed_files) > 5:
                 file_list += f"\n...等{len(failed_files)}个文件"

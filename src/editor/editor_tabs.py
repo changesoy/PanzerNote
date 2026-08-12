@@ -23,6 +23,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QMimeData, QPoint, QByteArray
 from PyQt6.QtGui import QFont, QTextCursor, QColor, QTextCharFormat, QDrag, QAction
 
 from ..core.config import Config
+from ..core.document_model import TabState, TabStateRegistry
 from ..utils.logger import get_logger
 from ..utils.error_handler import ErrorHandler, ErrorCategory
 from ..utils.feature_flags import is_enabled
@@ -276,7 +277,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self._theme_engine = theme_engine
         self._webengine_runtime = webengine_runtime
 
-        self._tab_info: Dict[int, Dict] = {}
+        self._registry = TabStateRegistry()
         self._next_tab_id = 0
         self._used_untitled_numbers: Set[int] = set()
         self._closed_tabs_stack: List[Dict] = []
@@ -329,14 +330,18 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     def session_manager(self) -> TempSessionManager:
         return self._session_manager
 
+    @property
+    def registry(self) -> TabStateRegistry:
+        """类型化的文档状态注册表（替代 _tab_info dict）"""
+        return self._registry
+
     def _get_filepath_for_index(self, index: int) -> Optional[str]:
         """获取指定标签页的文件路径（供 DraggableTabBar 使用）"""
         widget = self.widget(index)
         if widget and hasattr(widget, 'tab_id'):
-            info = self._tab_info.get(widget.tab_id, {})
-            filepath = info.get("filepath")
-            if filepath and not info.get("is_new"):
-                return str(filepath)
+            state = self._registry.get(widget.tab_id)
+            if state and state.filepath and not state.is_new:
+                return state.filepath
         return None
 
     def _get_editor_from_widget(self, widget) -> Optional[Editor]:
@@ -393,19 +398,16 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
         tab_id = self._generate_tab_id()
         editor.tab_id = tab_id
-        self._tab_info[tab_id] = {
-            "filepath": None,
-            "is_modified": False,
-            "is_new": True,
-            "untitled_number": num,
-            "encoding": "UTF-8",
-            "eol": self.config.get_editor_setting("line_ending", "LF"),
-            "last_saved_content": "",
-            "last_saved_chars": 0,
-            "last_text_length": 0,
-            "is_markdown": False,
-            "history": []
-        }
+        self._registry.register(tab_id, TabState(
+            tab_id=tab_id,
+            filepath=None,
+            display_name=title,
+            is_new=True,
+            untitled_number=num,
+            encoding="UTF-8",
+            eol=self.config.get_editor_setting("line_ending", "LF"),
+            is_markdown=False,
+        ))
         self._save_manager.register_tab(tab_id)
 
         self.setCurrentIndex(index)
@@ -431,8 +433,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             widget = self.widget(i)
             tab_id = getattr(widget, 'tab_id', None)
             if tab_id is not None:
-                info = self._tab_info.get(tab_id, {})
-                if info.get("filepath") == filepath:
+                state = self._registry.get(tab_id)
+                if state and state.filepath == filepath:
                     if activate:
                         self.setCurrentIndex(i)
                     return i
@@ -520,18 +522,17 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if is_md and isinstance(widget, MarkdownPreviewWidget):
             widget.editor.tab_id = tab_id
 
-        self._tab_info[tab_id] = {
-            "filepath": filepath,
-            "is_modified": False,
-            "is_new": False,
-            "encoding": detected_encoding,
-            "eol": eol_label,
-            "last_saved_content": content,
-            "last_saved_chars": len(content),
-            "last_text_length": len(content),
-            "is_markdown": is_md,
-            "history": []
-        }
+        self._registry.register(tab_id, TabState(
+            tab_id=tab_id,
+            filepath=filepath,
+            is_new=False,
+            encoding=detected_encoding,
+            eol=eol_label,
+            last_saved_content=content,
+            last_saved_chars=len(content),
+            last_text_length=len(content),
+            is_markdown=is_md,
+        ))
         self._save_manager.register_tab(tab_id)
 
         if activate:
@@ -556,14 +557,14 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if not widget or not hasattr(widget, 'tab_id'):
             return False, 0
 
-        info = self._tab_info.get(widget.tab_id, {})
-        filepath = info.get("filepath")
+        state = self._registry.get(widget.tab_id)
+        if state is None:
+            return False, 0
 
-        if not filepath or info.get("is_new"):
+        if not state.filepath or state.is_new:
             return self.save_current_as()
 
-        encoding = info.get("encoding", "UTF-8")
-        return self._save_file(widget, filepath, encoding)
+        return self._save_file(widget, state.filepath, state.encoding)
 
     def save_current_as(self) -> Tuple[bool, int]:
         """另存为"""
@@ -574,17 +575,19 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         tid = getattr(widget, 'tab_id', None)
         if tid is None:
             return False, 0
-        info = self._tab_info.get(tid, {})
+        state = self._registry.get(tid)
+        if state is None:
+            return False, 0
 
-        if info.get("filepath"):
-            suggested_name = info["filepath"]
+        if state.filepath:
+            suggested_name = state.filepath
         else:
             suggested_name = os.path.join(
                 self.config.get_notebooks_path(),
                 self._strip_tab_suffix(self.tabText(self.currentIndex()))
             )
 
-        current_encoding = info.get("encoding", "UTF-8")
+        current_encoding = state.encoding
 
         dialog = SaveAsDialog(suggested_name, current_encoding, self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
@@ -604,7 +607,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 self._pending_save_as_info[tab_id] = {
                     "filepath": filepath,
                     "encoding": encoding,
-                    "untitled_number": info.get("untitled_number") if info.get("is_new") else None,
+                    "untitled_number": state.untitled_number if state.is_new else None,
                 }
 
         return success, chars
@@ -634,18 +637,20 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if self._save_manager.is_saving(tab_id):
             return False, 0
 
-        info = self._tab_info.get(tab_id, {})
-        last_chars = info.get("last_saved_chars", 0)
+        state = self._registry.get(tab_id)
+        if state is None:
+            return False, 0
+        last_chars = state.last_saved_chars
 
         # EOL 规范化：将编辑器内部的 \n 替换为文档目标行尾
-        current_eol_label = info.get("eol", "LF")
+        current_eol_label = state.eol
         target_eol = {"LF": "\n", "CRLF": "\r\n", "CR": "\r"}.get(current_eol_label, "\n")
         from .eol_utils import normalize_eol
         content = normalize_eol(content, target_eol)
 
         new_chars = max(0, len(content) - last_chars)
 
-        info["encoding"] = encoding
+        state.encoding = encoding
 
         self._pending_save_info[tab_id] = {
             "content": content,
@@ -672,12 +677,10 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             widget = self.widget(i)
             tab_id = getattr(widget, 'tab_id', None)
             if tab_id is not None:
-                info = self._tab_info.get(tab_id, {})
-                if info.get("is_modified"):
-                    filepath = info.get("filepath")
-                    if filepath and not info.get("is_new"):
-                        encoding = info.get("encoding", "UTF-8")
-                        success, chars = self._save_file(widget, filepath, encoding)
+                state = self._registry.get(tab_id)
+                if state and state.is_modified:
+                    if state.filepath and not state.is_new:
+                        success, chars = self._save_file(widget, state.filepath, state.encoding)
                         if success:
                             total_chars += chars
                     else:
@@ -707,8 +710,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             if tab_id is None:
                 continue
 
-            info = self._tab_info.get(tab_id, {})
-            if not info.get("is_modified"):
+            state = self._registry.get(tab_id)
+            if state is None or not state.is_modified:
                 continue
 
             if isinstance(widget, MarkdownPreviewWidget):
@@ -720,10 +723,10 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
             tab_infos.append({
                 "tab_id": tab_id,
-                "filepath": info.get("filepath"),
+                "filepath": state.filepath,
                 "content": content,
-                "encoding": info.get("encoding", "UTF-8"),
-                "is_new": info.get("is_new", False),
+                "encoding": state.encoding,
+                "is_new": state.is_new,
                 "is_modified": True
             })
 
@@ -745,8 +748,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             if widget != current:
                 tab_id = getattr(widget, 'tab_id', None)
                 if tab_id:
-                    info = self._tab_info.get(tab_id, {})
-                    info["history"] = []
+                    state = self._registry.get(tab_id)
+                    if state:
+                        state.history.clear()
                     editor = self._get_editor_from_widget(widget)
                     if editor:
                         doc = editor.document()
@@ -771,8 +775,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         for i in range(self.count()):
             w = self.widget(i)
             tid = getattr(w, 'tab_id', None) if w is not None else None
-            info = self._tab_info.get(tid, {}) if tid else {}
-            if info.get("filepath") == filepath:
+            state = self._registry.get(tid) if tid else None
+            if state and state.filepath == filepath:
                 self.setCurrentIndex(i)
                 return True
         index = self.open_file(filepath)
@@ -868,7 +872,11 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             return True
 
         tab_id = widget.tab_id
-        info = self._tab_info.get(tab_id, {})
+        state = self._registry.get(tab_id)
+        if state is None:
+            self.removeTab(index)
+            self.tab_count_changed.emit(self.count())
+            return True
 
         if self._save_manager.is_saving(tab_id):
             return False
@@ -881,18 +889,18 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             content = ""
 
         title = self._strip_tab_suffix(self.tabText(index))
-        is_new = info.get("is_new", False)
+        is_new = state.is_new
         is_empty = len(content.strip()) == 0
 
         if is_new and is_empty:
             self._release_untitled_number(title)
             self._save_manager.unregister_tab(tab_id)
-            del self._tab_info[tab_id]
+            self._registry.unregister(tab_id)
             self.removeTab(index)
             self.tab_count_changed.emit(self.count())
             return True
 
-        if info.get("is_modified"):
+        if state.is_modified:
             msg_box = QMessageBox(self)
             msg_box.setWindowTitle("保存文件")
             if is_new:
@@ -917,8 +925,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                         self.setCurrentIndex(old_index)
                         return False
                 else:
-                    encoding = info.get("encoding", "UTF-8")
-                    success, _ = self._save_file(widget, info["filepath"], encoding)
+                    success, _ = self._save_file(widget, state.filepath or "", state.encoding)
                     if not success:
                         return False
                 if self._save_manager.is_saving(tab_id):
@@ -927,10 +934,10 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             elif clicked == cancel_btn:
                 return False
 
-        if info.get("is_new"):
+        if state.is_new:
             self._release_untitled_number(title)
         else:
-            filepath = info.get("filepath")
+            filepath = state.filepath
             if filepath and os.path.isfile(filepath):
                 cursor = None
                 if isinstance(widget, Editor):
@@ -945,7 +952,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                     self._closed_tabs_stack.pop(0)
 
         self._save_manager.unregister_tab(tab_id)
-        del self._tab_info[tab_id]
+        self._registry.unregister(tab_id)
         self.removeTab(index)
         self.tab_count_changed.emit(self.count())
         return True
@@ -1008,10 +1015,12 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if not widget or not hasattr(widget, 'tab_id'):
             return
 
-        info = self._tab_info.get(widget.tab_id, {})
-        filepath = info.get("filepath")
+        state = self._registry.get(widget.tab_id)
+        if state is None:
+            return
+        filepath = state.filepath
 
-        if not filepath or info.get("is_new"):
+        if not filepath or state.is_new:
             self._context_save_as(index)
             return
 
@@ -1022,7 +1031,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             new_path = os.path.join(os.path.dirname(filepath), new_name)
             try:
                 os.rename(filepath, new_path)
-                info["filepath"] = new_path
+                state.filepath = new_path
                 self.setTabText(index, new_name)
                 editor = self._get_editor_from_widget(widget)
                 if editor:
@@ -1067,15 +1076,17 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if tab_id is None:
             return
 
-        info = self._tab_info.get(tab_id, {})
+        state = self._registry.get(tab_id)
+        if state is None:
+            return
 
         doc = editor.document()
         if doc is None:
             return
         current_len = doc.characterCount() - 1
-        last_len = info.get("last_text_length", current_len)
+        last_len = state.last_text_length or current_len
         delta = current_len - last_len
-        info["last_text_length"] = current_len
+        state.last_text_length = current_len
 
         is_pasting = getattr(editor, '_is_pasting', False)
         is_programmatic = getattr(editor, 'is_programmatic_modify', False)
@@ -1084,11 +1095,11 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             if delta <= self._PASTE_THRESHOLD:
                 self.chars_typed.emit(delta)
 
-        last_saved_chars = info.get("last_saved_chars", 0)
+        last_saved_chars = state.last_saved_chars
         is_modified = doc.isModified()
 
-        if is_modified != info.get("is_modified", False):
-            info["is_modified"] = is_modified
+        if is_modified != state.is_modified:
+            state.is_modified = is_modified
             if is_modified:
                 self._save_manager.mark_dirty(tab_id)
                 for i in range(self.count()):
@@ -1114,8 +1125,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self.content_modified.emit()
 
     def _on_save_state_changed(self, tab_id: int, state_name: str) -> None:
-        state = SaveState(state_name)
-        info = self._tab_info.get(tab_id, {})
+        save_state = SaveState(state_name)
+        state = self._registry.get(tab_id)
         widget = None
         widget_index = -1
         for i in range(self.count()):
@@ -1130,8 +1141,10 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         index = self.indexOf(widget)
         base_title = self._strip_tab_suffix(self.tabText(index))
 
-        if state == SaveState.CLEAN:
-            info["is_modified"] = False
+        if save_state == SaveState.CLEAN:
+            if state is None:
+                return
+            state.is_modified = False
             editor = self._get_editor_from_widget(widget)
             if editor:
                 doc = editor.document()
@@ -1143,9 +1156,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             if pending:
                 content = pending["content"]
                 new_chars = pending["new_chars"]
-                info["last_saved_content"] = content
-                info["last_saved_chars"] = len(content)
-                info["last_text_length"] = len(content)
+                state.mark_saved(content)
                 if new_chars > 0:
                     self.chars_typed.emit(new_chars)
 
@@ -1153,26 +1164,24 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             if save_as_info:
                 filepath_new = save_as_info["filepath"]
                 encoding_new = save_as_info["encoding"]
-                info["is_new"] = False
-                info["filepath"] = filepath_new
-                info["encoding"] = encoding_new
+                state.mark_new_saved(filepath_new, encoding_new)
                 if save_as_info.get("untitled_number"):
                     self._used_untitled_numbers.discard(save_as_info["untitled_number"])
                 if editor:
                     editor.set_file_type(filepath_new)
                 self.setTabText(index, os.path.basename(filepath_new))
 
-            filepath = info.get("filepath")
-            if filepath:
-                self._session_manager.remove_autosave_for_file(filepath)
+            if state.filepath:
+                self._session_manager.remove_autosave_for_file(state.filepath)
             self.file_saved.emit()
             if tab_id in self._pending_close_tab_ids:
                 self._pending_close_tab_ids.discard(tab_id)
                 self._close_tab_after_save(widget_index)
-        elif state == SaveState.SAVING:
+        elif save_state == SaveState.SAVING:
             self.setTabText(index, base_title + " ⏳")
-        elif state == SaveState.SAVE_FAILED:
-            info["is_modified"] = True
+        elif save_state == SaveState.SAVE_FAILED:
+            if state is not None:
+                state.is_modified = True
             editor = self._get_editor_from_widget(widget)
             if editor:
                 doc = editor.document()
@@ -1183,11 +1192,11 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             self._pending_save_as_info.pop(tab_id, None)
             if tab_id in self._pending_close_tab_ids:
                 self._pending_close_tab_ids.discard(tab_id)
-        elif state == SaveState.DIRTY:
-            info["is_modified"] = True
+        elif save_state == SaveState.DIRTY:
+            if state is not None:
+                state.is_modified = True
 
     def _on_save_failed(self, tab_id: int, filepath: str, exc: BaseException) -> None:
-        info = self._tab_info.get(tab_id, {})
         basename = os.path.basename(filepath) if filepath else "未知文件"
         ErrorHandler.show_from_exception(exc, ErrorCategory.FILE, f"保存文件失败：{basename}")
 
@@ -1197,13 +1206,13 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             return
 
         tab_id = widget.tab_id
-        info = self._tab_info.get(tab_id, {})
+        state = self._registry.get(tab_id)
         title = self._strip_tab_suffix(self.tabText(index))
 
-        if info.get("is_new"):
+        if state and state.is_new:
             self._release_untitled_number(title)
         else:
-            filepath = info.get("filepath")
+            filepath = state.filepath if state else None
             if filepath and os.path.isfile(filepath):
                 cursor = None
                 if isinstance(widget, Editor):
@@ -1218,7 +1227,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                     self._closed_tabs_stack.pop(0)
 
         self._save_manager.unregister_tab(tab_id)
-        del self._tab_info[tab_id]
+        self._registry.unregister(tab_id)
         self.removeTab(index)
         self.tab_count_changed.emit(self.count())
 
@@ -1237,35 +1246,38 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             tab_id = getattr(widget, 'tab_id', None)
             if tab_id is None:
                 continue
-            info = self._tab_info.get(tab_id, {})
-            fp = info.get("filepath")
-            if fp and not info.get("is_new"):
-                paths.append(fp)
+            state = self._registry.get(tab_id)
+            if state and state.filepath and not state.is_new:
+                paths.append(state.filepath)
         return paths
 
     def get_current_encoding(self) -> str:
         """获取当前文件的编码"""
         widget = self.currentWidget()
         if widget and hasattr(widget, 'tab_id'):
-            info = self._tab_info.get(widget.tab_id, {})
-            return str(info.get("encoding", "UTF-8"))
+            state = self._registry.get(widget.tab_id)
+            if state:
+                return str(state.encoding)
         return "UTF-8"
 
     def get_current_eol(self) -> str:
         """获取当前文档的行尾类型（LF / CRLF / CR / Mixed）"""
         widget = self.currentWidget()
         if widget and hasattr(widget, 'tab_id'):
-            info = self._tab_info.get(widget.tab_id, {})
-            return str(info.get("eol", "LF"))
+            state = self._registry.get(widget.tab_id)
+            if state:
+                return str(state.eol)
         return "LF"
 
     def set_current_eol(self, eol: str) -> None:
         """切换当前文档的行尾类型，并标记为已修改"""
         widget = self.currentWidget()
         if widget and hasattr(widget, 'tab_id'):
-            info = self._tab_info.get(widget.tab_id, {})
-            info["eol"] = eol
-            info["is_modified"] = True
+            state = self._registry.get(widget.tab_id)
+            if state is None:
+                return
+            state.eol = eol
+            state.is_modified = True
             editor = self._get_editor_from_widget(widget)
             if editor:
                 doc = editor.document()
@@ -1286,22 +1298,21 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             widget = self.widget(i)
             tab_id = getattr(widget, 'tab_id', None)
             if tab_id is not None:
-                info = self._tab_info.get(tab_id, {})
-                if info.get("is_modified"):
+                state = self._registry.get(tab_id)
+                if state and state.is_modified:
                     editor = self._get_editor_from_widget(widget)
                     content = editor.toPlainText() if editor else ""
-                    if info.get("is_new") and len(content.strip()) == 0:
+                    if state.is_new and len(content.strip()) == 0:
                         continue
-                    filepath = info.get("filepath")
-                    if filepath:
-                        unsaved.append(os.path.basename(filepath))
+                    if state.filepath:
+                        unsaved.append(os.path.basename(state.filepath))
                     else:
                         unsaved.append(self._strip_tab_suffix(self.tabText(i)))
         return unsaved
 
     def has_modified_files(self) -> bool:
-        for tab_id, info in self._tab_info.items():
-            if info.get("is_modified"):
+        for state in self._registry.all_states():
+            if state.is_modified:
                 return True
         return False
 
@@ -1312,10 +1323,10 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         tab_id = getattr(widget, 'tab_id', None)
         if tab_id is None:
             return None
-        info = self._tab_info.get(tab_id, {})
-        filepath = info.get("filepath")
-        if not filepath:
+        state = self._registry.get(tab_id)
+        if state is None or not state.filepath:
             return None
+        filepath = state.filepath
         editor = self._get_editor_from_widget(widget)
         result = {"filepath": filepath}
         if editor:
@@ -1327,24 +1338,65 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         return result
 
     def get_open_files_info(self) -> List[Dict]:
-        files_info = []
+        # 先把每个标签的实时光标/滚动位置同步到 TabState，再经 registry 导出
         for i in range(self.count()):
             widget = self.widget(i)
             tab_id = getattr(widget, 'tab_id', None)
-            if tab_id is not None:
-                info = self._tab_info.get(tab_id, {})
-                filepath = info.get("filepath")
-                if filepath and not info.get("is_new"):
-                    editor = self._get_editor_from_widget(widget)
-                    if editor:
-                        cursor = editor.textCursor()
-                        vbar2 = editor.verticalScrollBar()
-                        files_info.append({
-                            "path": filepath,
-                            "cursor_position": cursor.position(),
-                            "scroll_position": vbar2.value() if vbar2 is not None else 0
-                        })
-        return files_info
+            if tab_id is None:
+                continue
+            state = self._registry.get(tab_id)
+            if state is None or state.is_new or not state.filepath:
+                continue
+            editor = self._get_editor_from_widget(widget)
+            if editor is None:
+                continue
+            cursor = editor.textCursor()
+            vbar2 = editor.verticalScrollBar()
+            state.cursor_position = cursor.position()
+            state.scroll_position = vbar2.value() if vbar2 is not None else 0
+        return self._registry.to_open_files_list()
+
+    # === 文档状态公开接口（替代 MainWindow 的私有穿透） ===
+
+    def set_tab_content(self, tab_id: int, content: str) -> bool:
+        """将内容恢复到指定标签的编辑器，并重置保存状态。
+
+        供崩溃恢复使用（restore_after_crash）。
+        """
+        state = self._registry.get(tab_id)
+        if state is None:
+            return False
+        editor = self._editor_for_tab_id(tab_id)
+        if editor is None:
+            return False
+        editor.setPlainText(content)
+        editor.document().setModified(False)
+        editor.clearUndoRedoStacks()
+        state.mark_saved(content)
+        return True
+
+    def mark_tab_dirty(self, tab_id: int) -> None:
+        """将指定标签标记为已修改（供崩溃恢复后的脏标记）。"""
+        state = self._registry.get(tab_id)
+        if state is None:
+            return
+        state.is_modified = True
+        self._save_manager.mark_dirty(tab_id)
+
+    def get_tab_state(self, tab_id: int) -> Optional[TabState]:
+        """获取指定标签的文档状态（只读用途）。"""
+        return self._registry.get(tab_id)
+
+    def get_failed_filenames(self, failed_tab_ids: List[int]) -> List[str]:
+        """根据失败的 tab_id 列表返回文件名（供关闭流程提示）。"""
+        return self._registry.get_failed_filenames(failed_tab_ids)
+
+    def _editor_for_tab_id(self, tab_id: int) -> Optional[Editor]:
+        for i in range(self.count()):
+            widget = self.widget(i)
+            if getattr(widget, 'tab_id', None) == tab_id:
+                return self._get_editor_from_widget(widget)
+        return None
 
     def set_wrap_mode_all(self, mode: str):
         for editor in self._iter_editors():
@@ -1437,12 +1489,11 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 widget = self.widget(i)
                 tab_id = getattr(widget, 'tab_id', None)
                 if tab_id is not None:
-                    info = self._tab_info.get(tab_id, {})
-                    if info.get("filepath") == filepath:
+                    state = self._registry.get(tab_id)
+                    if state and state.filepath == filepath:
                         # 保存最新内容
-                        if info.get("is_modified"):
-                            enc = info.get("encoding", "UTF-8")
-                            self._save_file(widget, filepath, enc)
+                        if state.is_modified:
+                            self._save_file(widget, filepath, state.encoding)
                         break
 
             import shutil
@@ -1453,9 +1504,10 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 widget = self.widget(i)
                 tab_id = getattr(widget, 'tab_id', None)
                 if tab_id is not None:
-                    info = self._tab_info.get(tab_id, {})
-                    if info.get("filepath") == filepath:
-                        info["filepath"] = new_path
+                    state = self._registry.get(tab_id)
+                    if state and state.filepath == filepath:
+                        state.filepath = new_path
+                        state.display_name = filename
                         self.setTabText(i, filename)
                         break
 
@@ -1631,14 +1683,13 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             tab_id = getattr(widget, 'tab_id', None)
             if tab_id is None:
                 continue
-            info = self._tab_info.get(tab_id, {})
-            filepath = info.get("filepath")
-            if not filepath:
+            state = self._registry.get(tab_id)
+            if state is None or not state.filepath:
                 continue
             editor = self._get_editor_from_widget(widget)
             if editor is not None:
                 bookmarks = editor.get_bookmarks()
-                self.config.set_bookmarks(filepath, list(bookmarks) if bookmarks else [])
+                self.config.set_bookmarks(state.filepath, list(bookmarks) if bookmarks else [])
 
     def _restore_folds(self, widget, filepath: str, lines: list) -> None:
         """恢复已保存的折叠状态。"""
@@ -1657,11 +1708,10 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             tab_id = getattr(widget, 'tab_id', None)
             if tab_id is None:
                 continue
-            info = self._tab_info.get(tab_id, {})
-            filepath = info.get("filepath")
-            if not filepath:
+            state = self._registry.get(tab_id)
+            if state is None or not state.filepath:
                 continue
             editor = self._get_editor_from_widget(widget)
             if editor is not None and hasattr(editor, '_folding'):
                 collapsed = editor._folding.get_collapsed_lines()
-                self.config.set_folds(filepath, collapsed if collapsed else [])
+                self.config.set_folds(state.filepath, collapsed if collapsed else [])

@@ -64,6 +64,16 @@ class DroppableTreeView(QTreeView):
         super().__init__(parent)
         self.setAcceptDrops(True)
 
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            index = self.indexAt(event.pos())
+            if not index.isValid():
+                sel_model = self.selectionModel()
+                if sel_model is not None and sel_model.hasSelection():
+                    sel_model.clearSelection()
+                self.setCurrentIndex(QModelIndex())
+        super().mousePressEvent(event)
+
     def dragEnterEvent(self, event):
         if event.mimeData().hasFormat(MIME_TAB_FILEPATH):
             event.acceptProposedAction()

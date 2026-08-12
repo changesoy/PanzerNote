@@ -93,7 +93,7 @@ class SaveAsDialog(QDialog):
     def _browse(self):
         filepath, _ = QFileDialog.getSaveFileName(
             self, "另存为", self.path_edit.text(),
-            "文本文件 (*.txt);;Markdown (*.md);;Python (*.py);;所有文件 (*.*)"
+            "文本文件 (*.txt);;Markdown (*.md);;Python (*.py);;PDF 文档 (*.pdf);;所有文件 (*.*)"
         )
         if filepath:
             self.path_edit.setText(filepath)
@@ -617,7 +617,13 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if not filepath:
             return False, 0
 
-        success, chars = self._save_file(widget, filepath, encoding)
+        # PDF 另存为：通过 ExportService 生成可打开的 PDF（当前标签保持原文件）
+        if filepath.lower().endswith(".pdf"):
+            return self._save_as_pdf(widget, filepath)
+
+        success, chars = self._save_file(
+            widget, filepath, encoding, is_copy=not state.is_new
+        )
 
         if success:
             tab_id = getattr(widget, 'tab_id', None)
@@ -626,11 +632,63 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                     "filepath": filepath,
                     "encoding": encoding,
                     "untitled_number": state.untitled_number if state.is_new else None,
+                    # 已有文件另存为 = 副本保存：当前标签保持指向原文件
+                    "is_copy": not state.is_new,
                 }
 
         return success, chars
 
-    def _save_file(self, widget, filepath: str, encoding: str = "UTF-8") -> Tuple[bool, int]:
+    def _save_as_pdf(self, widget, filepath: str) -> Tuple[bool, int]:
+        """另存为 PDF：通过 ExportService 生成可打开的 PDF 文件。
+
+        当前标签保持指向原文件（副本语义），PDF 生成完成后仅提示。
+        二进制写入走 FileGuard.safe_write_bytes，遵守路径安全规范。
+        """
+        from .export_service import ExportService
+        from ..security.file_access_context import FileAccessContext
+
+        editor = self._get_editor_from_widget(widget)
+        if editor is None:
+            return False, 0
+        content = editor.toPlainText()
+        widget_type = type(widget).__name__ if widget else ""
+        is_md = ExportService.is_markdown_content(content, widget_type)
+
+        def _on_pdf_ready(pdf_data):
+            if pdf_data:
+                try:
+                    self.config.get_file_guard().safe_write_bytes(
+                        filepath,
+                        pdf_data,
+                        context=FileAccessContext.USER_DOCUMENT_SAVE,
+                    )
+                    QMessageBox.information(
+                        self, "另存为",
+                        f"已导出PDF: {os.path.basename(filepath)}",
+                    )
+                except Exception as e:
+                    ErrorHandler.show_from_exception(
+                        e, ErrorCategory.FILE,
+                        f"写入PDF文件失败：{os.path.basename(filepath)}",
+                    )
+            else:
+                QMessageBox.warning(self, "另存为", "PDF生成失败")
+
+        try:
+            ExportService.export_pdf(
+                content,
+                is_md,
+                self,
+                _on_pdf_ready,
+                self._theme_engine.get_active_theme().colors,
+            )
+            return True, 0
+        except RuntimeError as e:
+            QMessageBox.warning(self, "另存为", str(e))
+            return False, 0
+
+    def _save_file(self, widget, filepath: str, encoding: str = "UTF-8",
+                   *, is_copy: bool = False) -> Tuple[bool, int]:
         """保存文件（异步写入磁盘，UI 不冻结）
 
         通过 SaveTaskManager 管理保存状态：
@@ -640,6 +698,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
         副作用（last_saved_content、last_saved_chars、last_text_length、
         字符收益结算）仅在保存成功回调中执行。
+
+        is_copy：已有文件"另存为副本"时为 True，不改变当前标签的
+        encoding（当前标签仍指向原文件）。
         """
         if isinstance(widget, MarkdownPreviewWidget):
             content = widget.editor.toPlainText()
@@ -668,7 +729,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
         new_chars = max(0, len(content) - last_chars)
 
-        state.encoding = encoding
+        if not is_copy:
+            state.encoding = encoding
 
         self._pending_save_info[tab_id] = {
             "content": content,
@@ -1179,6 +1241,18 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if save_state == SaveState.CLEAN:
             if state is None:
                 return
+            save_as_info = self._pending_save_as_info.pop(tab_id, None)
+            if save_as_info and save_as_info.get("is_copy"):
+                # 已有文件另存为副本：保存成功，但当前标签仍指向原文件。
+                # 跳过全部保存副作用（不清 dirty、不改标题、不结算收益），
+                # 避免原文件未保存的修改被误标记为已保存（数据安全）。
+                self._pending_save_info.pop(tab_id, None)
+                # 恢复标题（去除 SAVING 阶段追加的 ⏳ 后缀）
+                self.setTabText(index, base_title)
+                if tab_id in self._pending_close_tab_ids:
+                    self._pending_close_tab_ids.discard(tab_id)
+                    self._close_tab_after_save(widget_index)
+                return
             state.is_modified = False
             editor = self._get_editor_from_widget(widget)
             if editor:
@@ -1195,8 +1269,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 if new_chars > 0:
                     self.chars_typed.emit(new_chars)
 
-            save_as_info = self._pending_save_as_info.pop(tab_id, None)
             if save_as_info:
+                # 新建文件首次保存：正式化为该文件
                 filepath_new = save_as_info["filepath"]
                 encoding_new = save_as_info["encoding"]
                 state.mark_new_saved(filepath_new, encoding_new)
@@ -1215,6 +1289,12 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         elif save_state == SaveState.SAVING:
             self.setTabText(index, base_title + " ⏳")
         elif save_state == SaveState.SAVE_FAILED:
+            save_as_info = self._pending_save_as_info.pop(tab_id, None)
+            if save_as_info and save_as_info.get("is_copy"):
+                # 副本保存失败：当前标签状态不变（原文件未受影响），恢复标题
+                self._pending_save_info.pop(tab_id, None)
+                self.setTabText(index, base_title)
+                return
             if state is not None:
                 state.is_modified = True
             editor = self._get_editor_from_widget(widget)
@@ -1224,7 +1304,6 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                     doc.setModified(True)
             self.setTabText(index, base_title + " !")
             self._pending_save_info.pop(tab_id, None)
-            self._pending_save_as_info.pop(tab_id, None)
             if tab_id in self._pending_close_tab_ids:
                 self._pending_close_tab_ids.discard(tab_id)
         elif save_state == SaveState.DIRTY:

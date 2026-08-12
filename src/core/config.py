@@ -249,6 +249,20 @@ class Config:
     def remove_external_file(self, filepath: str) -> None:
         self._workspace_store.remove_external_file(filepath)
 
+    # === 子模块访问（供服务组装，AppContext 阶段使用） ===
+
+    @property
+    def path_resolver(self) -> PathResolver:
+        return self._path_resolver
+
+    @property
+    def settings_store(self) -> SettingsStore:
+        return self._settings_store
+
+    @property
+    def workspace_store(self) -> WorkspaceStore:
+        return self._workspace_store
+
     # === 存档代理（向后兼容） ===
 
     @property

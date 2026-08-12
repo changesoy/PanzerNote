@@ -62,8 +62,9 @@ class SavegameManager:
         self._logger = get_logger(__name__)
 
     @property
-    def data(self) -> Dict[str, Any]:
-        return self._savegame
+    def data(self) -> Mapping[str, Any]:
+        """存档数据只读视图（仅供内部调试/测试，勿修改内部状态）"""
+        return MappingProxyType(self._savegame)
 
     def _get_savegame_path(self) -> str:
         return os.path.join(self._gamedata_dir, "savegame.json")
@@ -126,7 +127,8 @@ class SavegameManager:
 
     def get_resources(self) -> Dict[str, int]:
         default: Dict[str, int] = {"fuel": 0, "ammo": 0, "steel": 0, "bauxite": 0}
-        return cast(Dict[str, int], self._savegame.get("resources", default))
+        # 返回拷贝，避免调用方（插件等）拿到内部 resources dict 引用后修改
+        return cast(Dict[str, int], dict(self._savegame.get("resources", default)))
 
     def set_resources(self, resources: Dict[str, int]):
         self._savegame["resources"] = resources

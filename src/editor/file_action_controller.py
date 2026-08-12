@@ -42,7 +42,7 @@ class FileActionController:
 
     # === 打开 ===
 
-    def open_file(self, filepath: str) -> Tuple[Optional[int], bool]:
+    def open_file(self, filepath: str) -> Tuple[int, bool]:
         """编排打开文件：安全校验 → 外部文件判定 → 打开 → 最近文件。
 
         安全校验失败抛出 FileOpenSecurityError（由调用方负责提示）。

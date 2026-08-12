@@ -47,28 +47,31 @@ def _crash_excepthook(exc_type, exc_value, exc_tb):
 sys.excepthook = _crash_excepthook
 
 
+def _iter_crash_logs(log_dir):
+    """枚举目录下所有 crash_*.log 文件名（目录不存在时为空迭代）"""
+    if not os.path.isdir(log_dir):
+        return
+    for name in os.listdir(log_dir):
+        if name.startswith("crash_") and name.endswith(".log"):
+            yield name
+
+
 def _migrate_crash_logs(old_dir, new_dir):
     """把早期 crash log 从 old_dir 迁移到 new_dir（跨盘用 copy+delete，同名跳过）"""
-    if not os.path.isdir(old_dir):
-        return
     os.makedirs(new_dir, exist_ok=True)
-    for name in os.listdir(old_dir):
-        if name.startswith("crash_") and name.endswith(".log"):
-            src = os.path.join(old_dir, name)
-            dst = os.path.join(new_dir, name)
-            try:
-                if not os.path.exists(dst):
-                    shutil.move(src, dst)
-            except OSError:
-                pass
+    for name in _iter_crash_logs(old_dir):
+        src = os.path.join(old_dir, name)
+        dst = os.path.join(new_dir, name)
+        try:
+            if not os.path.exists(dst):
+                shutil.move(src, dst)
+        except OSError:
+            pass
 
 
 def _cleanup_crash_logs(log_dir, keep=MAX_CRASH_LOGS):
     """仅保留最近 keep 个 crash log，按文件名时间戳倒序删除旧的"""
-    if not os.path.isdir(log_dir):
-        return
-    logs = [f for f in os.listdir(log_dir) if f.startswith("crash_") and f.endswith(".log")]
-    logs.sort(reverse=True)
+    logs = sorted(_iter_crash_logs(log_dir), reverse=True)
     for name in logs[keep:]:
         try:
             os.remove(os.path.join(log_dir, name))
@@ -83,14 +86,11 @@ def _clear_crash_logs(log_dir):
     直接终止进程，不会返回主循环），因此残留日志只可能来自历史崩溃，
     应一并清除，避免下次启动误报"上次启动异常退出"。
     """
-    if not os.path.isdir(log_dir):
-        return
-    for name in os.listdir(log_dir):
-        if name.startswith("crash_") and name.endswith(".log"):
-            try:
-                os.remove(os.path.join(log_dir, name))
-            except OSError:
-                pass
+    for name in _iter_crash_logs(log_dir):
+        try:
+            os.remove(os.path.join(log_dir, name))
+        except OSError:
+            pass
 
 
 def _activate_crash_log_dir(new_dir):
@@ -193,7 +193,7 @@ def main():
     _verify_version_consistency(logger)
     profiler.end_phase()
 
-    crash_logs = [f for f in os.listdir(log_dir) if f.startswith("crash_") and f.endswith(".log")]
+    crash_logs = list(_iter_crash_logs(log_dir))
     if crash_logs:
         latest_crash = sorted(crash_logs)[-1]
         crash_path = os.path.join(log_dir, latest_crash)

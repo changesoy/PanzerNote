@@ -11,7 +11,7 @@ v1.7.0 改动：
 
 import os
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -40,7 +40,7 @@ class TabState:
     scroll_position: Optional[int] = None
 
     # 预留
-    history: List = field(default_factory=list)
+    history: List[Any] = field(default_factory=list)
 
     # 运行时编号（仅 is_new=True 时使用）
     untitled_number: Optional[int] = None

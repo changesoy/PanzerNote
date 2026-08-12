@@ -18,6 +18,7 @@ import os
 from typing import List, Optional, Tuple
 
 from ..utils.logger import get_logger
+from ..editor.temp_session_manager import TempSessionManager
 from .workspace_store import WorkspaceStore
 from ..editor.file_open_service import (
     FileOpenService,
@@ -159,7 +160,7 @@ class SessionRestoreService:
 
     # === 崩溃恢复 ===
 
-    def check_crash_recovery(self, session_manager) -> Optional[dict]:
+    def check_crash_recovery(self, session_manager: TempSessionManager) -> Optional[dict]:
         """查找可恢复的异常退出会话
 
         无 recoverable 会话时清理干净会话并返回 None。
@@ -194,7 +195,7 @@ class SessionRestoreService:
         self,
         editor_tabs,
         session: dict,
-        session_manager,
+        session_manager: TempSessionManager,
     ) -> int:
         """恢复崩溃会话的文件内容，返回成功恢复的文件数
 

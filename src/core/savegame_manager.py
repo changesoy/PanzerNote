@@ -174,8 +174,7 @@ class SavegameManager:
     def get_last_login(self) -> Optional[str]:
         return self._savegame.get("last_login")
 
-    def migrate_bauxite_counter(self, settings: Dict):
-        old_val = settings.get("game", {}).pop("bauxite_counter", None)
+    def migrate_bauxite_counter(self, old_val: Any) -> None:
         if old_val is not None:
             self._savegame["bauxite_counter"] = old_val
             self._logger.info("已迁移 bauxite_counter (%s) 从 settings 到 savegame", old_val)

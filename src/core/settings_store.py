@@ -108,7 +108,8 @@ class SettingsStore:
         )
 
     def as_dict(self) -> Dict[str, Any]:
-        return self._settings
+        """返回深拷贝，避免调用方拿到内部引用后绕过封装修改状态"""
+        return copy.deepcopy(self._settings)
 
     # === 初始化状态 ===
 

@@ -94,7 +94,10 @@ class Config:
 
         self._savegame_manager.load()
 
-        self._savegame_manager.migrate_bauxite_counter(self._settings_store.as_dict())
+        # bauxite_counter 迁移：显式读取/删除 settings 命名空间，不依赖 as_dict() 引用
+        game_ns = self._settings_store.get_setting("game", {})
+        old_val = game_ns.pop("bauxite_counter", None) if isinstance(game_ns, dict) else None
+        self._savegame_manager.migrate_bauxite_counter(old_val)
 
     # === 保存 ===
 

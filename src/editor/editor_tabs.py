@@ -967,7 +967,10 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                         self.setCurrentIndex(old_index)
                         return False
                 else:
-                    success, _ = self._save_file(widget, state.filepath or "", state.encoding)
+                    filepath = state.filepath
+                    if not filepath:
+                        return False
+                    success, _ = self._save_file(widget, filepath, state.encoding)
                     if not success:
                         return False
                 if self._save_manager.is_saving(tab_id):

@@ -9,6 +9,7 @@ v1.7.0 改动：
   - 从 Config 拆出 WorkspaceStore（hotfix 阶段 0）
 """
 
+import copy
 import os
 from typing import Dict, Any, List, Optional, cast
 
@@ -36,11 +37,8 @@ class WorkspaceStore:
         "closed_tabs_memory": {}
     }
 
-    _KNOWN_WORKSPACE_KEYS = frozenset({
-        "last_session", "recent_files", "external_files",
-        "editor", "game", "secretary", "view", "window",
-        "resources", "cores",
-    })
+    # 白名单直接由 DEFAULT_WORKSPACE 派生，避免两份定义漂移
+    _KNOWN_WORKSPACE_KEYS = frozenset(DEFAULT_WORKSPACE.keys())
 
     def __init__(
         self,
@@ -76,7 +74,8 @@ class WorkspaceStore:
         )
 
     def as_dict(self) -> Dict[str, Any]:
-        return self._workspace
+        """返回深拷贝，避免调用方拿到内部引用后绕过封装修改状态"""
+        return copy.deepcopy(self._workspace)
 
     # === 通用字段 ===
 
@@ -145,7 +144,10 @@ class WorkspaceStore:
 
     def get_closed_tab_memory(self, filepath: str) -> Optional[Dict[str, int]]:
         """读取关闭标签页时的位置记忆；无记录时返回 None。"""
-        return self._workspace.get("closed_tabs_memory", {}).get(filepath)
+        memory = self._workspace.get("closed_tabs_memory", {})
+        if not isinstance(memory, dict):
+            return None
+        return cast(Optional[Dict[str, int]], memory.get(filepath))
 
     def clear_closed_tab_memory(self, filepath: str) -> None:
         """清除指定文件的位置记忆（重新打开并恢复后调用）。"""

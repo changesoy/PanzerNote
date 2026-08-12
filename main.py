@@ -76,6 +76,23 @@ def _cleanup_crash_logs(log_dir, keep=MAX_CRASH_LOGS):
             pass
 
 
+def _clear_crash_logs(log_dir):
+    """正常退出时清空 crash log。
+
+    能走到清理说明本次运行无未捕获异常（异常会由 excepthook 写日志后
+    直接终止进程，不会返回主循环），因此残留日志只可能来自历史崩溃，
+    应一并清除，避免下次启动误报"上次启动异常退出"。
+    """
+    if not os.path.isdir(log_dir):
+        return
+    for name in os.listdir(log_dir):
+        if name.startswith("crash_") and name.endswith(".log"):
+            try:
+                os.remove(os.path.join(log_dir, name))
+            except OSError:
+                pass
+
+
 def _activate_crash_log_dir(new_dir):
     """切换 crash log 写入目录到用户数据目录：迁移早期日志、清理过期文件、更新 hook 目标"""
     global _crash_log_dir
@@ -214,7 +231,10 @@ def main():
 
     logger.info(profiler.get_report())
 
-    sys.exit(app.exec())
+    exit_code = app.exec()
+    # 正常退出：清空 crash 日志，确保下次启动只对真正的异常退出提示
+    _clear_crash_logs(log_dir)
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":

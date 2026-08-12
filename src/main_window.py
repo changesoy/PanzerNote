@@ -14,8 +14,8 @@ import html as html_module
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QSplitter, QMenuBar, QMenu, QStatusBar,
-    QLabel, QMessageBox, QFileDialog, QTabWidget,
-    QToolButton, QFrame, QSizePolicy, QApplication, QDialog,
+    QLabel, QMessageBox, QTabWidget,
+    QToolButton, QFrame, QSizePolicy, QApplication,
     QLineEdit
 )
 from PyQt6.QtCore import Qt, QTimer, QEvent, pyqtSignal, QPoint, QRect
@@ -24,7 +24,6 @@ from typing import List, Optional, cast
 
 from . import __version__
 from .core.app_context import AppContext
-from .core.config_import_service import ConfigImportService, ConfigImportError
 from .core.session_restore_service import SessionRestoreService
 from .core.timer_manager import TimerManager
 from .core.event_bus import EventBus
@@ -34,11 +33,11 @@ from .game.game_engine import GameEngine
 from .editor.editor_tabs import EditorTabWidget
 from .editor.webengine_runtime import WebEngineRuntime
 from .editor.status_bar import StatusBarWidget
-from .editor.editor_settings_dialog import EditorSettingsDialog
 from .editor.file_open_service import FileOpenService, FileOpenSource, FileOpenSecurityError, _is_inside_root
 from .editor.file_action_controller import FileActionController
 from .editor.export_action_controller import ExportActionController
 from .editor.edit_action_controller import EditActionController
+from .editor.settings_action_controller import SettingsActionController
 from .plugins.plugin_manager import PluginManager
 from .themes.theme_engine import ThemeEngine
 from .themes.theme_preview import ThemePreviewDialog
@@ -137,6 +136,14 @@ class MainWindow(QMainWindow):
         self.edit_actions = EditActionController(
             self.editor_tabs,
             self.secretary,
+        )
+        self.settings_actions = SettingsActionController(
+            self.config,
+            self.editor_tabs,
+            self.secretary,
+            self.timer_manager,
+            self._file_open_service,
+            self,
         )
         self._init_menubar()
         self._init_statusbar()
@@ -852,8 +859,7 @@ class MainWindow(QMainWindow):
         self.editor_tabs.set_wrap_mode_all(mode)
 
         # 更新菜单选中状态
-        self._wrap_no_wrap_action.setChecked(mode == "no_wrap")
-        self._wrap_limit_action.setChecked(mode == "limit_width")
+        self._sync_wrap_menu()
 
     def _toggle_md_preview(self):
         """切换Markdown预览"""
@@ -1064,168 +1070,42 @@ class MainWindow(QMainWindow):
     # === 设置 ===
 
     def _show_editor_settings(self):
-        """显示记事本设置"""
-        dialog = EditorSettingsDialog(self.config, self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            settings = dialog.get_settings()
-            editor = settings["editor"]
-            secretary = settings["secretary"]
+        """显示记事本设置（委托 SettingsActionController，完成后同步换行菜单）"""
+        self.settings_actions.show_editor_settings()
+        self._sync_wrap_menu()
 
-            # 保存编辑器设置
-            for key, value in editor.items():
-                self.config.set_editor_setting(key, value)
-
-            # 保存小秘书设置
-            for key, value in secretary.items():
-                self.config.set_secretary_setting(key, value)
-
-            self.config.save_settings()
-
-            # 应用设置
-            # 显示行号
-            self.editor_tabs.set_line_numbers_all(editor["show_line_numbers"])
-
-            # 高亮当前行
-            self.editor_tabs.set_highlight_current_line_all(editor["highlight_current_line"])
-
-            # 字体和字体大小
-            self.editor_tabs.set_font_all(editor["font_family"], editor["font_size"])
-
-            # 行宽模式
-            self.editor_tabs.set_wrap_mode_all(editor["wrap_mode"])
-            self._wrap_no_wrap_action.setChecked(editor["wrap_mode"] == "no_wrap")
-            self._wrap_limit_action.setChecked(editor["wrap_mode"] == "limit_width")
-
-            # 自动缩略图
-            self.editor_tabs.apply_auto_minimap_all()
-
-            # 缩进配置
-            self.editor_tabs.update_indent_settings_all()
-
-            # 自动保存间隔
-            self.timer_manager.update_auto_save_interval(editor["auto_save_interval"])
-
-            # 自动补全
-            self.editor_tabs.set_completion_enabled_all(editor.get("enable_completion", False))
-
-            # 小秘书设置
-            if secretary["show_secretary"]:
-                self.secretary.show()
-                self.secretary.set_size_percent(secretary["size_percent"])
-            else:
-                self.secretary.hide()
-
-            self.secretary.show_message("设置已保存并应用")
+    def _sync_wrap_menu(self):
+        """同步换行菜单选中态（show/apply/reset/import 后统一调用）"""
+        wrap_mode = self.config.get_editor_setting("wrap_mode", "no_wrap")
+        self._wrap_no_wrap_action.setChecked(wrap_mode == "no_wrap")
+        self._wrap_limit_action.setChecked(wrap_mode == "limit_width")
 
     def _show_game_settings(self):
         """显示游戏设置"""
         QMessageBox.information(self, "提示", "该功能尚在开发中")
 
     def _export_settings(self):
-        filepath, _ = QFileDialog.getSaveFileName(
-            self, "导出设置", "panzernote_settings.json", "JSON文件 (*.json)"
-        )
-        if not filepath:
-            return
-        import json as json_module
-        try:
-            export_data = {
-                "version": __version__,
-                "settings": self.config.get_settings(),
-                "workspace": self.config.get_workspace(),
-            }
-            with open(filepath, 'w', encoding='utf-8') as f:
-                json_module.dump(export_data, f, ensure_ascii=False, indent=2)
-            self.secretary.show_message(f"设置已导出到 {os.path.basename(filepath)}")
-        except Exception as e:
-            QMessageBox.warning(self, "导出失败", str(e))
+        """导出设置（委托 SettingsActionController）"""
+        self.settings_actions.export_settings()
 
     def _import_settings(self):
-        filepath, _ = QFileDialog.getOpenFileName(
-            self, "导入设置", "", "JSON文件 (*.json)"
-        )
-        if not filepath:
-            return
-        import json as json_module
-        try:
-            validated = self._file_open_service.validate_open_request(
-                filepath, FileOpenSource.SETTINGS_IMPORT
-            )
-        except FileOpenSecurityError as e:
-            QMessageBox.warning(self, "导入失败", str(e))
-            return
-
-        try:
-            content = self.config.get_file_guard().safe_read(
-                validated, encoding='utf-8',
-                context=self.config.INTERNAL_CONFIG_CTX
-            )
-            data = json_module.loads(content)
-            if not isinstance(data, dict) or "settings" not in data:
-                QMessageBox.warning(self, "导入失败", "无效的设置文件格式")
-                return
-            reply = QMessageBox.question(
-                self, "确认导入",
-                "导入设置将覆盖当前所有设置，是否继续？",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No
-            )
-            if reply == QMessageBox.StandardButton.No:
-                return
-            service = ConfigImportService(self.config)
-            skipped = service.import_from_json(content)
-            if skipped:
-                QMessageBox.warning(
-                    self, "导入完成（部分跳过）",
-                    "以下字段因格式不正确已跳过：\n" + "\n".join(skipped[:10])
-                )
-            self._apply_editor_settings()
-            self.secretary.show_message("设置已导入，部分设置将在重启后生效")
-        except ConfigImportError as e:
-            QMessageBox.warning(self, "导入失败", str(e))
-        except Exception as e:
-            QMessageBox.warning(self, "导入失败", str(e))
+        """导入设置（委托 SettingsActionController，完成后同步换行菜单）"""
+        self.settings_actions.import_settings()
+        self._sync_wrap_menu()
 
     def _save_settings(self):
-        """保存设置"""
-        self.config.save_settings()
-        self.secretary.show_message("设置已保存")
+        """保存设置（委托 SettingsActionController）"""
+        self.settings_actions.save_settings()
 
     def _apply_editor_settings(self):
-        """从 config 读取当前设置并应用到 UI"""
-        self.editor_tabs.set_line_numbers_all(self.config.get_editor_setting("show_line_numbers", True))
-        self.editor_tabs.set_highlight_current_line_all(self.config.get_editor_setting("highlight_current_line", True))
-        self.editor_tabs.set_font_all(
-            self.config.get_editor_setting("font_family", "Microsoft YaHei"),
-            self.config.get_editor_setting("font_size", 12)
-        )
-        self.editor_tabs.set_wrap_mode_all(self.config.get_editor_setting("wrap_mode", "no_wrap"))
-        wrap_mode = self.config.get_editor_setting("wrap_mode", "no_wrap")
-        self._wrap_no_wrap_action.setChecked(wrap_mode == "no_wrap")
-        self._wrap_limit_action.setChecked(wrap_mode == "limit_width")
-        self.editor_tabs.apply_auto_minimap_all()
-        self.timer_manager.update_auto_save_interval(self.config.get_editor_setting("auto_save_interval", 30))
-        if self.config.get_secretary_setting("show_secretary", True):
-            self.secretary.show()
-            self.secretary.set_size_percent(self.config.get_secretary_setting("size_percent", 7))
-        else:
-            self.secretary.hide()
+        """从 config 读取当前设置并应用到 UI（委托，完成后同步换行菜单）"""
+        self.settings_actions.apply_editor_settings()
+        self._sync_wrap_menu()
 
     def _reset_settings(self):
-        """恢复默认设置"""
-        msg_box = QMessageBox(self)
-        msg_box.setWindowTitle("确认")
-        msg_box.setText("确定要恢复所有设置为默认值吗？")
-        msg_box.setIcon(QMessageBox.Icon.Question)
-
-        yes_btn = msg_box.addButton("确定", QMessageBox.ButtonRole.AcceptRole)
-        no_btn = msg_box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
-
-        msg_box.exec()
-
-        if msg_box.clickedButton() == yes_btn:
-            self.config.reset_to_defaults()
-            self._apply_editor_settings()
-            self.secretary.show_message("设置已恢复为默认值")
+        """恢复默认设置（委托 SettingsActionController，完成后同步换行菜单）"""
+        self.settings_actions.reset_settings()
+        self._sync_wrap_menu()
 
     # === 帮助 ===
 

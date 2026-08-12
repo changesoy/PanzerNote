@@ -440,6 +440,9 @@ class Config:
     def get_savegame(self) -> Mapping[str, Any]:
         return self._savegame_manager.get_savegame()
 
+    def get_savegame_field(self, key: str, default: Any = None) -> Any:
+        return self._savegame_manager.get_savegame_field(key, default)
+
     def set_savegame_field(self, key: str, value: Any) -> None:
         self._savegame_manager.set_savegame_field(key, value)
 

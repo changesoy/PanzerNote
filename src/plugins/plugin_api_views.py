@@ -60,7 +60,7 @@ class ReadOnlyConfigView:
         return cast(Dict[str, int], self._config.get_resources())
 
     def get_savegame_field(self, key: str, default: Any = None) -> Any:
-        return self._config.get_savegame().get(key, default)
+        return self._config.get_savegame_field(key, default)
 
     def get_setting(self, key: str, default: Any = None) -> Any:
         return self._config.get_setting(key, default)

@@ -111,8 +111,15 @@ class SavegameManager:
     # === 存档数据访问 ===
 
     def get_savegame(self) -> Mapping[str, Any]:
-        """返回存档数据的只读视图，防止外部直接修改内部 dict"""
+        """返回存档数据的只读视图（仅供内部调试/查看，勿用于业务读写）
+
+        外部代码请使用 get_savegame_field() / set_savegame_field()，
+        避免拿到 dict 引用后绕过封装修改内部状态。
+        """
         return MappingProxyType(self._savegame)
+
+    def get_savegame_field(self, key: str, default: Any = None) -> Any:
+        return self._savegame.get(key, default)
 
     def set_savegame_field(self, key: str, value: Any) -> None:
         self._savegame[key] = value

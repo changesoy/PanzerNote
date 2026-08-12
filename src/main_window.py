@@ -23,7 +23,7 @@ from PyQt6.QtGui import QIcon, QCloseEvent, QAction
 from typing import List, Optional, cast
 
 from . import __version__
-from .core.config import Config
+from .core.app_context import AppContext
 from .core.config_import_service import ConfigImportService, ConfigImportError
 from .core.session_restore_service import SessionRestoreService
 from .core.timer_manager import TimerManager
@@ -62,19 +62,21 @@ from .utils.window_theme import (
 class MainWindow(QMainWindow):
     """主窗口"""
 
-    def __init__(self, config: Config, parent=None):
+    def __init__(self, app_context: AppContext, parent=None):
         super().__init__(parent)
-        self.config = config
+        self.app_context = app_context
+        # 过渡期：保留 Config 门面引用，旧代码零改动；新代码优先用 app_context.xxx
+        self.config = app_context.config
         # 预声明由 MenuBuilder 动态挂载的属性
         self.recent_menu: QMenu
         self._wrap_no_wrap_action: QAction
         self._wrap_limit_action: QAction
         self._file_open_service = FileOpenService(
-            config.get_path_validator(),
-            config.get_notebooks_path(),
+            self.config.get_path_validator(),
+            self.config.get_notebooks_path(),
         )
         self._session_restore_service = SessionRestoreService(
-            config.workspace_store,
+            self.app_context.workspace_store,
             self._file_open_service,
         )
         self._current_view = "editor"
@@ -82,13 +84,13 @@ class MainWindow(QMainWindow):
         self._closing_pending_save = False
         self.setAcceptDrops(True)
 
-        self.game_engine = GameEngine(config)
-        self.timer_manager = TimerManager(config, self)
-        self.event_bus = EventBus(config, self)
-        self.shortcut_manager = ShortcutManager(config)
+        self.game_engine = GameEngine(self.config)
+        self.timer_manager = TimerManager(self.config, self)
+        self.event_bus = EventBus(self.config, self)
+        self.shortcut_manager = ShortcutManager(self.config)
         self._cmd_palette: Optional[CommandPalette] = None
         self.editor_tabs: EditorTabWidget  # 在 _init_ui 中初始化
-        self.theme_engine = ThemeEngine(config)
+        self.theme_engine = ThemeEngine(self.config)
         self.theme_engine.load_external_themes()
         self.theme_engine.initialize_active_theme()
 
@@ -106,7 +108,7 @@ class MainWindow(QMainWindow):
         )
         self._presented = False
 
-        self.plugin_manager = PluginManager(config)
+        self.plugin_manager = PluginManager(self.config)
         self.plugin_manager.scan_plugins()
         self._register_plugin_callbacks()
 
@@ -117,8 +119,8 @@ class MainWindow(QMainWindow):
         self._init_ui()
         self._file_action_controller = FileActionController(
             self.editor_tabs,
-            config.workspace_store,
-            config.path_resolver,
+            self.app_context.workspace_store,
+            self.app_context.path_resolver,
             self._file_open_service,
         )
         self._init_menubar()
@@ -129,7 +131,7 @@ class MainWindow(QMainWindow):
         self._connect_signals()
         self._apply_theme()
 
-        icon_path = os.path.join(config.get_assets_path(), "icons", "app_icon.png")
+        icon_path = os.path.join(self.config.get_assets_path(), "icons", "app_icon.png")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
 

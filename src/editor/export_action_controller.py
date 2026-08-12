@@ -109,6 +109,7 @@ class ExportActionController:
                 is_md,
                 filepath,
                 self._theme_engine.get_active_theme().colors,
+                file_guard=self._editor_tabs.config.get_file_guard(),
             )
             self._secretary.show_message(
                 f"已导出HTML: {os.path.basename(filepath)}"

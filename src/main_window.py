@@ -510,7 +510,6 @@ class MainWindow(QMainWindow):
 
         self.config.save_settings()
         self.config.save_workspace()
-        self.config._save_user_data_path()
 
         from .core.savegame_manager import SavegameSaveResult
         result = self.config.save_savegame()
@@ -1020,7 +1019,7 @@ class MainWindow(QMainWindow):
 
         valid_files = [f for f in recent_files if os.path.exists(f)]
         if valid_files != recent_files:
-            self.config._workspace["recent_files"] = valid_files
+            self.config.set_recent_files(valid_files)
             recent_files = valid_files
 
         if not recent_files:
@@ -1445,8 +1444,8 @@ class MainWindow(QMainWindow):
         try:
             export_data = {
                 "version": __version__,
-                "settings": self.config._settings,
-                "workspace": self.config._workspace,
+                "settings": self.config.get_settings(),
+                "workspace": self.config.get_workspace(),
             }
             with open(filepath, 'w', encoding='utf-8') as f:
                 json_module.dump(export_data, f, ensure_ascii=False, indent=2)

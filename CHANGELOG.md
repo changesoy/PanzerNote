@@ -2,7 +2,7 @@
 
 本文件记录 PanzerNote 各版本的变更。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
 
-## 未发布
+## v1.8.4
 
 **文件树选中高亮交互修复**
 
@@ -10,6 +10,26 @@
 - **范围内点击行为保持不变**：点击落在项目视图可视矩形内时交由 Qt 内部 `selectionModel` 处理，原有切换选中项 / Ctrl / Shift 多选逻辑不受影响
 - **场景覆盖**：坐标获取优先使用 `globalPosition()`，兼容应用级事件过滤；模态对话框弹出时不干扰其内部列表；跨窗口点击不误操作；文件树空白点击清除选中的局部处理保留
 - **mypy 类型修复**：`main_window.py` 修复 5 个错误（`eventFilter` 签名对齐父类 `Optional` 参数、`QMouseEvent` 类型收窄、`model()` 局部变量化、`QApplication.instance()` 空值守卫）；`editor_tabs.py` 修复 4 个错误（`result` 显式 `Dict[str, object]`、`document()` 空值守卫、`clearUndoRedoStacks()` 移至 `QTextDocument`）。`mypy src/` 86 个文件零错误
+
+**Wave 3/4 配置与职责重构（hotfix 阶段 0-7）**
+
+- **Config 拆分**：Config 由配置中枢演进为门面（Facade），内部委托 PathResolver（base_path / user_data_path.txt / 目录 getter + JSON 工具）、SettingsStore（settings dict / 命名空间设置 / reset_to_defaults）、WorkspaceStore（workspace dict / 会话状态 / 书签 / 折叠 / 关闭标签记忆）。对外保持 v1.6.x 起完整接口，调用方零改动；main_window 移除 4 处 config 私有成员访问
+- **类型化文档模型**：新增 `core/document_model.py`（TabState + TabStateRegistry），替代无类型 `_tab_info` dict；保存状态副作用集中到 TabState（`_on_save_state_changed` CLEAN 分支统一处理 `mark_saved` / `mark_new_saved`）
+- **会话恢复服务化**：新增 `core/session_restore_service.py`，将分级恢复计划（pre_show / deferred）、光标/滚动位置恢复、崩溃恢复（`check_crash_recovery` / `restore_after_crash`）从 MainWindow 提取为独立服务，MainWindow 仅保留调用与 UI 提示
+- **文件打开编排**：新增 `editor/file_action_controller.py`，集中文件打开编排（安全校验 → 外部文件注册 → 最近文件过滤并持久化），错误弹窗/文件树刷新/菜单构建等 UI 副作用保留在 MainWindow
+- **应用上下文**：新增 `core/app_context.py`（AppContext），main.py 创建并传入 MainWindow；服务层经 app_context 直连子模块，Config 门面过渡期共存，新代码鼓励直连子模块
+- **存档防泄漏**：SavegameManager 通过 MappingProxyType 暴露只读存档视图、get_resources 返回拷贝；新增字段级 API（get_savegame_field / set_savegame_field），消除整档引用透传
+
+**会话与崩溃可靠性**
+
+- **关闭标签页位置记忆**：关闭标签时持久化光标/滚动位置到 workspace.json（closed_tabs_memory），重新打开时恢复并清除；Ctrl+Shift+T 内存栈限 50 条
+- **崩溃日志误报修复**：正常退出时清空 crash\_\*.log（异常退出由 excepthook 写日志后直接终止进程，不会触发清理），消除"上次启动异常退出"的历史残留误报
+
+**代码质量与类型**
+
+- **数据防泄漏**：SettingsStore.as_dict() / WorkspaceStore.as_dict() 改返回深拷贝，杜绝调用方绕过封装修改内部状态；migrate_bauxite_counter 迁移改显式 API
+- **白名单单一来源**：workspace 字段白名单由 DEFAULT_WORKSPACE 派生，ConfigImportService 直接复用，消除两份白名单漂移（配置导入时书签/折叠/关闭标签记忆不再被丢弃）
+- **类型清理**：消除 3 处 Returning Any 与裸泛型，file_action_controller.open_file 返回类型统一为 int，main.py 提取 \_iter_crash_logs 消除 4 处 crash 日志枚举重复
 
 ## v1.8.3
 

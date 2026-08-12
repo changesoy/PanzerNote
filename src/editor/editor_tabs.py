@@ -1353,7 +1353,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             return None
         filepath = state.filepath
         editor = self._get_editor_from_widget(widget)
-        result = {"filepath": filepath}
+        result: Dict[str, object] = {"filepath": filepath}
         if editor:
             cursor = editor.textCursor()
             result["cursor_position"] = cursor.position()
@@ -1395,8 +1395,10 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if editor is None:
             return False
         editor.setPlainText(content)
-        editor.document().setModified(False)
-        editor.clearUndoRedoStacks()
+        doc = editor.document()
+        if doc is not None:
+            doc.setModified(False)
+            doc.clearUndoRedoStacks()
         state.mark_saved(content)
         return True
 

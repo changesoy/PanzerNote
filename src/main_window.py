@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
     QLineEdit, QAbstractItemView
 )
 from PyQt6.QtCore import Qt, QTimer, QEvent, pyqtSignal, QPoint, QObject, QRect
-from PyQt6.QtGui import QIcon, QCloseEvent, QAction
+from PyQt6.QtGui import QIcon, QCloseEvent, QAction, QMouseEvent
 from typing import List, Optional, cast
 
 from . import __version__
@@ -70,8 +70,12 @@ class _SelectionClearFilter(QObject):
     Ctrl/Shift 多选逻辑保持不变）。
     """
 
-    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
-        if event.type() != QEvent.Type.MouseButtonPress:
+    def eventFilter(self, watched: Optional[QObject], event: Optional[QEvent]) -> bool:
+        if (
+            event is None
+            or not isinstance(event, QMouseEvent)
+            or event.type() != QEvent.Type.MouseButtonPress
+        ):
             return super().eventFilter(watched, event)
         if event.button() != Qt.MouseButton.LeftButton:
             return super().eventFilter(watched, event)
@@ -134,7 +138,8 @@ class _SelectionClearFilter(QObject):
             if sel_model is not None and sel_model.hasSelection():
                 sel_model.clearSelection()
             # 同时清空 currentIndex，避免焦点矩形残留
-            invalid_idx = view.model().index(-1, -1) if view.model() else view.rootIndex()
+            model = view.model()
+            invalid_idx = model.index(-1, -1) if model is not None else view.rootIndex()
             view.setCurrentIndex(invalid_idx)
 
         return super().eventFilter(watched, event)
@@ -221,7 +226,9 @@ class MainWindow(QMainWindow):
         # 安装应用级点击过滤器，用于点击空白处取消选中高亮
         # 必须在 _init_ui 之后安装，确保所有子视图已创建
         self._selection_clear_filter = _SelectionClearFilter(self)
-        QApplication.instance().installEventFilter(self._selection_clear_filter)
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self._selection_clear_filter)
 
         QTimer.singleShot(0, self._check_session_recovery)
 

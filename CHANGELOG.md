@@ -2,6 +2,15 @@
 
 本文件记录 PanzerNote 各版本的变更。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
 
+## 未发布
+
+**文件树选中高亮交互修复**
+
+- **点击空白区域清除选中高亮**：`MainWindow` 安装应用级事件过滤器 `_SelectionClearFilter`，点击视窗内任何项目视图（`QAbstractItemView`，含文件树/大纲等）之外区域时，清空全部子视图选中态与 `currentIndex`，选中高亮蓝色块在跳出列表区域时消失
+- **范围内点击行为保持不变**：点击落在项目视图可视矩形内时交由 Qt 内部 `selectionModel` 处理，原有切换选中项 / Ctrl / Shift 多选逻辑不受影响
+- **场景覆盖**：坐标获取优先使用 `globalPosition()`，兼容应用级事件过滤；模态对话框弹出时不干扰其内部列表；跨窗口点击不误操作；文件树空白点击清除选中的局部处理保留
+- **mypy 类型修复**：`main_window.py` 修复 5 个错误（`eventFilter` 签名对齐父类 `Optional` 参数、`QMouseEvent` 类型收窄、`model()` 局部变量化、`QApplication.instance()` 空值守卫）；`editor_tabs.py` 修复 4 个错误（`result` 显式 `Dict[str, object]`、`document()` 空值守卫、`clearUndoRedoStacks()` 移至 `QTextDocument`）。`mypy src/` 86 个文件零错误
+
 ## v1.8.3
 
 **Wave 1 主题迁移：语法高亮并入语义 token、内置主题 JSON 化**

@@ -663,7 +663,7 @@ class MainWindow(QMainWindow):
         ))
 
     def _check_daily_checkin(self):
-        if self.config.savegame_manager.check_daily_checkin():
+        if self.config.check_daily_checkin():
             QTimer.singleShot(3000, lambda: self.secretary.show_message(
                 "每日签到成功！\n燃料+100 弹药+100\n钢材+100 铝材+100",
                 5000

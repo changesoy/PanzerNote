@@ -482,6 +482,9 @@ class Config:
     def get_last_login(self) -> Optional[str]:
         return self._savegame_manager.get_last_login()
 
+    def check_daily_checkin(self) -> bool:
+        return self._savegame_manager.check_daily_checkin()
+
     # === 安全代理（向后兼容） ===
 
     @property

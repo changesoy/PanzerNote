@@ -73,9 +73,15 @@ PanzerNote/
 │   ├── main_window.py              # 主窗口（菜单栏 + 布局组装 + 事件路由 + 插件/主题集成）
 │   │
 │   ├── core/                       # ── 核心模块 ──
-│   │   ├── config.py               # 配置管理中枢（settings/workspace 读写 + SavegameManager/SecurityManager 组合委托）
-│   │   ├── config_import_service.py # 配置导入服务（类型校验 + 白名单）
-│   │   ├── savegame_manager.py     # 存档管理器（加载/保存/每日签到）
+│   │   ├── config.py               # 配置门面（委托 PathResolver/SettingsStore/WorkspaceStore/SavegameManager/SecurityManager，对外保持完整接口）
+│   │   ├── path_resolver.py        # 路径解析（base_path / user_data_path.txt / 目录 getter + JSON 工具）
+│   │   ├── settings_store.py       # 设置存储（settings dict / 命名空间设置 / reset_to_defaults）
+│   │   ├── workspace_store.py      # 工作区存储（workspace dict / 会话状态 / 书签 / 折叠 / 关闭标签记忆）
+│   │   ├── app_context.py          # 应用上下文容器（持有已拆子模块，供服务层组装）
+│   │   ├── document_model.py       # 文档状态模型（TabState + TabStateRegistry，替代无类型 _tab_info）
+│   │   ├── session_restore_service.py # 会话恢复服务（崩溃恢复检测 / 恢复计划 / 恢复执行）
+│   │   ├── config_import_service.py # 配置导入服务（类型校验 + 白名单，复用 WorkspaceStore 白名单）
+│   │   ├── savegame_manager.py     # 存档管理器（加载/保存/每日签到/只读视图防泄漏）
 │   │   ├── security_manager.py     # 安全管理器（PathValidator/FileGuard/InputValidator 集成管理）
 │   │   ├── timer_manager.py        # 定时器管理中心
 │   │   ├── event_bus.py            # 事件路由系统
@@ -114,6 +120,7 @@ PanzerNote/
 │   │   ├── secure_markdown_renderer.py # 安全 Markdown 渲染（清洗 script/iframe/onerror/javascript:）
 │   │   ├── export_service.py       # 导出服务（HTML/PDF 统一安全管线）
 │   │   ├── file_open_service.py    # 文件打开安全入口（来源校验/路径白名单/二进制检测）
+│   │   ├── file_action_controller.py # 文件动作编排（打开对话框/外部文件注册/最近文件过滤）
 │   │   ├── editor_settings_dialog.py # 记事本设置对话框
 │   │   ├── file_tree.py            # 文件树
 │   │   └── status_bar.py           # 状态栏
@@ -197,14 +204,22 @@ PanzerNote/
 
 ## 4. 核心模块详解
 
-### 4.1 配置管理 (`core/config.py`)
+### 4.1 配置管理（Config 门面 + 四个子模块）
 
-Config 类是整个应用的配置中枢，通过组合方式委托 `SavegameManager` 和 `SecurityManager` 管理存档和安全功能，自身负责 settings/workspace 两个 JSON 文件：
+Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.x 起的完整接口不变（调用方零改动），内部把职责拆分委托给独立模块（hotfix 阶段 0/7）。拆分后的模块：
+
+| 模块                       | 职责                                                                                                                                         |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `core/path_resolver.py`    | 路径解析：`base_path` / `_app_dir` / `user_data_path.txt` / 各目录 getter + JSON 读写工具（`load_json`/`save_json`/`merge_dicts`）           |
+| `core/settings_store.py`   | settings.json：settings dict + 五个命名空间 getter/setter + `reset_to_defaults()`                                                            |
+| `core/workspace_store.py`  | workspace.json：workspace dict + 会话状态/书签/折叠/关闭标签记忆 + `update_workspace_field()`（白名单由 `DEFAULT_WORKSPACE` 派生，单一来源） |
+| `core/savegame_manager.py` | 存档管理（拆分于更早版本，继续由 Config 组合委托）                                                                                           |
+| `core/security_manager.py` | 安全管理（拆分于更早版本，继续由 Config 组合委托）                                                                                           |
 
 | 文件             | 位置                         | 职责                                                           | 管理者            |
 | ---------------- | ---------------------------- | -------------------------------------------------------------- | ----------------- |
-| `settings.json`  | `{base_path}/data/config/`   | 所有用户偏好设置（编辑器、游戏、小秘书、视图、窗口、快捷键）   | `Config`          |
-| `workspace.json` | `{base_path}/data/config/`   | 会话状态（打开的文件列表、最近文件、外部文件、文件树展开状态） | `Config`          |
+| `settings.json`  | `{base_path}/data/config/`   | 所有用户偏好设置（编辑器、游戏、小秘书、视图、窗口、快捷键）   | `SettingsStore`   |
+| `workspace.json` | `{base_path}/data/config/`   | 会话状态（打开文件/最近文件/外部文件/书签/折叠/关闭标签记忆）  | `WorkspaceStore`  |
 | `savegame.json`  | `{base_path}/data/gamedata/` | 游戏存档（四资源、核心数、打字统计、建造队列、拥有角色、成就） | `SavegameManager` |
 
 **路径机制（方案A）**：
@@ -213,6 +228,18 @@ Config 类是整个应用的配置中枢，通过组合方式委托 `SavegameMan
 - 首次运行由 `FirstRunDialog` 引导选择
 - 资源文件（立绘、图标等）始终从**程序目录** `_app_dir` 读取
 - 用户数据（笔记、配置、存档）从 `_base_path` 读取
+
+**AppContext 装配**（`core/app_context.py`，hotfix 阶段 7）：
+
+- `main.py` 创建 `Config` 后组装 `AppContext`（持有 `path_resolver` / `settings_store` / `workspace_store` / `config` 门面引用），传入 `MainWindow`
+- `MainWindow` 保留 `self.config` 门面（过渡期共存）；服务层（`SessionRestoreService` / `FileActionController`）经 `app_context.workspace_store` / `app_context.path_resolver` 直连子模块
+- 新代码鼓励使用 `app_context.<子模块>` 直连，避免继续穿透门面
+
+**防泄漏约定**（与 SavegameManager 相同的只读策略）：
+
+- `SavegameManager` 通过 `MappingProxyType` 暴露只读存档视图，`get_resources()` 返回拷贝
+- `SettingsStore.as_dict()` / `WorkspaceStore.as_dict()` 返回**深拷贝**，杜绝调用方绕过封装修改内部状态
+- `migrate_bauxite_counter` 迁移逻辑使用显式 API（读删 settings 命名空间），不依赖泄漏引用
 
 **关键方法**：
 
@@ -272,8 +299,13 @@ Config 类是整个应用的配置中枢，通过组合方式委托 `SavegameMan
 
 - `present()` — 统一的窗口显示入口（替代直接 `show()`）。`__init__()` 期间窗口始终不可见，最大化场景使用 `showMaximized()` 让 Qt 以最终尺寸完成首次渲染，避免普通尺寸→最大化尺寸的两段式跳变
 - `_restore_window_geometry()` — 在窗口不可见状态下恢复几何和最大化状态。最大化场景预缩放控件树到屏幕可用尺寸，消除首帧 paint 时的视觉撕裂
-- `_build_restore_plan(open_files)` — 会话恢复计划：返回 `(pre_show_entries, deferred_entries)`。`pre_show_entries` 包含首个标签和首个 Markdown 标签（若二者是同一文件，只恢复一次），在窗口显示前同步挂载；`deferred_entries` 在窗口显示后通过 `QTimer.singleShot(0, ...)` 异步恢复
-- `_restore_cursor_for_tab(file_info, tab_index)` — 提取的光标/滚动位置恢复辅助函数，支持 `Editor` 和 `MarkdownPreviewWidget`
+- 会话恢复逻辑已提取到 `core/session_restore_service.py`（hotfix 阶段 3），`MainWindow` 只保留调用与 UI 提示：
+  - `build_restore_plan(open_files)` — 恢复计划：`pre_show_entries`（首个标签 + 首个 Markdown 标签，若同一文件只恢复一次）在窗口显示前同步挂载；`deferred_entries` 显示后经 `QTimer.singleShot(0, ...)` 异步恢复
+  - `restore_session(editor_tabs)` — 执行恢复，返回是否还有待打开文件（有则继续调度 `open_next_pending`）
+  - `check_crash_recovery()` / `restore_after_crash(editor_tabs, session, session_manager)` — 崩溃恢复公开接口（安全拒绝跳过 + new 文件跳过）
+  - `_restore_cursor` — 光标/滚动位置恢复，支持 `Editor` 与 `MarkdownPreviewWidget`；滚动仅在 `scroll_pos > 0` 时延迟设置，避免 0 值定时器在控件销毁后触发
+- `FileActionController`（`editor/file_action_controller.py`，hotfix 阶段 4）— 文件打开编排：`open_file()`（安全校验 → 外部文件注册 → 最近文件）、`show_open_dialog()`、`refresh_recent_files()`（过滤已不存在的路径并持久化）。UI 副作用（错误弹窗/文件树刷新/菜单构建）保留在 MainWindow
+- 关闭标签页位置记忆（`closed_tabs_memory`，workspace.json）：关闭标签时持久化光标/滚动位置（`WorkspaceStore`），重新打开时恢复并清除；Ctrl+Shift+T 内存栈限 50 条
 - `WebEngineRuntime` — 在 `__init__` 中创建，布局 setup 期间调用 `prepare_startup_anchor()` 在编辑器容器中挂载一个 1×1 的最小 QWebEngineView，强制 Qt WebEngine 提前初始化，避免首个 Markdown 预览打开时的白屏延迟。首个真实预览挂载后调用 `notify_real_view_attached()` 释放锚点
 
 ### 4.3 编辑器 (`editor/editor.py`)
@@ -325,17 +357,18 @@ Config 类是整个应用的配置中枢，通过组合方式委托 `SavegameMan
 
 ### 4.4 标签页管理 (`editor/editor_tabs.py`)
 
-| 组件              | 说明                                                                                  |
-| ----------------- | ------------------------------------------------------------------------------------- |
-| `DraggableTabBar` | 继承 `QTabBar`，标签内拖拽 = 重排序，拖出标签栏 = 发起 `QDrag`（携带文件路径 MIME）   |
-| `EditorTabWidget` | 继承 `QTabWidget`，管理 `_tab_info` 字典（filepath/modified/encoding/is_markdown 等） |
-| `SaveAsDialog`    | 自定义另存为对话框，支持编码选择（UTF-8/GBK/UTF-16）                                  |
+| 组件              | 说明                                                                                                                                                                                     |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DraggableTabBar` | 继承 `QTabBar`，标签内拖拽 = 重排序，拖出标签栏 = 发起 `QDrag`（携带文件路径 MIME）                                                                                                      |
+| `EditorTabWidget` | 继承 `QTabWidget`，配合 `TabStateRegistry`（`core/document_model.py`）管理类型化标签状态（TabState：filepath/is_new/is_modified/encoding/is_markdown/cursor_position 等，hotfix 阶段 1） |
+| `SaveAsDialog`    | 自定义另存为对话框，支持编码选择（UTF-8/GBK/UTF-16）                                                                                                                                     |
 
 **核心逻辑**：
 
 - `open_file()` — 编码级联检测（UTF-8 → GBK → UTF-16 → 容错UTF-8），Markdown 文件自动使用 `MarkdownPreviewWidget`；新增 `render_preview` 参数（默认 `True`），设为 `False` 时延迟预览渲染以加速启动恢复
 - `_on_text_changed()` — 比较当前内容与 `last_saved_content`，决定是否标记为已修改（标签名加 ` *`）；粘贴操作不计入打字奖励
-- `move_file_to_folder()` — 先保存最新内容 → `shutil.move` → 更新 `_tab_info` 中的 filepath
+- `move_file_to_folder()` — 先保存最新内容 → `shutil.move` → 更新 TabState 中的 filepath
+- 保存状态副作用集中到 TabState：`_on_save_state_changed(tab_id, state_name)` 的 CLEAN 分支统一处理 `mark_saved()` / `mark_new_saved()`（hotfix 阶段 1/5）
 - 所有编辑操作（undo/redo/cut/copy/paste/行操作/大小写/格式化）通过代理方法转发给当前编辑器
 
 ### 4.5 Markdown 预览 (`editor/markdown_preview.py`)
@@ -674,6 +707,8 @@ LOADED → on_unload() → UNLOADED
 - `save()` — 保存存档，返回 `SavegameSaveResult` 枚举值
 - `add_resource(key, amount)` / `get_resources()` — 资源 CRUD
 - `check_daily_checkin()` — 每日签到检查，首次启动自动发放奖励（燃料/弹药/钢材/铝材各+100）
+- `get_savegame_field(key, default)` / `set_savegame_field(key, value)` — 字段级读写 API，替代整档引用透传（hotfix 阶段 4）
+- **防泄漏只读视图**：`data` 属性 / `get_savegame()` 通过 `MappingProxyType` 暴露只读存档视图；`get_resources()` 返回拷贝，调用方无法修改内部状态（hotfix 阶段 4）
 
 **SavegameSaveResult 枚举**：
 
@@ -796,14 +831,16 @@ src/__init__.py (__version__ = "1.8.3")
 用户双击文件树 / Ctrl+O
   → FileTreeWidget.file_open_requested(filepath)
   → MainWindow._open_file(filepath)
-     → FileOpenService 校验来源（用户/拖放/插件/会话恢复/设置导入）
-     → 判断是否笔记库外文件 → config.add_external_file()
-     → EditorTabWidget.open_file(filepath)
-        → 编码级联检测
-        → 判断是否 Markdown → 创建 Editor 或 MarkdownPreviewWidget
-        → 生成 tab_id，存入 _tab_info
-        → set_file_type() → 绑定语法高亮 + auto_minimap
-     → config.add_recent_file()
+     → FileActionController.open_file(filepath)      # hotfix 阶段 4 编排
+        → FileOpenService 校验来源（用户/拖放/插件/会话恢复/设置导入）
+        → 判断是否笔记库外文件 → workspace_store.add_external_file()
+        → EditorTabWidget.open_file(filepath)
+           → 编码级联检测
+           → 判断是否 Markdown → 创建 Editor 或 MarkdownPreviewWidget
+           → 生成 tab_id，写入 TabStateRegistry（document_model.py）
+           → set_file_type() → 绑定语法高亮 + auto_minimap
+        → 最近文件记录（refresh_recent_files 过滤已不存在路径并持久化）
+     → MainWindow 保留 UI 副作用（错误弹窗 / 文件树刷新 / 菜单重建）
 ```
 
 ### 6.2 在线挂机资源发放
@@ -829,7 +866,7 @@ DraggableTabBar.mouseMoveEvent (鼠标离开标签栏)
      → FileTreeWidget.file_move_requested(src, dest)
      → MainWindow._on_file_move_from_tree(src, dest)
         → EditorTabWidget.move_file_to_folder(src, dest)
-           → 保存最新内容 → shutil.move → 更新 _tab_info
+           → 保存最新内容 → shutil.move → 更新 TabState
         → secretary.show_message("已移动...")
 ```
 
@@ -896,7 +933,7 @@ pip install mypy>=1.20                         # 类型检查
 
 ### 通用约束
 
-1. **编码保持**：打开文件时检测编码并记录在 `_tab_info["encoding"]`，保存时使用相同编码
+1. **编码保持**：打开文件时检测编码并记录在 TabState.encoding，保存时使用相同编码
 2. **资源文件路径**：立绘/图标始终从 `_app_dir`（程序目录）读取，不随 `_base_path` 变化
 3. **auto_minimap**：开启时 .txt/.md 不显示缩略图，关闭时使用全局 `show_minimap` 设置
 4. **打字统计日期重置**：`get_today_chars_typed()` 自动比较 `today_date` 并在跨日时归零
@@ -955,7 +992,10 @@ pip install mypy>=1.20                         # 类型检查
 40. **依赖梳理**：`pyproject.toml` 分组 format/dev/all，所有运行时依赖均为必需
 41. **增量渲染器命名澄清**：`incremental_renderer.py` 确认为全文 hash 渲染缓存，文档不宣称"真正增量渲染"
 42. **分屏语义**：`_split_editor()` 打开新空白文件而非当前文件副本，避免双标签编辑同一文件的数据覆盖风险。菜单文本标注"独立编辑"
-43. **封装规范**：禁止通过 `self.config._savegame_manager` 等私有属性访问，使用 `self.config.savegame_manager` 公开属性
+43. **封装规范**：禁止通过 `self.config._savegame_manager` 等私有属性访问，使用 `self.config.savegame_manager` 公开属性；新代码优先经 `app_context.<子模块>` 直连（hotfix 阶段 7），Config 门面仅作过渡兼容
+44. **数据防泄漏**：对外暴露配置/存档数据一律走只读视图或拷贝——`savegame_manager.get_savegame()` 返回 MappingProxyType、`get_resources()` 返回拷贝、`settings_store.as_dict()`/`workspace_store.as_dict()` 返回深拷贝。禁止直接返回内部可变 dict 引用
+45. **类型化标签状态**：标签页元数据使用 `TabState`（dataclass）+ `TabStateRegistry`，禁止回退到无类型 `_tab_info` dict
+46. **白名单单一来源**：workspace 字段白名单由 `WorkspaceStore._KNOWN_WORKSPACE_KEYS`（由 `DEFAULT_WORKSPACE` 派生）提供，`ConfigImportService` 直接复用，禁止另行复制定义
 
 ---
 

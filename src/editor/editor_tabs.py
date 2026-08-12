@@ -93,7 +93,7 @@ class SaveAsDialog(QDialog):
     def _browse(self):
         filepath, _ = QFileDialog.getSaveFileName(
             self, "另存为", self.path_edit.text(),
-            "文本文件 (*.txt);;Markdown (*.md);;Python (*.py);;PDF 文档 (*.pdf);;所有文件 (*.*)"
+            "文本文件 (*.txt);;Markdown (*.md);;Python (*.py);;网页文件 (*.html);;PDF 文档 (*.pdf);;所有文件 (*.*)"
         )
         if filepath:
             self.path_edit.setText(filepath)
@@ -620,6 +620,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         # PDF 另存为：通过 ExportService 生成可打开的 PDF（当前标签保持原文件）
         if filepath.lower().endswith(".pdf"):
             return self._save_as_pdf(widget, filepath)
+        # HTML 另存为：渲染为可打开的 HTML 网页（当前标签保持原文件）
+        if filepath.lower().endswith((".html", ".htm")):
+            return self._save_as_html(widget, filepath)
 
         success, chars = self._save_file(
             widget, filepath, encoding, is_copy=not state.is_new
@@ -685,6 +688,47 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             return True, 0
         except RuntimeError as e:
             QMessageBox.warning(self, "另存为", str(e))
+            return False, 0
+
+    def _save_as_html(self, widget, filepath: str) -> Tuple[bool, int]:
+        """另存为 HTML：通过 ExportService 渲染为可打开的 HTML 网页。
+
+        当前标签保持指向原文件（副本语义）。
+        渲染内容经 FileGuard.safe_write_bytes 安全写入（UTF-8），
+        不直接复用 ExportService.export_html（其内部直接 open 写入）。
+        """
+        from .export_service import ExportService
+        from .secure_markdown_renderer import build_export_html_document
+        from ..security.file_access_context import FileAccessContext
+
+        editor = self._get_editor_from_widget(widget)
+        if editor is None:
+            return False, 0
+        content = editor.toPlainText()
+        widget_type = type(widget).__name__ if widget else ""
+        is_md = ExportService.is_markdown_content(content, widget_type)
+
+        try:
+            body_html = ExportService.render_content(content, is_md)
+            full_html = build_export_html_document(
+                body_html,
+                self._theme_engine.get_active_theme().colors,
+            )
+            self.config.get_file_guard().safe_write_bytes(
+                filepath,
+                full_html.encode("utf-8"),
+                context=FileAccessContext.USER_DOCUMENT_SAVE,
+            )
+            QMessageBox.information(
+                self, "另存为",
+                f"已导出HTML: {os.path.basename(filepath)}",
+            )
+            return True, 0
+        except Exception as e:
+            ErrorHandler.show_from_exception(
+                e, ErrorCategory.FILE,
+                f"写入HTML文件失败：{os.path.basename(filepath)}",
+            )
             return False, 0
 
     def _save_file(self, widget, filepath: str, encoding: str = "UTF-8",

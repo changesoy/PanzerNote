@@ -31,16 +31,9 @@ from .core.event_bus import EventBus
 from .core.menu_builder import MenuBuilder
 from .core.shortcut_manager import ShortcutManager
 from .game.game_engine import GameEngine
-from .game.resource_bar import ResourceBar
-from .game.game_sidebar import GameSidebar
-from .editor.file_tree import FileTreeWidget
 from .editor.editor_tabs import EditorTabWidget
 from .editor.webengine_runtime import WebEngineRuntime
-from .game.secretary_widget import SecretaryWidget
 from .editor.status_bar import StatusBarWidget
-from .editor.find_replace import FindReplaceBar
-from .editor.outline_panel import OutlinePanel
-from .ui.side_panel_host import SidePanelHost
 from .editor.editor_settings_dialog import EditorSettingsDialog
 from .editor.file_open_service import FileOpenService, FileOpenSource, FileOpenSecurityError, _is_inside_root
 from .editor.file_action_controller import FileActionController
@@ -50,7 +43,6 @@ from .plugins.plugin_manager import PluginManager
 from .themes.theme_engine import ThemeEngine
 from .themes.theme_preview import ThemePreviewDialog
 from .ui.command_palette import CommandPalette
-from .editor.find_in_files_panel import FindInFilesPanel
 from .utils.logger import get_logger
 from .utils.error_handler import ErrorHandler, ErrorCategory
 from .utils.feature_flags import is_enabled
@@ -59,6 +51,7 @@ from .utils.window_theme import (
     apply_native_dark_titlebar,
     install_native_titlebar_theme_filter,
 )
+from .ui.main_window_ui import MainWindowUIBuilder
 from .ui.selection_clear_filter import SelectionClearFilter
 
 
@@ -121,6 +114,13 @@ class MainWindow(QMainWindow):
         self._save_notify_timer.setSingleShot(True)
         self._save_notify_timer.timeout.connect(self._do_save_notify)
 
+        self._ui_builder = MainWindowUIBuilder(
+            self.config,
+            self.theme_engine,
+            self.shortcut_manager,
+            self.webengine_runtime,
+        )
+
         self._init_ui()
         self._file_action_controller = FileActionController(
             self.editor_tabs,
@@ -160,148 +160,56 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._check_session_recovery)
 
     def _init_ui(self):
-        """初始化UI"""
+        """初始化UI：widget 创建与布局委托给 MainWindowUIBuilder，信号集中连接"""
         self.setWindowTitle("PanzerNote")
         self.setMinimumSize(scale(800), scale(600))
 
-        # 中心部件
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-
-        # 主布局
-        main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
-
-        # 资源栏
-        self.resource_bar = ResourceBar(self.config, theme_engine=self.theme_engine)
-        main_layout.addWidget(self.resource_bar)
-
-        # 分隔线
-        self.line1 = QFrame()
-        self.line1.setFrameShape(QFrame.Shape.NoFrame)
-        self.line1.setFixedHeight(1)
-        main_layout.addWidget(self.line1)
-
-        # 内容区域
-        content_layout = QHBoxLayout()
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(0)
-
-        # 游戏图标侧边栏
-        self.game_sidebar = GameSidebar(theme_engine=self.theme_engine)
-        self.game_sidebar.setFixedWidth(scale(50))
-        self.game_sidebar.view_changed.connect(self._on_view_changed)
-        content_layout.addWidget(self.game_sidebar)
-
-        # 分隔线
-        self.line2 = QFrame()
-        self.line2.setFrameShape(QFrame.Shape.NoFrame)
-        self.line2.setFixedWidth(1)
-        content_layout.addWidget(self.line2)
-
-        # 分割器
-        self.splitter = QSplitter(Qt.Orientation.Horizontal)
-
-        # 侧栏面板宿主（统一管理文件树、大纲等面板）
-        self.side_panel_host = SidePanelHost(theme_engine=self.theme_engine)
-
-        # 文件树注册到宿主（默认面板）
-        self.file_tree = FileTreeWidget(self.config, theme_engine=self.theme_engine)
-        self.file_tree.file_open_requested.connect(self._open_file)
-        self.file_tree.file_move_requested.connect(self._on_file_move_from_tree)
-        self.side_panel_host.register_panel("filetree", self.file_tree, "≡", "文件树")
-
-        # 大纲面板注册到宿主
-        self.outline_panel = OutlinePanel()
-        self.outline_panel.heading_clicked.connect(self._on_outline_heading_clicked)
-        self.side_panel_host.register_panel("outline", self.outline_panel, "§", "大纲")
-
-        # 跨文件搜索面板注册到宿主
-        self.find_in_files_panel = FindInFilesPanel(
-            self.config.get_notebooks_path,
-            get_open_files=lambda: self.editor_tabs.get_open_filepaths(),
-                get_recent_files=lambda: self.config.get_recent_files(),
-            theme_engine=self.theme_engine,
-        )
-        self.find_in_files_panel.result_clicked.connect(self._on_find_in_files_result)
-        self.side_panel_host.register_panel("search", self.find_in_files_panel, "🔍", "跨文件搜索")
-
-        self.side_panel_host.setMinimumWidth(scale(100))
-        self.splitter.addWidget(self.side_panel_host)
-
-        self.side_panel_host.show_panel("filetree")
-
-        # 编辑区容器
-        self.editor_container = QWidget()
-        editor_layout = QVBoxLayout(self.editor_container)
-        editor_layout.setContentsMargins(0, 0, 0, 0)
-        editor_layout.setSpacing(0)
-
-        # v1.5.4: 查找替换栏（嵌入在编辑器标签页上方）
-        self.find_replace_bar = FindReplaceBar(theme_engine=self.theme_engine)
-        self.find_replace_bar.hide()
-        editor_layout.addWidget(self.find_replace_bar)
-
-        # 编辑器分屏容器
-        self.editor_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.editor_splitter.setChildrenCollapsible(False)
-
-        # 编辑器标签页
-        self.editor_tabs = EditorTabWidget(
-            self.config,
-            theme_engine=self.theme_engine,
-            webengine_runtime=self.webengine_runtime,
-        )
-        self.editor_tabs.set_find_bar(self.find_replace_bar)
-        self.editor_tabs.current_changed.connect(self._on_tab_changed)
-        self.editor_tabs.content_modified.connect(self._on_content_modified)
-        self.editor_tabs.tab_count_changed.connect(self._on_tab_count_changed)
-        self.editor_tabs.chars_typed.connect(self._on_chars_typed)
-        self.editor_tabs.cursor_position_changed.connect(self._update_stats)
-        self.editor_tabs.word_count_updated.connect(self._update_stats)
-        self.editor_tabs.file_saved.connect(self._on_file_saved)
-        self.editor_splitter.addWidget(self.editor_tabs)
-
-        self._split_tabs: List[EditorTabWidget] = []
-
-        editor_layout.addWidget(self.editor_splitter)
-
-        self.splitter.addWidget(self.editor_container)
+        ui = self._ui_builder.build(self)
+        # 解包
+        self.resource_bar = ui.resource_bar
+        self.line1 = ui.line1
+        self.game_sidebar = ui.game_sidebar
+        self.line2 = ui.line2
+        self.splitter = ui.splitter
+        self.side_panel_host = ui.side_panel_host
+        self.file_tree = ui.file_tree
+        self.outline_panel = ui.outline_panel
+        self.find_in_files_panel = ui.find_in_files_panel
+        self.editor_container = ui.editor_container
+        self.find_replace_bar = ui.find_replace_bar
+        self.editor_splitter = ui.editor_splitter
+        self.editor_tabs = ui.editor_tabs
+        self.game_view_container = ui.game_view_container
+        self._game_placeholder = ui.game_placeholder
+        self.secretary = ui.secretary
+        self.shortcut_panel = ui.shortcut_panel
 
         self.webengine_runtime.prepare_startup_anchor(self.editor_container)
+        self._split_tabs: List[EditorTabWidget] = []
+        self._connect_ui_signals()
 
-        # 设置分割器初始大小
-        sidebar_width = self.config.get_view_setting("sidebar_width", 200)
-        editor_width = self.config.get_view_setting("editor_area_width", 800)
-        self.splitter.setSizes([sidebar_width, editor_width])
+    def _connect_ui_signals(self):
+        """集中连接主 UI 信号（与重构前散落 connect 逐项核对一致）。
 
-        content_layout.addWidget(self.splitter)
-
-        # 内容容器
-        content_widget = QWidget()
-        content_widget.setLayout(content_layout)
-        main_layout.addWidget(content_widget, 1)
-
-        # 游戏界面容器
-        self.game_view_container = QWidget()
-        self.game_view_container.hide()
-        _game_layout = QVBoxLayout(self.game_view_container)
-        _game_layout.setContentsMargins(0, 0, 0, 0)
-        self._game_placeholder = QLabel("该功能尚在开发中")
-        self._game_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._game_placeholder.setStyleSheet(f"color: {self.theme_engine.get_active_theme().colors.text_disabled}; font-size: 18px;")
-        _game_layout.addWidget(self._game_placeholder)
-        main_layout.addWidget(self.game_view_container)
-
-        # 小秘书（覆盖在编辑区右下角，自动跟随父容器大小变化）
-        self.secretary = SecretaryWidget(self.config, theme_engine=self.theme_engine, parent=self.editor_container)
-
-        # 快捷键提示面板
-        from .ui.shortcut_panel import ShortcutPanel
-        self.shortcut_panel = ShortcutPanel(self.shortcut_manager, theme_engine=self.theme_engine, parent=self)
+        仅包含 _init_ui 创建的组件信号；状态栏信号在 _init_statusbar 连接。
+        """
+        self.game_sidebar.view_changed.connect(self._on_view_changed)
+        self.file_tree.file_open_requested.connect(self._open_file)
+        self.file_tree.file_move_requested.connect(self._on_file_move_from_tree)
+        self.outline_panel.heading_clicked.connect(self._on_outline_heading_clicked)
+        self.find_in_files_panel.result_clicked.connect(self._on_find_in_files_result)
         self.shortcut_panel.set_edit_callback(self._on_shortcut_edited)
-        self.shortcut_panel.hide()
+        self._connect_editor_tabs_signals(self.editor_tabs)
+
+    def _connect_editor_tabs_signals(self, tabs: EditorTabWidget):
+        """主面板与分屏复用，保证信号配置永远一致。"""
+        tabs.current_changed.connect(self._on_tab_changed)
+        tabs.content_modified.connect(self._on_content_modified)
+        tabs.tab_count_changed.connect(self._on_tab_count_changed)
+        tabs.chars_typed.connect(self._on_chars_typed)
+        tabs.cursor_position_changed.connect(self._update_stats)
+        tabs.word_count_updated.connect(self._update_stats)
+        tabs.file_saved.connect(self._on_file_saved)
 
     def _init_menubar(self):
         """初始化菜单栏"""
@@ -956,12 +864,7 @@ class MainWindow(QMainWindow):
             webengine_runtime=self.webengine_runtime,
         )
         split_tabs.set_find_bar(self.find_replace_bar)
-        split_tabs.current_changed.connect(self._on_tab_changed)
-        split_tabs.content_modified.connect(self._on_content_modified)
-        split_tabs.tab_count_changed.connect(self._on_tab_count_changed)
-        split_tabs.chars_typed.connect(self._on_chars_typed)
-        split_tabs.cursor_position_changed.connect(self._update_stats)
-        split_tabs.word_count_updated.connect(self._update_stats)
+        self._connect_editor_tabs_signals(split_tabs)
         self.editor_splitter.addWidget(split_tabs)
         self._split_tabs.append(split_tabs)
         split_tabs.new_file()

@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer, QEvent, pyqtSignal, QPoint, QRect
 from PyQt6.QtGui import QIcon, QCloseEvent, QAction
-from typing import List, Optional, cast
+from typing import Optional, cast
 
 from . import __version__
 from .core.app_context import AppContext
@@ -52,6 +52,7 @@ from .utils.window_theme import (
 )
 from .ui.main_window_ui import MainWindowUIBuilder
 from .ui.selection_clear_filter import SelectionClearFilter
+from .ui.view_coordinator import ViewCoordinator
 
 
 class MainWindow(QMainWindow):
@@ -76,7 +77,6 @@ class MainWindow(QMainWindow):
             self.app_context.workspace_store,
             self._file_open_service,
         )
-        self._current_view = "editor"
         self._closing = False
         self._closing_pending_save = False
         self.setAcceptDrops(True)
@@ -192,7 +192,22 @@ class MainWindow(QMainWindow):
         self.shortcut_panel = ui.shortcut_panel
 
         self.webengine_runtime.prepare_startup_anchor(self.editor_container)
-        self._split_tabs: List[EditorTabWidget] = []
+        self.view_coordinator = ViewCoordinator(
+            self.config,
+            self.theme_engine,
+            self.webengine_runtime,
+            self.editor_splitter,
+            self.editor_tabs,
+            self.find_replace_bar,
+            self.side_panel_host,
+            self.splitter,
+            self.game_view_container,
+            self.game_sidebar,
+            self.secretary,
+            self.shortcut_panel,
+            self._connect_editor_tabs_signals,
+            lambda _mode: self._sync_wrap_menu(),
+        )
         self._connect_ui_signals()
 
     def _connect_ui_signals(self):
@@ -314,7 +329,7 @@ class MainWindow(QMainWindow):
         self.config.set_open_files(open_files)
 
         self.config.set_active_tab_index(self.editor_tabs.currentIndex())
-        self.config.set_current_view(self._current_view)
+        self.config.set_current_view(self.view_coordinator.current_view)
 
         sizes = self.splitter.sizes()
         if len(sizes) >= 2:
@@ -625,7 +640,7 @@ class MainWindow(QMainWindow):
 
     def keyPressEvent(self, event):
         """键盘事件"""
-        if event.key() == Qt.Key.Key_Escape and self._current_view != "editor":
+        if event.key() == Qt.Key.Key_Escape and self.view_coordinator.current_view != "editor":
             self._switch_view("editor")
             return
         if event.key() == Qt.Key.Key_F1:
@@ -675,7 +690,7 @@ class MainWindow(QMainWindow):
         focus = QApplication.focusWidget()
         if focus is None:
             return None
-        for tabs in [self.editor_tabs, *self._split_tabs]:
+        for tabs in [self.editor_tabs, *self.view_coordinator.split_tabs]:
             if tabs is focus or tabs.isAncestorOf(focus):
                 return tabs
         return None
@@ -693,7 +708,7 @@ class MainWindow(QMainWindow):
     def _save_all(self):
         """保存所有文件（主面板 + 全部分屏）"""
         self.editor_tabs.save_all()
-        for tabs in self._split_tabs:
+        for tabs in self.view_coordinator.split_tabs:
             tabs.save_all()
 
     def _export_pdf(self):
@@ -829,7 +844,7 @@ class MainWindow(QMainWindow):
     def _on_view_changed(self, view: str):
         """游戏侧边栏视图切换"""
         if view == "back":
-            if self._current_view != "editor":
+            if self.view_coordinator.current_view != "editor":
                 self._switch_view("editor")
             else:
                 self._undo()
@@ -837,113 +852,48 @@ class MainWindow(QMainWindow):
             self._switch_view(view)
 
     def _switch_view(self, view: str):
-        """切换视图"""
-        if view == self._current_view:
-            return
-
-        if view == "editor":
-            self.side_panel_host.show_panel("filetree")
-            self.splitter.show()
-            self.game_view_container.hide()
-            self.game_sidebar.set_current_view(None)
-        else:
-            self.splitter.hide()
-            self.game_view_container.show()
-            self.game_sidebar.set_current_view(view)
-
-        self._current_view = view
+        """切换视图（委托 ViewCoordinator）"""
+        self.view_coordinator.switch_view(view)
 
     def _set_wrap_mode(self, mode: str):
-        """设置行宽模式"""
-        self.config.set_editor_setting("wrap_mode", mode)
-        self.editor_tabs.set_wrap_mode_all(mode)
-
-        # 更新菜单选中状态
-        self._sync_wrap_menu()
+        """设置行宽模式（委托 ViewCoordinator）"""
+        self.view_coordinator.set_wrap_mode(mode)
 
     def _toggle_md_preview(self):
-        """切换Markdown预览"""
-        self.editor_tabs.toggle_md_preview()
+        """切换Markdown预览（委托 ViewCoordinator）"""
+        self.view_coordinator.toggle_md_preview()
 
     def _toggle_minimap(self):
-        """切换代码缩略图"""
-        self.editor_tabs.toggle_minimap()
+        """切换代码缩略图（委托 ViewCoordinator）"""
+        self.view_coordinator.toggle_minimap()
 
     def _split_editor_horizontal(self):
-        """水平分屏"""
-        self._split_editor(Qt.Orientation.Horizontal)
+        """水平分屏（委托 ViewCoordinator）"""
+        self.view_coordinator.split_editor(Qt.Orientation.Horizontal)
 
     def _split_editor_vertical(self):
-        """垂直分屏"""
-        self._split_editor(Qt.Orientation.Vertical)
-
-    def _split_editor(self, orientation):
-        if self._split_tabs:
-            return
-        self.editor_splitter.setOrientation(orientation)
-        split_tabs = EditorTabWidget(
-            self.config,
-            theme_engine=self.theme_engine,
-            webengine_runtime=self.webengine_runtime,
-        )
-        split_tabs.set_find_bar(self.find_replace_bar)
-        self._connect_editor_tabs_signals(split_tabs)
-        self.editor_splitter.addWidget(split_tabs)
-        self._split_tabs.append(split_tabs)
-        split_tabs.new_file()
-        total = self.editor_splitter.width()
-        self.editor_splitter.setSizes([total // 2, total // 2])
-        self.secretary.show_message("已启用分屏。注意：分屏中编辑的是独立文件，与主面板不同步。")
+        """垂直分屏（委托 ViewCoordinator）"""
+        self.view_coordinator.split_editor(Qt.Orientation.Vertical)
 
     def _close_split(self):
-        """关闭分屏"""
-        if not self._split_tabs:
-            return
-        split_tabs = self._split_tabs.pop()
-        unsaved = split_tabs.get_unsaved_files()
-        if unsaved:
-            reply = QMessageBox.question(
-                self, "关闭分屏",
-                "分屏中有未保存的文件，是否关闭？",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No
-            )
-            if reply == QMessageBox.StandardButton.No:
-                self._split_tabs.append(split_tabs)
-                return
-        split_tabs.save_all_to_temp()
-        split_tabs.close_all_tabs()
-        split_tabs.setParent(None)
-        split_tabs.deleteLater()
+        """关闭分屏（委托 ViewCoordinator）"""
+        self.view_coordinator.close_split(self)
 
     def _toggle_file_tree(self):
-        """切换文件树显示/隐藏"""
-        self.side_panel_host.toggle("filetree")
+        """切换文件树显示/隐藏（委托 ViewCoordinator）"""
+        self.view_coordinator.toggle_file_tree()
 
     def _toggle_side_panel(self):
-        """切换侧栏面板宿主显示/隐藏"""
-        if self.side_panel_host.isVisible():
-            self.side_panel_host.hide_panel()
-        else:
-            current_id = self.side_panel_host.current_panel_id()
-            if current_id is not None:
-                self.side_panel_host.show_panel(current_id)
-            else:
-                # 无激活面板时默认显示大纲
-                self.side_panel_host.show_panel("outline")
+        """切换侧栏面板宿主显示/隐藏（委托 ViewCoordinator）"""
+        self.view_coordinator.toggle_side_panel()
 
     def _toggle_secretary(self):
-        """切换小秘书显示/隐藏"""
-        self.secretary.setVisible(not self.secretary.isVisible())
-        self.config.set_secretary_setting("show_secretary", self.secretary.isVisible())
+        """切换小秘书显示/隐藏（委托 ViewCoordinator）"""
+        self.view_coordinator.toggle_secretary()
 
     def _toggle_shortcut_panel(self):
-        """切换快捷键提示面板"""
-        if self.shortcut_panel.isVisible():
-            self.shortcut_panel.hide()
-        else:
-            self.shortcut_panel.refresh()
-            self.shortcut_panel.show()
-            self.shortcut_panel.raise_()
+        """切换快捷键提示面板（委托 ViewCoordinator）"""
+        self.view_coordinator.toggle_shortcut_panel()
 
     def _on_shortcut_edited(self, action_id: str, new_shortcut: str):
         """快捷键编辑回调"""
@@ -1167,7 +1117,7 @@ class MainWindow(QMainWindow):
         """根据当前编辑器类型显示/隐藏大纲面板"""
         # 从所有 tab widget 中找到当前编辑器
         editor = None
-        for tw in [self.editor_tabs] + self._split_tabs:
+        for tw in [self.editor_tabs] + self.view_coordinator.split_tabs:
             e = tw.current_editor()
             if e is not None:
                 editor = e

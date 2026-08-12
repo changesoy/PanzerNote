@@ -151,7 +151,7 @@ class SessionRestoreService:
                 cursor = editor.textCursor()
                 cursor.setPosition(min(cursor_pos, len(editor.toPlainText())))
                 editor.setTextCursor(cursor)
-            if scroll_pos is not None:
+            if scroll_pos:
                 from PyQt6.QtCore import QTimer
                 vbar = editor.verticalScrollBar()
                 if vbar is not None:

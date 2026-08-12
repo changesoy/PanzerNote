@@ -10,7 +10,7 @@ v1.7.0 改动：
 """
 
 import os
-from typing import Dict, Any, List, cast
+from typing import Dict, Any, List, Optional, cast
 
 from ..security.file_guard import FileGuard
 from .path_resolver import PathResolver, load_json, save_json, merge_dicts, INTERNAL_CONFIG_CTX
@@ -31,7 +31,9 @@ class WorkspaceStore:
         "bookmarks": {},
         "folds": {},
         "recent_files": [],
-        "external_files": []
+        "external_files": [],
+        # 关闭标签页时的光标/滚动位置记忆（重新打开文件时恢复）
+        "closed_tabs_memory": {}
     }
 
     _KNOWN_WORKSPACE_KEYS = frozenset({
@@ -128,6 +130,28 @@ class WorkspaceStore:
             folds[filepath] = sorted(lines)
         else:
             folds.pop(filepath, None)
+
+    # === closed_tabs 位置记忆 ===
+
+    def set_closed_tab_memory(
+        self, filepath: str, cursor_position: int, scroll_position: int
+    ) -> None:
+        """记录关闭标签页时的光标/滚动位置，供重新打开该文件时恢复。"""
+        memory = self._workspace.setdefault("closed_tabs_memory", {})
+        memory[filepath] = {
+            "cursor_position": cursor_position,
+            "scroll_position": scroll_position,
+        }
+
+    def get_closed_tab_memory(self, filepath: str) -> Optional[Dict[str, int]]:
+        """读取关闭标签页时的位置记忆；无记录时返回 None。"""
+        return self._workspace.get("closed_tabs_memory", {}).get(filepath)
+
+    def clear_closed_tab_memory(self, filepath: str) -> None:
+        """清除指定文件的位置记忆（重新打开并恢复后调用）。"""
+        memory = self._workspace.get("closed_tabs_memory")
+        if memory and filepath in memory:
+            memory.pop(filepath, None)
 
     # === recent / external ===
 

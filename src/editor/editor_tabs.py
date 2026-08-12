@@ -549,6 +549,24 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if saved_folds:
             self._restore_folds(widget, filepath, saved_folds)
 
+        # 恢复关闭标签页时的位置记忆（重新打开该文件）
+        memory = self.config.get_closed_tab_memory(filepath)
+        if memory:
+            editor = self._get_editor_from_widget(widget)
+            if editor is not None:
+                cursor_pos = memory.get("cursor_position")
+                if cursor_pos is not None:
+                    cursor = editor.textCursor()
+                    cursor.setPosition(min(cursor_pos, len(editor.toPlainText())))
+                    editor.setTextCursor(cursor)
+                scroll_pos = memory.get("scroll_position")
+                if scroll_pos:
+                    from PyQt6.QtCore import QTimer
+                    vbar = editor.verticalScrollBar()
+                    if vbar is not None:
+                        QTimer.singleShot(0, lambda v=scroll_pos, sb=vbar: sb.setValue(v))
+            self.config.clear_closed_tab_memory(filepath)
+
         return int(index)
 
     def save_current(self) -> Tuple[bool, int]:
@@ -864,6 +882,30 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     def _on_tab_close_requested(self, index: int):
         self._close_tab(index)
 
+    def _record_closed_tab(self, filepath: str, widget) -> None:
+        """记录关闭标签页的位置：内存栈（Ctrl+Shift+T）+ 持久化记忆（重开恢复）。
+
+        仅记录已保存文件（调用方已确认 filepath 存在）。
+        """
+        cursor = None
+        scroll = 0
+        if isinstance(widget, Editor):
+            cursor = widget.textCursor().position()
+            vbar = widget.verticalScrollBar()
+            scroll = vbar.value() if vbar is not None else 0
+        elif isinstance(widget, MarkdownPreviewWidget):
+            cursor = widget.editor.textCursor().position()
+            vbar = widget.editor.verticalScrollBar()
+            scroll = vbar.value() if vbar is not None else 0
+        self._closed_tabs_stack.append({
+            "filepath": filepath,
+            "cursor_position": cursor
+        })
+        if len(self._closed_tabs_stack) > 50:
+            self._closed_tabs_stack.pop(0)
+        if cursor is not None:
+            self.config.set_closed_tab_memory(filepath, cursor, scroll)
+
     def _close_tab(self, index: int) -> bool:
         widget = self.widget(index)
         if not widget or not hasattr(widget, 'tab_id'):
@@ -939,17 +981,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         else:
             filepath = state.filepath
             if filepath and os.path.isfile(filepath):
-                cursor = None
-                if isinstance(widget, Editor):
-                    cursor = widget.textCursor().position()
-                elif isinstance(widget, MarkdownPreviewWidget):
-                    cursor = widget.editor.textCursor().position()
-                self._closed_tabs_stack.append({
-                    "filepath": filepath,
-                    "cursor_position": cursor
-                })
-                if len(self._closed_tabs_stack) > 50:
-                    self._closed_tabs_stack.pop(0)
+                self._record_closed_tab(filepath, widget)
 
         self._save_manager.unregister_tab(tab_id)
         self._registry.unregister(tab_id)
@@ -1214,17 +1246,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         else:
             filepath = state.filepath if state else None
             if filepath and os.path.isfile(filepath):
-                cursor = None
-                if isinstance(widget, Editor):
-                    cursor = widget.textCursor().position()
-                elif isinstance(widget, MarkdownPreviewWidget):
-                    cursor = widget.editor.textCursor().position()
-                self._closed_tabs_stack.append({
-                    "filepath": filepath,
-                    "cursor_position": cursor
-                })
-                if len(self._closed_tabs_stack) > 50:
-                    self._closed_tabs_stack.pop(0)
+                self._record_closed_tab(filepath, widget)
 
         self._save_manager.unregister_tab(tab_id)
         self._registry.unregister(tab_id)

@@ -249,6 +249,15 @@ class Config:
     def remove_external_file(self, filepath: str) -> None:
         self._workspace_store.remove_external_file(filepath)
 
+    def set_closed_tab_memory(self, filepath: str, cursor_position: int, scroll_position: int) -> None:
+        self._workspace_store.set_closed_tab_memory(filepath, cursor_position, scroll_position)
+
+    def get_closed_tab_memory(self, filepath: str) -> Optional[Dict]:
+        return self._workspace_store.get_closed_tab_memory(filepath)
+
+    def clear_closed_tab_memory(self, filepath: str) -> None:
+        self._workspace_store.clear_closed_tab_memory(filepath)
+
     # === 子模块访问（供服务组装，AppContext 阶段使用） ===
 
     @property

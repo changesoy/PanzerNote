@@ -11,6 +11,7 @@ import json as json_module
 from typing import Dict, List, Optional, Tuple, Union
 
 from ..utils.logger import get_logger
+from .workspace_store import WorkspaceStore
 
 
 class ConfigImportError(Exception):
@@ -112,23 +113,16 @@ class ConfigImportService:
         },
     }
 
-    _KNOWN_WORKSPACE_KEYS = frozenset({
-        "last_session", "recent_files", "external_files",
-        "editor", "game", "secretary", "view", "window",
-        "resources", "cores",
-    })
+    # 单一来源：直接复用 WorkspaceStore 的白名单（由 DEFAULT_WORKSPACE 派生）
+    _KNOWN_WORKSPACE_KEYS = WorkspaceStore._KNOWN_WORKSPACE_KEYS
 
     _WORKSPACE_TYPE_RULES: Dict[str, tuple] = {
         "last_session": (dict,),
+        "bookmarks": (dict,),
+        "folds": (dict,),
         "recent_files": (list,),
         "external_files": (list,),
-        "editor": (dict,),
-        "game": (dict,),
-        "secretary": (dict,),
-        "view": (dict,),
-        "window": (dict,),
-        "resources": (dict,),
-        "cores": (dict,),
+        "closed_tabs_memory": (dict,),
     }
 
     _WORKSPACE_NESTED_RULES: Dict[str, Dict[str, Tuple[tuple, Optional[Tuple[Optional[float], Optional[float]]]]]] = {
@@ -136,17 +130,6 @@ class ConfigImportService:
             "open_files": ((list,), None),
             "active_tab_index": ((int,), (0, None)),
             "current_view": ((str,), None),
-        },
-        "resources": {
-            "steel": ((int, float), (0, None)),
-            "oil": ((int, float), (0, None)),
-            "ammo": ((int, float), (0, None)),
-            "fuel": ((int, float), (0, None)),
-            "rare_metal": ((int, float), (0, None)),
-        },
-        "cores": {
-            "total": ((int, float), (0, None)),
-            "available": ((int, float), (0, None)),
         },
     }
 

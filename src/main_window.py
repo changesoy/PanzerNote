@@ -19,12 +19,13 @@ from PyQt6.QtWidgets import (
     QLineEdit
 )
 from PyQt6.QtCore import Qt, QTimer, QEvent, pyqtSignal, QPoint
-from PyQt6.QtGui import QIcon, QCloseEvent, QAction, QTextCursor
+from PyQt6.QtGui import QIcon, QCloseEvent, QAction
 from typing import List, Optional, cast
 
 from . import __version__
-from .core.config import Config
+from .core.app_context import AppContext
 from .core.config_import_service import ConfigImportService, ConfigImportError
+from .core.session_restore_service import SessionRestoreService
 from .core.timer_manager import TimerManager
 from .core.event_bus import EventBus
 from .core.menu_builder import MenuBuilder
@@ -42,6 +43,7 @@ from .editor.outline_panel import OutlinePanel
 from .ui.side_panel_host import SidePanelHost
 from .editor.editor_settings_dialog import EditorSettingsDialog
 from .editor.file_open_service import FileOpenService, FileOpenSource, FileOpenSecurityError, _is_inside_root
+from .editor.file_action_controller import FileActionController
 from .plugins.plugin_manager import PluginManager
 from .themes.theme_engine import ThemeEngine
 from .themes.theme_preview import ThemePreviewDialog
@@ -60,29 +62,35 @@ from .utils.window_theme import (
 class MainWindow(QMainWindow):
     """主窗口"""
 
-    def __init__(self, config: Config, parent=None):
+    def __init__(self, app_context: AppContext, parent=None):
         super().__init__(parent)
-        self.config = config
+        self.app_context = app_context
+        # 过渡期：保留 Config 门面引用，旧代码零改动；新代码优先用 app_context.xxx
+        self.config = app_context.config
         # 预声明由 MenuBuilder 动态挂载的属性
         self.recent_menu: QMenu
         self._wrap_no_wrap_action: QAction
         self._wrap_limit_action: QAction
         self._file_open_service = FileOpenService(
-            config.get_path_validator(),
-            config.get_notebooks_path(),
+            self.config.get_path_validator(),
+            self.config.get_notebooks_path(),
+        )
+        self._session_restore_service = SessionRestoreService(
+            self.app_context.workspace_store,
+            self._file_open_service,
         )
         self._current_view = "editor"
         self._closing = False
         self._closing_pending_save = False
         self.setAcceptDrops(True)
 
-        self.game_engine = GameEngine(config)
-        self.timer_manager = TimerManager(config, self)
-        self.event_bus = EventBus(config, self)
-        self.shortcut_manager = ShortcutManager(config)
+        self.game_engine = GameEngine(self.config)
+        self.timer_manager = TimerManager(self.config, self)
+        self.event_bus = EventBus(self.config, self)
+        self.shortcut_manager = ShortcutManager(self.config)
         self._cmd_palette: Optional[CommandPalette] = None
         self.editor_tabs: EditorTabWidget  # 在 _init_ui 中初始化
-        self.theme_engine = ThemeEngine(config)
+        self.theme_engine = ThemeEngine(self.config)
         self.theme_engine.load_external_themes()
         self.theme_engine.initialize_active_theme()
 
@@ -100,7 +108,7 @@ class MainWindow(QMainWindow):
         )
         self._presented = False
 
-        self.plugin_manager = PluginManager(config)
+        self.plugin_manager = PluginManager(self.config)
         self.plugin_manager.scan_plugins()
         self._register_plugin_callbacks()
 
@@ -109,6 +117,12 @@ class MainWindow(QMainWindow):
         self._save_notify_timer.timeout.connect(self._do_save_notify)
 
         self._init_ui()
+        self._file_action_controller = FileActionController(
+            self.editor_tabs,
+            self.app_context.workspace_store,
+            self.app_context.path_resolver,
+            self._file_open_service,
+        )
         self._init_menubar()
         self._init_statusbar()
         self._init_timers()
@@ -117,7 +131,7 @@ class MainWindow(QMainWindow):
         self._connect_signals()
         self._apply_theme()
 
-        icon_path = os.path.join(config.get_assets_path(), "icons", "app_icon.png")
+        icon_path = os.path.join(self.config.get_assets_path(), "icons", "app_icon.png")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
 
@@ -318,32 +332,8 @@ class MainWindow(QMainWindow):
         self._calculate_offline_rewards()
         self._check_daily_checkin()
 
-        open_files = self.config.get_open_files()
-        if open_files:
-            pre_show_entries, deferred_entries = self._build_restore_plan(open_files)
-
-            for entry in pre_show_entries:
-                filepath = entry.get("path")
-                if filepath and os.path.exists(filepath):
-                    index = self.editor_tabs.open_file(
-                        filepath,
-                        activate=False,
-                        insert_index=entry.get("index"),
-                        render_preview=False,
-                    )
-                    if index >= 0:
-                        self._restore_cursor_for_tab(entry, index)
-
-            self._pending_files = deferred_entries
-
-            if self.editor_tabs.count() == 0:
-                self.editor_tabs.new_file()
-        else:
-            self._pending_files = []
-            self.editor_tabs.new_file()
-
-        if self._pending_files:
-            from PyQt6.QtCore import QTimer
+        has_pending = self._session_restore_service.restore_session(self.editor_tabs)
+        if has_pending:
             QTimer.singleShot(0, self._open_next_pending_file)
         else:
             active_index = self.config.get_active_tab_index()
@@ -361,118 +351,14 @@ class MainWindow(QMainWindow):
         self.config.update_last_login()
         self.config.save_savegame()
 
-    def _build_restore_plan(self, open_files: list) -> tuple[list, list]:
-        """构建会话恢复计划
-
-        返回 (pre_show_entries, deferred_entries)
-
-        pre_show_entries: 显示前同步恢复的文件列表
-          - 原本的首个标签
-          - 会话中的首个 Markdown 标签（若二者是同一个，只恢复一次）
-
-        deferred_entries: 显示后异步恢复的文件列表
-        """
-        pre_show_entries = []
-        deferred_entries = []
-
-        first_file_index = None
-        first_md_index = None
-
-        for idx, entry in enumerate(open_files):
-            entry_with_index = {"index": idx, **entry}
-            filepath = entry.get("path")
-            if filepath and os.path.exists(filepath):
-                ext = os.path.splitext(filepath)[1].lower()
-                is_md = ext in ('.md', '.markdown')
-
-                if first_file_index is None:
-                    first_file_index = idx
-                    pre_show_entries.append(entry_with_index)
-                elif is_md and first_md_index is None:
-                    first_md_index = idx
-                    pre_show_entries.append(entry_with_index)
-                else:
-                    deferred_entries.append(entry_with_index)
-            else:
-                deferred_entries.append(entry_with_index)
-
-        return pre_show_entries, deferred_entries
-
-    def _restore_cursor_for_tab(self, file_info: dict, tab_index: int):
-        """恢复指定索引标签的光标位置"""
-        cursor_pos = file_info.get("cursor_position")
-        scroll_pos = file_info.get("scroll_position")
-        if cursor_pos is None and scroll_pos is None:
-            return
-
-        from .editor.editor import Editor
-        from .editor.markdown_preview import MarkdownPreviewWidget
-        widget = self.editor_tabs.widget(tab_index)
-        if widget is None:
-            return
-
-        editor = None
-        if isinstance(widget, Editor):
-            editor = widget
-        elif isinstance(widget, MarkdownPreviewWidget):
-            editor = widget.editor
-
-        if editor:
-            if cursor_pos is not None:
-                cursor = editor.textCursor()
-                cursor.setPosition(min(cursor_pos, len(editor.toPlainText())))
-                editor.setTextCursor(cursor)
-            if scroll_pos is not None:
-                from PyQt6.QtCore import QTimer
-                vbar = editor.verticalScrollBar()
-                if vbar is not None:
-                    QTimer.singleShot(0, lambda v=scroll_pos, sb=vbar: sb.setValue(v))
-
     def _open_next_pending_file(self):
-        if not hasattr(self, '_pending_files') or not self._pending_files:
-            active_index = self.config.get_active_tab_index()
-            if active_index < self.editor_tabs.count():
-                self.editor_tabs.setCurrentIndex(active_index)
+        """打开下一个待恢复的会话文件（由 QTimer 单次驱动）
+
+        逻辑委托 SessionRestoreService.open_next_pending。
+        """
+        if not self._session_restore_service.open_next_pending(self.editor_tabs):
             return
-
-        file_info = self._pending_files.pop(0)
-        filepath = file_info.get("path")
-        if filepath and os.path.exists(filepath):
-            index = self.editor_tabs.open_file(
-                filepath,
-                activate=False,
-                insert_index=file_info.get("index"),
-                render_preview=True,
-            )
-            if index >= 0:
-                self._restore_cursor_for_tab(file_info, index)
-
-        if self._pending_files:
-            from PyQt6.QtCore import QTimer
-            QTimer.singleShot(0, self._open_next_pending_file)
-
-    def _restore_cursor_for_current_tab(self, file_info: dict):
-        cursor_pos = file_info.get("cursor_position")
-        scroll_pos = file_info.get("scroll_position")
-        if cursor_pos is None and scroll_pos is None:
-            return
-        from .editor.editor import Editor
-        from .editor.markdown_preview import MarkdownPreviewWidget
-        widget = self.editor_tabs.currentWidget()
-        editor = None
-        if isinstance(widget, Editor):
-            editor = widget
-        elif isinstance(widget, MarkdownPreviewWidget):
-            editor = widget.editor
-        if editor:
-            if cursor_pos is not None:
-                cursor = editor.textCursor()
-                cursor.setPosition(min(cursor_pos, len(editor.toPlainText())))
-                editor.setTextCursor(cursor)
-            if scroll_pos is not None:
-                vbar = editor.verticalScrollBar()
-                if vbar is not None:
-                    QTimer.singleShot(0, lambda v=scroll_pos, sb=vbar: sb.setValue(v))
+        QTimer.singleShot(0, self._open_next_pending_file)
 
     def _connect_signals(self):
         """连接信号"""
@@ -510,7 +396,6 @@ class MainWindow(QMainWindow):
 
         self.config.save_settings()
         self.config.save_workspace()
-        self.config._save_user_data_path()
 
         from .core.savegame_manager import SavegameSaveResult
         result = self.config.save_savegame()
@@ -529,7 +414,8 @@ class MainWindow(QMainWindow):
         """检查是否有可恢复的异常退出会话
 
         在 window.show() 之后由 QTimer.singleShot(0, ...) 触发，
-        不在 __init__ 中直接弹窗。
+        不在 __init__ 中直接弹窗。查找与命名委托
+        SessionRestoreService，UI 弹窗保留在本方法。
 
         创建者：MainWindow.__init__（通过 QTimer.singleShot 延迟）
         持有者：TempSessionManager
@@ -538,25 +424,11 @@ class MainWindow(QMainWindow):
         关闭时行为：恢复的会话在关闭时走正常保存流程
         """
         session_mgr = self.editor_tabs.session_manager
-        recoverable = session_mgr.find_recoverable_sessions()
-
-        if not recoverable:
-            session_mgr.cleanup_all_clean_sessions()
+        session = self._session_restore_service.check_crash_recovery(session_mgr)
+        if session is None:
             return
 
-        session = recoverable[0]
-        files = session.get("files", [])
-        if not files:
-            return
-
-        file_names = []
-        for f in files:
-            original = f.get("original_path", "")
-            if original:
-                file_names.append(os.path.basename(original))
-            else:
-                file_names.append("未命名文件")
-
+        file_names = self._session_restore_service.describe_crash_files(session)
         file_list = "\n".join([f"• {n}" for n in file_names[:5]])
         if len(file_names) > 5:
             file_list += f"\n...等{len(file_names)}个文件"
@@ -586,57 +458,11 @@ class MainWindow(QMainWindow):
                 self._recover_session(session)
 
     def _recover_session(self, session: dict):
-        """恢复指定会话的文件"""
+        """恢复指定会话的文件（逻辑委托 SessionRestoreService）"""
         session_mgr = self.editor_tabs.session_manager
-        session_dir = session.get("session_dir", "")
-        files = session.get("files", [])
-
-        for f in files:
-            original_path = f.get("original_path", "")
-            autosave_name = f.get("autosave_path", "")
-            encoding = f.get("encoding", "UTF-8")
-            is_new = f.get("is_new", False)
-
-            content = session_mgr.read_autosave_content(session_dir, autosave_name, encoding)
-            if content is None:
-                continue
-
-            if original_path and os.path.isfile(original_path) and not is_new:
-                try:
-                    validated = self._file_open_service.validate_open_request(
-                        original_path, FileOpenSource.SESSION_RESTORE
-                    )
-                except FileOpenSecurityError:
-                    get_logger(__name__).warning(
-                        "恢复会话文件被安全策略拒绝: %s", original_path
-                    )
-                    continue
-                index = self.editor_tabs.open_file(validated)
-                if index >= 0:
-                    widget = self.editor_tabs.widget(index)
-                    editor = self.editor_tabs._get_editor_from_widget(widget)
-                    if editor:
-                        cursor = editor.textCursor()
-                        cursor.select(QTextCursor.SelectionType.Document)
-                        cursor.insertText(content)
-                        tab_id = getattr(widget, 'tab_id', None)
-                        if tab_id is not None:
-                            self.editor_tabs._save_manager.mark_dirty(tab_id)
-            else:
-                index = self.editor_tabs.new_file()
-                if index >= 0:
-                    widget = self.editor_tabs.widget(index)
-                    if hasattr(widget, 'tab_id'):
-                        editor = self.editor_tabs._get_editor_from_widget(widget)
-                        if editor:
-                            cursor = editor.textCursor()
-                            cursor.select(QTextCursor.SelectionType.Document)
-                            cursor.insertText(content)
-                            tab_id = getattr(widget, 'tab_id', None)
-                            if tab_id is not None:
-                                self.editor_tabs._save_manager.mark_dirty(tab_id)
-
-        session_mgr.remove_recovered_session(session_dir)
+        self._session_restore_service.restore_after_crash(
+            self.editor_tabs, session, session_mgr
+        )
 
     # === 挂机机制 ===
 
@@ -663,7 +489,7 @@ class MainWindow(QMainWindow):
         ))
 
     def _check_daily_checkin(self):
-        if self.config.savegame_manager.check_daily_checkin():
+        if self.config.check_daily_checkin():
             QTimer.singleShot(3000, lambda: self.secretary.show_message(
                 "每日签到成功！\n燃料+100 弹药+100\n钢材+100 铝材+100",
                 5000
@@ -843,14 +669,7 @@ class MainWindow(QMainWindow):
         failed_tabs = save_mgr.get_failed_tab_ids()
         if failed_tabs:
             self._closing_pending_save = False
-            failed_files = []
-            for tab_id in failed_tabs:
-                info = self.editor_tabs._tab_info.get(tab_id, {})
-                filepath = info.get("filepath", "")
-                if filepath:
-                    failed_files.append(os.path.basename(filepath))
-                else:
-                    failed_files.append("未知文件")
+            failed_files = self.editor_tabs.get_failed_filenames(failed_tabs)
             file_list = "\n".join([f"• {f}" for f in failed_files[:5]])
             if len(failed_files) > 5:
                 file_list += f"\n...等{len(failed_files)}个文件"
@@ -889,54 +708,26 @@ class MainWindow(QMainWindow):
 
     def _open_file_dialog(self):
         """打开文件对话框"""
-        filepath, _ = QFileDialog.getOpenFileName(
-            self,
-            "打开文件",
-            self.config.get_notebooks_path(),
-            "所有支持的文件 (*.txt *.md *.py *.c *.cpp *.h *.java *.js *.json *.html *.css *.xml);;"
-            "文本文件 (*.txt);;"
-            "Markdown (*.md);;"
-            "Python (*.py);;"
-            "C/C++ (*.c *.cpp *.h);;"
-            "Java (*.java);;"
-            "Web (*.html *.css *.js);;"
-            "所有文件 (*.*)"
-        )
+        filepath = self._file_action_controller.show_open_dialog(self)
         if filepath:
             self._open_file(filepath)
 
     def _open_file(self, filepath: str):
-        """打开文件（统一走 FileOpenService 安全入口）"""
+        """打开文件（编排委托 FileActionController）"""
         try:
-            validated = self._file_open_service.validate_open_request(
-                filepath, FileOpenSource.USER_DIALOG
-            )
+            _, is_external = self._file_action_controller.open_file(filepath)
         except FileOpenSecurityError as e:
             QMessageBox.warning(self, "无法打开文件", str(e))
             return
-
-        notebooks_path = os.path.normpath(self.config.get_notebooks_path())
-        filepath_norm = os.path.normpath(validated)
-
-        if not _is_inside_root(filepath_norm, notebooks_path):
-            self.config.add_external_file(validated)
+        if is_external:
             self.file_tree.refresh_external_files()
-
-        self.editor_tabs.open_file(validated)
-        self.config.add_recent_file(validated)
         self._update_recent_menu()
 
     def _open_file_bypass_service(self, filepath: str):
         """由拖放等已通过 FileOpenService 校验后调用，不再重复校验"""
-        notebooks_path = os.path.normpath(self.config.get_notebooks_path())
-        filepath_norm = os.path.normpath(filepath)
-
-        if not _is_inside_root(filepath_norm, notebooks_path):
-            self.config.add_external_file(filepath)
+        _, is_external = self._file_action_controller.open_file_bypass_service(filepath)
+        if is_external:
             self.file_tree.refresh_external_files()
-
-        self.editor_tabs.open_file(filepath)
-        self.config.add_recent_file(filepath)
         self._update_recent_menu()
 
     def _save_current(self):
@@ -1030,14 +821,9 @@ class MainWindow(QMainWindow):
         self.secretary.show_message("已释放内存占用")
 
     def _update_recent_menu(self):
-        """更新最近打开菜单"""
+        """更新最近打开菜单（数据过滤委托服务，菜单构建保留）"""
+        recent_files = self._file_action_controller.refresh_recent_files()
         self.recent_menu.clear()
-        recent_files = self.config.get_recent_files()
-
-        valid_files = [f for f in recent_files if os.path.exists(f)]
-        if valid_files != recent_files:
-            self.config._workspace["recent_files"] = valid_files
-            recent_files = valid_files
 
         if not recent_files:
             action = QAction("(空)", self)
@@ -1461,8 +1247,8 @@ class MainWindow(QMainWindow):
         try:
             export_data = {
                 "version": __version__,
-                "settings": self.config._settings,
-                "workspace": self.config._workspace,
+                "settings": self.config.get_settings(),
+                "workspace": self.config.get_workspace(),
             }
             with open(filepath, 'w', encoding='utf-8') as f:
                 json_module.dump(export_data, f, ensure_ascii=False, indent=2)

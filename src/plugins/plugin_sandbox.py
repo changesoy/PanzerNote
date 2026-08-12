@@ -89,7 +89,7 @@ class PluginAPI:
 
     def get_savegame_field(self, key: str, default: Any = None) -> Any:
         self._check_permission(PluginPermission.READ_SAVEGAME)
-        return self._config.get_savegame().get(key, default)
+        return self._config.get_savegame_field(key, default)
 
     def get_recent_files(self) -> List[str]:
         self._check_permission(PluginPermission.READ_WORKSPACE)

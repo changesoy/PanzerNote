@@ -1,121 +1,49 @@
 # -*- coding: utf-8 -*-
 """
-配置管理模块
-负责读写程序设置、会话状态等
-支持方案A：在程序目录保存user_data_path.txt记住用户数据路径
+配置管理模块（门面）
 
-v1.6.4 改动：
-  - 拆出 SavegameManager 管理游戏存档
-  - 拆出 SecurityManager 管理安全组件
-  - Config 保留设置、工作区状态，并代理存档/安全接口
+负责协调 PathResolver / SettingsStore / WorkspaceStore /
+SavegameManager / SecurityManager 五个子模块，对外保持 v1.6.x 的
+完整接口不变，所有现有调用方零改动。
+
+v1.7.0 改动：
+  - 拆出 PathResolver / SettingsStore / WorkspaceStore（hotfix 阶段 0）
+  - Config 保留为门面，原有方法全部改为委托
 """
 
 import os
-import json
-from typing import Optional, Dict, Any, List, cast
+from typing import Optional, Dict, Any, List, Mapping
 
-from ..utils.logger import get_logger
-from ..utils.exceptions import safe_call
-from ..security.path_validator import PathValidator, PathSecurityError
-from ..security.file_guard import FileGuard, FileSizeExceededError, FileOperationTimeoutError
+from ..security.path_validator import PathValidator
+from ..security.file_guard import FileGuard
 from ..security.file_access_context import FileAccessContext
 from ..security.input_validator import InputValidator
 from .savegame_manager import SavegameManager, SavegameSaveResult
 from .security_manager import SecurityManager
+from .path_resolver import PathResolver
+from .settings_store import SettingsStore
+from .workspace_store import WorkspaceStore
 
 
 class Config:
-    """配置管理类
+    """配置管理类（门面）
 
-    职责：设置读写、工作区状态、路径管理。
+    职责：协调设置读写、工作区状态、路径管理。
+    具体实现委托给 PathResolver / SettingsStore / WorkspaceStore，
     游戏存档委托给 SavegameManager，安全组件委托给 SecurityManager。
     """
 
     INTERNAL_CONFIG_CTX = FileAccessContext.INTERNAL_CONFIG
     INTERNAL_SAVEGAME_CTX = FileAccessContext.INTERNAL_SAVEGAME
 
-    DEFAULT_SETTINGS = {
-        "initialized": False,
-        "base_path": "",
-        "editor": {
-            "font_family": "Microsoft YaHei",
-            "font_size": 12,
-            "line_spacing": 1.5,
-            "show_line_numbers": True,
-            "auto_wrap": False,
-            "wrap_mode": "no_wrap",
-            "highlight_current_line": True,
-            "auto_save_interval": 30,
-            "max_history_count": 40,
-            "default_encoding": "utf-8",
-            "line_ending": "LF",
-            "code_highlight_theme": "pycharm_light",
-            "show_minimap": True,
-            "auto_minimap": False,
-            "auto_pair_brackets": True,
-            "indent_size": 4,
-            "use_tabs": False,
-            "enable_completion": False,
-            "completion_min_chars": 2,
-        },
-        "game": {
-            "typing_reward_rate": 1.0,
-            "idle_reward_rate": 1.0,
-            "daily_typing_limit": 10000,
-            "construction_time_rate": 1.0,
-            "construction_slots": 2,
-        },
-        "secretary": {
-            "character_id": None,
-            "character_name": None,
-            "skin_name": None,
-            "state": "正常",
-            "user_nickname": "指挥官",
-            "secretary_self": "我",
-            "enable_voice": False,
-            "show_secretary": True,
-            "size_percent": 7
-        },
-        "view": {
-            "theme": "light",
-            "sidebar_width": 200,
-            "show_file_tree": True
-        },
-        "window": {
-            "width": 1200,
-            "height": 800,
-            "x": 100,
-            "y": 100,
-            "maximized": False
-        },
-        "shortcuts": {}
-    }
-
-    DEFAULT_WORKSPACE = {
-        "last_session": {
-            "open_files": [],
-            "active_tab_index": 0,
-            "current_view": "editor",
-            "file_tree_state": {
-                "expanded_folders": []
-            }
-        },
-        "bookmarks": {},
-        "folds": {},
-        "recent_files": [],
-        "external_files": []
-    }
+    DEFAULT_SETTINGS = SettingsStore.DEFAULT_SETTINGS
+    DEFAULT_WORKSPACE = WorkspaceStore.DEFAULT_WORKSPACE
 
     def __init__(self, app_dir: Optional[str] = None):
         self._app_dir = app_dir or os.path.dirname(os.path.dirname(__file__))
-        self._base_path = None
-        self._settings: Dict[str, Any] = {}
-        self._workspace: Dict[str, Any] = {}
 
         self._path_validator = PathValidator()
         self._input_validator = InputValidator()
-
-        self._path_validator.add_allowed_root(self._app_dir)
 
         self._file_guard = FileGuard(
             path_validator=self._path_validator,
@@ -123,10 +51,11 @@ class Config:
             timeout=15,
         )
 
-        self._load_user_data_path()
-
-        if self._base_path:
-            self._path_validator.add_allowed_root(self._base_path)
+        self._path_resolver = PathResolver(
+            app_dir=self._app_dir,
+            file_guard=self._file_guard,
+            path_validator=self._path_validator,
+        )
 
         self._security_manager = SecurityManager(
             path_validator=self._path_validator,
@@ -134,96 +63,41 @@ class Config:
             input_validator=self._input_validator,
         )
 
+        self._settings_store = SettingsStore(
+            path_resolver=self._path_resolver,
+            file_guard=self._file_guard,
+        )
+
+        self._workspace_store = WorkspaceStore(
+            path_resolver=self._path_resolver,
+            file_guard=self._file_guard,
+        )
+
         self._savegame_manager = SavegameManager(
             file_guard=self._file_guard,
-            gamedata_dir=self._get_gamedata_dir(),
+            gamedata_dir=self._path_resolver.get_gamedata_dir(),
         )
 
         self._load_all()
 
-    def _get_user_data_path_file(self) -> str:
-        return os.path.join(self._app_dir, "user_data_path.txt")
-
-    @safe_call(catch=Exception)
-    def _load_user_data_path(self) -> None:
-        path_file = self._get_user_data_path_file()
-        if os.path.exists(path_file):
-            try:
-                path = self._file_guard.safe_read(
-                    path_file, encoding='utf-8', context=self.INTERNAL_CONFIG_CTX
-                )
-                if path and os.path.exists(path):
-                    self._base_path = path.strip()
-            except Exception:
-                get_logger(__name__).debug("读取 user_data_path.txt 失败")
-
-    @safe_call()
-    def _save_user_data_path(self) -> None:
-        if self._base_path:
-            path_file = self._get_user_data_path_file()
-            self._file_guard.safe_write(
-                path_file, self._base_path, encoding='utf-8', context=self.INTERNAL_CONFIG_CTX
-            )
-
-    def _get_config_dir(self) -> str:
-        if self._base_path:
-            return os.path.join(self._base_path, "data", "config")
-        return os.path.join(self._app_dir, "data", "config")
-
-    def _get_gamedata_dir(self) -> str:
-        if self._base_path:
-            return os.path.join(self._base_path, "data", "gamedata")
-        return os.path.join(self._app_dir, "data", "gamedata")
-
-    def _load_json(self, filepath: str, default: Dict) -> Dict:
-        if os.path.exists(filepath):
-            try:
-                content = self._file_guard.safe_read(filepath, context=self.INTERNAL_CONFIG_CTX)
-                return cast(Dict[str, Any], json.loads(content))
-            except (json.JSONDecodeError, IOError, FileSizeExceededError,
-                    FileOperationTimeoutError, PathSecurityError) as e:
-                get_logger(__name__).warning("加载配置文件失败: %s, 错误: %s", filepath, e)
-                return default.copy()
-        return default.copy()
-
-    def _save_json(self, filepath: str, data: Dict) -> None:
-        content = json.dumps(data, ensure_ascii=False, indent=2)
-        self._file_guard.safe_write(filepath, content, context=self.INTERNAL_CONFIG_CTX)
-
     def _load_all(self) -> None:
-        config_dir = self._get_config_dir()
+        self._settings_store.load()
 
-        settings_path = os.path.join(config_dir, "settings.json")
-        self._settings = self._load_json(settings_path, self.DEFAULT_SETTINGS)
+        # base_path 恢复：user_data_path.txt 未设置时，从 settings.json 恢复
+        if not self._path_resolver.has_base_path():
+            saved_path = self._settings_store.get_setting("base_path")
+            if saved_path and os.path.exists(saved_path):
+                self._path_resolver.set_base_path(saved_path)
+                self._settings_store.load()
 
-        if not self._base_path and self._settings.get("base_path"):
-            saved_path = self._settings["base_path"]
-            if os.path.exists(saved_path):
-                self._base_path = saved_path
-                config_dir = self._get_config_dir()
-                settings_path = os.path.join(config_dir, "settings.json")
-                self._settings = self._load_json(settings_path, self.DEFAULT_SETTINGS)
-
-        self._workspace = self._load_json(
-            os.path.join(config_dir, "workspace.json"),
-            self.DEFAULT_WORKSPACE
-        )
+        self._workspace_store.load()
 
         self._savegame_manager.load()
 
-        self._settings = self._merge_dict(self.DEFAULT_SETTINGS, self._settings)
-        self._workspace = self._merge_dict(self.DEFAULT_WORKSPACE, self._workspace)
-
-        self._savegame_manager.migrate_bauxite_counter(self._settings)
-
-    def _merge_dict(self, default: Dict, current: Dict) -> Dict:
-        result = default.copy()
-        for key, value in current.items():
-            if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-                result[key] = self._merge_dict(result[key], value)
-            else:
-                result[key] = value
-        return result
+        # bauxite_counter 迁移：显式读取/删除 settings 命名空间，不依赖 as_dict() 引用
+        game_ns = self._settings_store.get_setting("game", {})
+        old_val = game_ns.pop("bauxite_counter", None) if isinstance(game_ns, dict) else None
+        self._savegame_manager.migrate_bauxite_counter(old_val)
 
     # === 保存 ===
 
@@ -231,205 +105,175 @@ class Config:
         self.save_settings()
         self.save_workspace()
         self.save_savegame()
-        self._save_user_data_path()
+        self._path_resolver.save_user_data_path()
 
     def save_settings(self) -> None:
-        config_dir = self._get_config_dir()
-        os.makedirs(config_dir, exist_ok=True)
-        self._save_json(os.path.join(config_dir, "settings.json"), self._settings)
-        self._save_user_data_path()
+        self._settings_store.save()
+        self._path_resolver.save_user_data_path()
 
     def save_workspace(self) -> None:
-        config_dir = self._get_config_dir()
-        os.makedirs(config_dir, exist_ok=True)
-        self._save_json(os.path.join(config_dir, "workspace.json"), self._workspace)
+        self._workspace_store.save()
 
     def save_savegame(self) -> SavegameSaveResult:
         return self._savegame_manager.save()
 
-    # === 路径管理 ===
+    # === 路径管理（委托 PathResolver） ===
 
     def get_base_path(self) -> str:
-        return self._base_path or self._app_dir
+        return self._path_resolver.get_base_path()
 
     def set_base_path(self, path: str) -> None:
-        self._settings["base_path"] = path
-        self._base_path = path
-        self._path_validator.add_allowed_root(path)
-        self._save_user_data_path()
+        self._settings_store.set_setting("base_path", path)
+        self._path_resolver.set_base_path(path)
 
     def get_app_dir(self) -> str:
-        return self._app_dir
+        return self._path_resolver.get_app_dir()
 
     def get_notebooks_path(self) -> str:
-        return os.path.join(self.get_base_path(), "notebooks")
+        return self._path_resolver.get_notebooks_path()
 
     def get_temp_path(self) -> str:
-        return os.path.join(self.get_base_path(), "temp", "autosave")
+        return self._path_resolver.get_temp_path()
 
     def get_assets_path(self) -> str:
-        return os.path.join(self._app_dir, "data", "assets")
+        return self._path_resolver.get_assets_path()
 
     def get_portraits_path(self) -> str:
-        return os.path.join(self.get_assets_path(), "portraits")
+        return self._path_resolver.get_portraits_path()
 
     def ensure_directories(self) -> None:
-        portraits = self.get_portraits_path()
-        for subdir in ["原始/正常", "原始/大破", "皮肤/正常", "皮肤/大破"]:
-            os.makedirs(os.path.join(portraits, subdir), exist_ok=True)
+        self._path_resolver.ensure_directories()
 
-        base = self.get_base_path()
-        for subdir in ["notebooks/工作", "notebooks/回忆", "notebooks/日记",
-                        "data/config", "data/gamedata", "data/logs",
-                        "temp/autosave"]:
-            os.makedirs(os.path.join(base, subdir), exist_ok=True)
-
-    # === 初始化状态 ===
+    # === 初始化状态（委托 SettingsStore） ===
 
     def is_initialized(self) -> bool:
-        if self._base_path and os.path.exists(self._base_path):
-            settings_path = os.path.join(self._base_path, "data", "config", "settings.json")
-            return os.path.exists(settings_path)
-        return False
+        return self._settings_store.is_initialized()
 
     def set_initialized(self, value: bool) -> None:
-        self._settings["initialized"] = value
+        self._settings_store.set_initialized(value)
 
-    # === 设置访问 ===
-
-    def _get_ns_setting(self, namespace: str, key: str, default: Any = None) -> Any:
-        return self._settings.get(namespace, {}).get(key, default)
-
-    def _set_ns_setting(self, namespace: str, key: str, value: Any) -> None:
-        if namespace not in self._settings:
-            self._settings[namespace] = {}
-        self._settings[namespace][key] = value
+    # === 设置访问（委托 SettingsStore） ===
 
     def get_editor_setting(self, key: str, default: Any = None) -> Any:
-        return self._get_ns_setting("editor", key, default)
+        return self._settings_store.get_editor_setting(key, default)
 
     def set_editor_setting(self, key: str, value: Any) -> None:
-        self._set_ns_setting("editor", key, value)
+        self._settings_store.set_editor_setting(key, value)
 
     def get_game_setting(self, key: str, default: Any = None) -> Any:
-        return self._get_ns_setting("game", key, default)
+        return self._settings_store.get_game_setting(key, default)
 
     def set_game_setting(self, key: str, value: Any) -> None:
-        self._set_ns_setting("game", key, value)
+        self._settings_store.set_game_setting(key, value)
 
     def get_secretary_setting(self, key: str, default: Any = None) -> Any:
-        return self._get_ns_setting("secretary", key, default)
+        return self._settings_store.get_secretary_setting(key, default)
 
     def set_secretary_setting(self, key: str, value: Any) -> None:
-        self._set_ns_setting("secretary", key, value)
+        self._settings_store.set_secretary_setting(key, value)
 
     def get_view_setting(self, key: str, default: Any = None) -> Any:
-        return self._get_ns_setting("view", key, default)
+        return self._settings_store.get_view_setting(key, default)
 
     def set_view_setting(self, key: str, value: Any) -> None:
-        self._set_ns_setting("view", key, value)
+        self._settings_store.set_view_setting(key, value)
 
     def get_window_setting(self, key: str, default: Any = None) -> Any:
-        return self._get_ns_setting("window", key, default)
+        return self._settings_store.get_window_setting(key, default)
 
     def set_window_setting(self, key: str, value: Any) -> None:
-        self._set_ns_setting("window", key, value)
+        self._settings_store.set_window_setting(key, value)
 
     def get_setting(self, key: str, default: Any = None) -> Any:
-        return self._settings.get(key, default)
+        return self._settings_store.get_setting(key, default)
 
     def set_setting(self, key: str, value: Any) -> None:
-        self._settings[key] = value
+        self._settings_store.set_setting(key, value)
 
     def reset_to_defaults(self) -> None:
-        import copy
-        self._settings = copy.deepcopy(self.DEFAULT_SETTINGS)
-        self.save_settings()
+        self._settings_store.reset_to_defaults()
 
-    # === 工作区状态 ===
-
-    _KNOWN_WORKSPACE_KEYS = frozenset({
-        "last_session", "recent_files", "external_files",
-        "editor", "game", "secretary", "view", "window",
-        "resources", "cores",
-    })
+    # === 工作区状态（委托 WorkspaceStore） ===
 
     def update_workspace_field(self, key: str, value: Any) -> None:
-        if key not in self._KNOWN_WORKSPACE_KEYS:
-            raise KeyError(f"未知的 workspace 字段: {key}")
-        self._workspace[key] = value
+        self._workspace_store.update_workspace_field(key, value)
 
     def get_workspace(self) -> Dict:
-        return self._workspace
+        return self._workspace_store.as_dict()
+
+    def get_settings(self) -> Dict:
+        return self._settings_store.as_dict()
 
     def set_open_files(self, files: List[Dict]) -> None:
-        self._workspace["last_session"]["open_files"] = files
+        self._workspace_store.set_open_files(files)
 
     def get_open_files(self) -> List[Dict]:
-        return cast(List[Dict[str, Any]], self._workspace.get("last_session", {}).get("open_files", []))
+        return self._workspace_store.get_open_files()
 
     def set_active_tab_index(self, index: int) -> None:
-        self._workspace["last_session"]["active_tab_index"] = index
+        self._workspace_store.set_active_tab_index(index)
 
     def get_active_tab_index(self) -> int:
-        return int(self._workspace.get("last_session", {}).get("active_tab_index", 0))
+        return self._workspace_store.get_active_tab_index()
 
     def set_current_view(self, view: str) -> None:
-        self._workspace["last_session"]["current_view"] = view
+        self._workspace_store.set_current_view(view)
 
     def get_current_view(self) -> str:
-        return str(self._workspace.get("last_session", {}).get("current_view", "editor"))
+        return self._workspace_store.get_current_view()
 
     def get_bookmarks(self, filepath: str) -> list:
-        """获取指定文件的书签行号列表。"""
-        return list(self._workspace.get("bookmarks", {}).get(filepath, []))
+        return self._workspace_store.get_bookmarks(filepath)
 
     def set_bookmarks(self, filepath: str, lines: list) -> None:
-        """设置指定文件的书签行号列表。"""
-        bookmarks = self._workspace.setdefault("bookmarks", {})
-        if lines:
-            bookmarks[filepath] = sorted(lines)
-        else:
-            bookmarks.pop(filepath, None)
+        self._workspace_store.set_bookmarks(filepath, lines)
 
     def get_folds(self, filepath: str) -> list:
-        """获取指定文件的折叠状态（被折叠标题行号列表）。"""
-        return list(self._workspace.get("folds", {}).get(filepath, []))
+        return self._workspace_store.get_folds(filepath)
 
     def set_folds(self, filepath: str, lines: list) -> None:
-        """设置指定文件的折叠状态（被折叠标题行号列表）。"""
-        folds = self._workspace.setdefault("folds", {})
-        if lines:
-            folds[filepath] = sorted(lines)
-        else:
-            folds.pop(filepath, None)
+        self._workspace_store.set_folds(filepath, lines)
 
     def add_recent_file(self, filepath: str) -> None:
-        recent = self._workspace.get("recent_files", [])
-        if filepath in recent:
-            recent.remove(filepath)
-        recent.insert(0, filepath)
-        self._workspace["recent_files"] = recent[:20]
+        self._workspace_store.add_recent_file(filepath)
+
+    def set_recent_files(self, files: List[str]) -> None:
+        self._workspace_store.set_recent_files(files)
 
     def get_recent_files(self) -> List[str]:
-        return cast(List[str], self._workspace.get("recent_files", []))
+        return self._workspace_store.get_recent_files()
 
     def get_external_files(self) -> List[str]:
-        return cast(List[str], self._workspace.get("external_files", []))
+        return self._workspace_store.get_external_files()
 
     def add_external_file(self, filepath: str) -> None:
-        if "external_files" not in self._workspace:
-            self._workspace["external_files"] = []
-        external = self._workspace["external_files"]
-        if filepath not in external:
-            external.append(filepath)
-            self.save_workspace()
+        self._workspace_store.add_external_file(filepath)
 
     def remove_external_file(self, filepath: str) -> None:
-        external = self._workspace.get("external_files", [])
-        if filepath in external:
-            external.remove(filepath)
-            self.save_workspace()
+        self._workspace_store.remove_external_file(filepath)
+
+    def set_closed_tab_memory(self, filepath: str, cursor_position: int, scroll_position: int) -> None:
+        self._workspace_store.set_closed_tab_memory(filepath, cursor_position, scroll_position)
+
+    def get_closed_tab_memory(self, filepath: str) -> Optional[Dict]:
+        return self._workspace_store.get_closed_tab_memory(filepath)
+
+    def clear_closed_tab_memory(self, filepath: str) -> None:
+        self._workspace_store.clear_closed_tab_memory(filepath)
+
+    # === 子模块访问（供服务组装，AppContext 阶段使用） ===
+
+    @property
+    def path_resolver(self) -> PathResolver:
+        return self._path_resolver
+
+    @property
+    def settings_store(self) -> SettingsStore:
+        return self._settings_store
+
+    @property
+    def workspace_store(self) -> WorkspaceStore:
+        return self._workspace_store
 
     # === 存档代理（向后兼容） ===
 
@@ -437,8 +281,14 @@ class Config:
     def savegame_manager(self) -> SavegameManager:
         return self._savegame_manager
 
-    def get_savegame(self) -> Dict:
+    def get_savegame(self) -> Mapping[str, Any]:
         return self._savegame_manager.get_savegame()
+
+    def get_savegame_field(self, key: str, default: Any = None) -> Any:
+        return self._savegame_manager.get_savegame_field(key, default)
+
+    def set_savegame_field(self, key: str, value: Any) -> None:
+        self._savegame_manager.set_savegame_field(key, value)
 
     def get_resources(self) -> Dict[str, int]:
         return self._savegame_manager.get_resources()
@@ -475,6 +325,9 @@ class Config:
 
     def get_last_login(self) -> Optional[str]:
         return self._savegame_manager.get_last_login()
+
+    def check_daily_checkin(self) -> bool:
+        return self._savegame_manager.check_daily_checkin()
 
     # === 安全代理（向后兼容） ===
 

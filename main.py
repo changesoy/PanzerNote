@@ -7,6 +7,7 @@ PanzerNote - 战车少女主题记事本
 
 import sys
 import os
+import shutil
 import traceback
 from datetime import datetime
 
@@ -19,17 +20,21 @@ sys.path.insert(0, APP_DIR)
 
 _original_excepthook = sys.excepthook
 
+# crash log 写入目录：excepthook 在 Config 就绪前就要注册（否则 Config 自身崩溃无日志），
+# 那时还不知道 base_path，只能回退到 APP_DIR；Config 就绪后由 _activate_crash_log_dir() 切换。
+_crash_log_dir = os.path.join(APP_DIR, "data", "logs")
+MAX_CRASH_LOGS = 15
+
 
 def _crash_excepthook(exc_type, exc_value, exc_tb):
     try:
-        logs_dir = os.path.join(APP_DIR, "data", "logs")
-        os.makedirs(logs_dir, exist_ok=True)
+        os.makedirs(_crash_log_dir, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        crash_file = os.path.join(logs_dir, f"crash_{timestamp}.log")
+        crash_file = os.path.join(_crash_log_dir, f"crash_{timestamp}.log")
         with open(crash_file, "w", encoding="utf-8") as f:
             f.write(f"PanzerNote Crash Log\n")
             f.write(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"Version: {__version__ if '__version__' in dir() else 'unknown'}\n")
+            f.write(f"Version: {globals().get('__version__', 'unknown')}\n")
             f.write(f"Python: {sys.version}\n")
             f.write(f"OS: {sys.platform}\n")
             f.write(f"\n{'='*60}\n\n")
@@ -41,12 +46,68 @@ def _crash_excepthook(exc_type, exc_value, exc_tb):
 
 sys.excepthook = _crash_excepthook
 
+
+def _iter_crash_logs(log_dir):
+    """枚举目录下所有 crash_*.log 文件名（目录不存在时为空迭代）"""
+    if not os.path.isdir(log_dir):
+        return
+    for name in os.listdir(log_dir):
+        if name.startswith("crash_") and name.endswith(".log"):
+            yield name
+
+
+def _migrate_crash_logs(old_dir, new_dir):
+    """把早期 crash log 从 old_dir 迁移到 new_dir（跨盘用 copy+delete，同名跳过）"""
+    os.makedirs(new_dir, exist_ok=True)
+    for name in _iter_crash_logs(old_dir):
+        src = os.path.join(old_dir, name)
+        dst = os.path.join(new_dir, name)
+        try:
+            if not os.path.exists(dst):
+                shutil.move(src, dst)
+        except OSError:
+            pass
+
+
+def _cleanup_crash_logs(log_dir, keep=MAX_CRASH_LOGS):
+    """仅保留最近 keep 个 crash log，按文件名时间戳倒序删除旧的"""
+    logs = sorted(_iter_crash_logs(log_dir), reverse=True)
+    for name in logs[keep:]:
+        try:
+            os.remove(os.path.join(log_dir, name))
+        except OSError:
+            pass
+
+
+def _clear_crash_logs(log_dir):
+    """正常退出时清空 crash log。
+
+    能走到清理说明本次运行无未捕获异常（异常会由 excepthook 写日志后
+    直接终止进程，不会返回主循环），因此残留日志只可能来自历史崩溃，
+    应一并清除，避免下次启动误报"上次启动异常退出"。
+    """
+    for name in _iter_crash_logs(log_dir):
+        try:
+            os.remove(os.path.join(log_dir, name))
+        except OSError:
+            pass
+
+
+def _activate_crash_log_dir(new_dir):
+    """切换 crash log 写入目录到用户数据目录：迁移早期日志、清理过期文件、更新 hook 目标"""
+    global _crash_log_dir
+    if os.path.normpath(_crash_log_dir) != os.path.normpath(new_dir):
+        _migrate_crash_logs(_crash_log_dir, new_dir)
+    _cleanup_crash_logs(new_dir)
+    _crash_log_dir = new_dir
+
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QIcon
 
 from src import __version__
 from src.core.config import Config
+from src.core.app_context import AppContext
 from src.ui.first_run_dialog import FirstRunDialog
 from src.utils.logger import setup_logging, get_logger
 from src.utils.feature_flags import init_flags
@@ -124,13 +185,15 @@ def main():
     profiler.begin_phase(PHASE_LOG_INIT)
     log_dir = os.path.join(config.get_base_path(), "data", "logs")
     setup_logging(log_dir=log_dir)
+    # crash hook 在 Config 就绪前已注册并写 APP_DIR，此处切换到用户数据目录并迁移早期日志
+    _activate_crash_log_dir(log_dir)
     logger = get_logger(__name__)
     logger.info("PanzerNote 启动，版本 %s", __version__)
 
     _verify_version_consistency(logger)
     profiler.end_phase()
 
-    crash_logs = [f for f in os.listdir(log_dir) if f.startswith("crash_") and f.endswith(".log")]
+    crash_logs = list(_iter_crash_logs(log_dir))
     if crash_logs:
         latest_crash = sorted(crash_logs)[-1]
         crash_path = os.path.join(log_dir, latest_crash)
@@ -151,7 +214,15 @@ def main():
 
     profiler.begin_phase(PHASE_WINDOW_CREATE)
     from src.main_window import MainWindow
-    window = MainWindow(config)
+    # 阶段 7：AppContext 承载已拆好的子模块，稳定依赖边界；
+    # Config 门面仍在 app_context.config 上保留（过渡期共存）
+    app_context = AppContext(
+        path_resolver=config.path_resolver,
+        settings_store=config.settings_store,
+        workspace_store=config.workspace_store,
+        config=config,
+    )
+    window = MainWindow(app_context)
     profiler.end_phase()
 
     profiler.begin_phase(PHASE_WINDOW_SHOW)
@@ -160,7 +231,10 @@ def main():
 
     logger.info(profiler.get_report())
 
-    sys.exit(app.exec())
+    exit_code = app.exec()
+    # 正常退出：清空 crash 日志，确保下次启动只对真正的异常退出提示
+    _clear_crash_logs(log_dir)
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":

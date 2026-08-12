@@ -27,7 +27,7 @@ class GameEngine:
 
     def __init__(self, config: Config) -> None:
         self._config = config
-        self._bauxite_counter: int = config.get_savegame().get("bauxite_counter", 0)
+        self._bauxite_counter: int = config.get_savegame_field("bauxite_counter", 0)
 
     def calculate_idle_reward(self) -> dict:
         """计算单次在线挂机奖励（每分钟调用）
@@ -48,7 +48,7 @@ class GameEngine:
         else:
             bauxite = 0
 
-        self._config.get_savegame()["bauxite_counter"] = self._bauxite_counter
+        self._config.set_savegame_field("bauxite_counter", self._bauxite_counter)
 
         return {"fuel": fuel, "ammo": ammo, "steel": steel, "bauxite": bauxite}
 

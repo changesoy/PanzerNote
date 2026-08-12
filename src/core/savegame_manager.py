@@ -8,7 +8,8 @@ import json
 import os
 from datetime import datetime
 from enum import Enum, auto
-from typing import Any, Dict, Optional, cast
+from types import MappingProxyType
+from typing import Any, Dict, Mapping, Optional, cast
 
 from ..utils.logger import get_logger
 from ..utils.exceptions import safe_call
@@ -61,8 +62,9 @@ class SavegameManager:
         self._logger = get_logger(__name__)
 
     @property
-    def data(self) -> Dict[str, Any]:
-        return self._savegame
+    def data(self) -> Mapping[str, Any]:
+        """存档数据只读视图（仅供内部调试/测试，勿修改内部状态）"""
+        return MappingProxyType(self._savegame)
 
     def _get_savegame_path(self) -> str:
         return os.path.join(self._gamedata_dir, "savegame.json")
@@ -109,12 +111,24 @@ class SavegameManager:
 
     # === 存档数据访问 ===
 
-    def get_savegame(self) -> Dict:
-        return self._savegame
+    def get_savegame(self) -> Mapping[str, Any]:
+        """返回存档数据的只读视图（仅供内部调试/查看，勿用于业务读写）
+
+        外部代码请使用 get_savegame_field() / set_savegame_field()，
+        避免拿到 dict 引用后绕过封装修改内部状态。
+        """
+        return MappingProxyType(self._savegame)
+
+    def get_savegame_field(self, key: str, default: Any = None) -> Any:
+        return self._savegame.get(key, default)
+
+    def set_savegame_field(self, key: str, value: Any) -> None:
+        self._savegame[key] = value
 
     def get_resources(self) -> Dict[str, int]:
         default: Dict[str, int] = {"fuel": 0, "ammo": 0, "steel": 0, "bauxite": 0}
-        return cast(Dict[str, int], self._savegame.get("resources", default))
+        # 返回拷贝，避免调用方（插件等）拿到内部 resources dict 引用后修改
+        return cast(Dict[str, int], dict(self._savegame.get("resources", default)))
 
     def set_resources(self, resources: Dict[str, int]):
         self._savegame["resources"] = resources
@@ -160,8 +174,7 @@ class SavegameManager:
     def get_last_login(self) -> Optional[str]:
         return self._savegame.get("last_login")
 
-    def migrate_bauxite_counter(self, settings: Dict):
-        old_val = settings.get("game", {}).pop("bauxite_counter", None)
+    def migrate_bauxite_counter(self, old_val: Any) -> None:
         if old_val is not None:
             self._savegame["bauxite_counter"] = old_val
             self._logger.info("已迁移 bauxite_counter (%s) 从 settings 到 savegame", old_val)

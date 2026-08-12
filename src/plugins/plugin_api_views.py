@@ -17,7 +17,7 @@ class ReadOnlyConfigView:
         'set_', 'save', 'get_file_guard', 'get_security_manager',
         '_settings', '_workspace', '_savegame_manager',
         '_path_validator', '_file_guard', '_input_validator',
-        '_crypto_manager', '_security_manager',
+        '_security_manager',
         'set_base_path', 'set_initialized', 'reset_to_defaults',
         'set_editor_setting', 'set_game_setting', 'set_secretary_setting',
         'set_view_setting', 'set_window_setting', 'set_setting',
@@ -60,7 +60,7 @@ class ReadOnlyConfigView:
         return cast(Dict[str, int], self._config.get_resources())
 
     def get_savegame_field(self, key: str, default: Any = None) -> Any:
-        return self._config.get_savegame().get(key, default)
+        return self._config.get_savegame_field(key, default)
 
     def get_setting(self, key: str, default: Any = None) -> Any:
         return self._config.get_setting(key, default)

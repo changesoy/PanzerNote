@@ -298,6 +298,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self.setTabsClosable(True)
         self.setMovable(True)
         self.setDocumentMode(True)
+        # 3.5.4：接受跨分屏标签迁移拖拽（MIME_TAB_FILEPATH）
+        self.setAcceptDrops(True)
 
         self.tabCloseRequested.connect(self._on_tab_close_requested)
         self.currentChanged.connect(self._on_current_changed)
@@ -383,6 +385,73 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         tab_id = self._next_tab_id
         self._next_tab_id += 1
         return tab_id
+
+    # === 3.5.4 跨分屏标签迁移（拖拽） ===
+
+    def dragEnterEvent(self, event):
+        """接受标签迁移拖拽（MIME_TAB_FILEPATH）；其余（如文件 URL）放行给窗口级拖放。"""
+        if event.mimeData().hasFormat(MIME_TAB_FILEPATH):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        """跨分屏标签迁移：源标签栏位于另一个 EditorTabWidget 时执行迁移。"""
+        source = event.source()
+        if not event.mimeData().hasFormat(MIME_TAB_FILEPATH):
+            event.ignore()
+            return
+        if not isinstance(source, DraggableTabBar):
+            event.ignore()
+            return
+        source_tabs = source.parent()
+        if not isinstance(source_tabs, EditorTabWidget) or source_tabs is self:
+            event.ignore()
+            return
+        index = source._drag_tab_index
+        if index < 0 or index >= source_tabs.count():
+            event.ignore()
+            return
+        if self._migrate_tab_from(source_tabs, index):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def _migrate_tab_from(self, source_tabs: "EditorTabWidget", index: int) -> bool:
+        """把源面板 index 位置的标签迁移到本面板（脏标记不丢）。
+
+        顺序关键：取信息 → 源移除/注销 → 目标添加/注册 → 提升 _next_tab_id。
+        源移除后 emit tab_count_changed（空分屏自动关闭 / 主面板空会话兜底联动）。
+        """
+        if source_tabs is self:
+            return False
+        widget = source_tabs.widget(index)
+        if widget is None:
+            return False
+        tab_id = getattr(widget, 'tab_id', None)
+        if tab_id is None:
+            return False
+        state = source_tabs._registry.get(tab_id)
+        if state is None:
+            return False
+        if source_tabs._save_manager.is_saving(tab_id):
+            return False  # 保存中拒绝迁移，避免跨面板保存状态机竞态
+        title = source_tabs.tabText(index)
+
+        # 源：移除标签 + 注销状态（removeTab 为原生方法，不触发关闭确认）
+        source_tabs.removeTab(index)
+        source_tabs._registry.unregister(tab_id)
+        source_tabs._save_manager.unregister_tab(tab_id)
+        source_tabs.tab_count_changed.emit(source_tabs.count())
+
+        # 目标：添加标签 + 注册状态（tabInserted 自动重建关闭按钮）
+        self.addTab(widget, title)
+        self._registry.register(tab_id, state)
+        self._save_manager.register_tab(tab_id)
+        # 关键：每个面板 _next_tab_id 独立计数，提升避免未来生成重复 tab_id
+        self._next_tab_id = max(self._next_tab_id, tab_id + 1)
+        self.tab_count_changed.emit(self.count())
+        return True
 
     def new_file(self) -> int:
         """新建文件"""

@@ -153,6 +153,7 @@ class MenuBuilder:
         menu.addSeparator()
         self._add_action(menu, "水平分屏（独立编辑）", None, mw._split_editor_horizontal, "view.split_horizontal", "视图")
         self._add_action(menu, "垂直分屏（独立编辑）", None, mw._split_editor_vertical, "view.split_vertical", "视图")
+        self._add_action(menu, "重置分屏布局", None, mw._reset_split_layout, "view.reset_split_layout", "视图")
         self._add_action(menu, "关闭分屏", None, mw._close_split, "view.close_split", "视图")
         menu.addSeparator()
         self._add_action(menu, "折叠/展开文件树", QKeySequence("Ctrl+B"), mw._toggle_file_tree, "view.file_tree", "视图")

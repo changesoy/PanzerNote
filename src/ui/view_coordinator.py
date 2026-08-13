@@ -195,6 +195,18 @@ class ViewCoordinator:
         split_tabs.setParent(None)
         split_tabs.deleteLater()
 
+    def reset_split_layout(self) -> None:
+        """重置分屏布局：清空方向/比例记忆；有分屏时立即均分（恢复默认水平方向）。
+
+        3.5.9：方向/比例记忆的可控出口（菜单「重置分屏布局」），无分屏时仅清记忆。
+        """
+        self._config.set_view_setting("split_ratio_h", [])
+        self._config.set_view_setting("split_ratio_v", [])
+        if self._split_tabs:
+            self._editor_splitter.setOrientation(Qt.Orientation.Horizontal)
+            total = self._editor_splitter.width()
+            self._editor_splitter.setSizes([total // 2, total // 2])
+
     def restore_split(
         self, orientation: Qt.Orientation, sizes: List[int]
     ) -> None:

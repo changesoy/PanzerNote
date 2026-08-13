@@ -11,6 +11,7 @@ v1.5.4 改动：
 
 import os
 import html as html_module
+from functools import partial
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QSplitter, QMenuBar, QMenu, QStatusBar,
@@ -232,7 +233,7 @@ class MainWindow(QMainWindow):
         """主面板与分屏复用，保证信号配置永远一致。"""
         tabs.current_changed.connect(self._on_tab_changed)
         tabs.content_modified.connect(self._on_content_modified)
-        tabs.tab_count_changed.connect(self._on_tab_count_changed)
+        tabs.tab_count_changed.connect(partial(self._on_tab_count_changed, tabs))
         tabs.chars_typed.connect(self._on_chars_typed)
         tabs.cursor_position_changed.connect(self._update_stats)
         tabs.word_count_updated.connect(self._update_stats)
@@ -298,6 +299,14 @@ class MainWindow(QMainWindow):
                 self.editor_tabs.setCurrentIndex(active_index)
 
         self._restore_split_state()
+
+        # 3.5.9：启动空会话兜底（主面板总有一个可编辑位置）
+        if self.editor_tabs.count() == 0:
+            self.editor_tabs.new_file()
+        # 3.5.9：旧配置残留的空分屏（3.5.9 之前保存的空面板）→ 自动关闭
+        for tabs in list(self.view_coordinator.split_tabs):
+            if tabs.count() == 0:
+                self.view_coordinator.close_split(self)
 
         current_view = self.config.get_current_view()
         if current_view != "editor":
@@ -965,6 +974,10 @@ class MainWindow(QMainWindow):
         """关闭分屏（委托 ViewCoordinator）"""
         self.view_coordinator.close_split(self)
 
+    def _reset_split_layout(self):
+        """重置分屏布局（委托 ViewCoordinator）"""
+        self.view_coordinator.reset_split_layout()
+
     def _toggle_file_tree(self):
         """切换文件树显示/隐藏（委托 ViewCoordinator）"""
         self.view_coordinator.toggle_file_tree()
@@ -1089,10 +1102,19 @@ class MainWindow(QMainWindow):
         self.resource_bar.refresh()
         self.secretary.show_message("文件已保存！")
 
-    def _on_tab_count_changed(self, count: int):
-        """标签页数量变化"""
+    def _on_tab_count_changed(self, tabs: EditorTabWidget, count: int):
+        """标签页数量变化
+
+        3.5.9：标签全关时的空会话兜底 / 自动关闭分屏。
+        - 主面板标签全关 → 自动新建未命名1（总有一个可编辑位置）。
+        - 分屏标签全关 → 自动关闭分屏（分屏是临时任务视图，任务完成即清理）；
+          分屏不新建未命名，否则与自动关闭冲突。
+        """
         if count == 0:
-            self.secretary.show_event_message("欢迎")
+            if tabs is self.editor_tabs:
+                tabs.new_file()
+            else:
+                self.view_coordinator.close_split(self)
 
     def _on_file_move_from_tree(self, src_filepath: str, dest_folder: str):
         """文件树请求移动文件（标签拖拽到文件夹）"""

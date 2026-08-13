@@ -10,12 +10,13 @@ v1.6.4 改动：
 """
 
 import os
+from typing import Optional
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QTreeView, QLabel, QMenu,
     QInputDialog, QMessageBox,
-    QHeaderView, QFrame, QScrollArea, QStyledItemDelegate
+    QHeaderView, QFrame, QScrollArea, QStyledItemDelegate, QAbstractItemView
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QDir, QModelIndex, QMimeData, QSortFilterProxyModel
+from PyQt6.QtCore import Qt, pyqtSignal, QDir, QModelIndex, QMimeData, QSortFilterProxyModel, QTimer
 from PyQt6.QtGui import QFont, QAction, QFileSystemModel
 
 from ..core.config import Config
@@ -61,12 +62,40 @@ class ExternalFileLabel(QLabel):
 class DroppableTreeView(QTreeView):
 
     file_move_requested = pyqtSignal(str, str)
+    file_copy_requested = pyqtSignal(str, str)
     # 3.5.11：(source_tabs, tab_id, dest_folder) 未命名标签落盘保存
     untitled_save_requested = pyqtSignal(object, int, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAcceptDrops(True)
+
+    def _ask_move_or_copy(self, filename: str, dest_folder: str) -> Optional[str]:
+        """询问用户移动还是复制文件。返回 "move" / "copy" / None（取消）。"""
+        box = QMessageBox(self)
+        box.setWindowTitle("移动或复制")
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setText(f"将「{filename}」放入文件夹：\n{os.path.basename(dest_folder)}")
+        box.setInformativeText("请选择要执行的操作。")
+        move_btn = box.addButton("移动", QMessageBox.ButtonRole.AcceptRole)
+        copy_btn = box.addButton("复制", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(move_btn)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is move_btn:
+            return "move"
+        if clicked is copy_btn:
+            return "copy"
+        return None
+
+    def _handle_saved_tab_drop(self, src_filepath: str, dest_folder: str):
+        """拖放结束后（异步）询问移动/复制并发出对应请求。"""
+        action = self._ask_move_or_copy(os.path.basename(src_filepath), dest_folder)
+        if action == "move":
+            self.file_move_requested.emit(src_filepath, dest_folder)
+        elif action == "copy":
+            self.file_copy_requested.emit(src_filepath, dest_folder)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -90,7 +119,8 @@ class DroppableTreeView(QTreeView):
 
     def dragMoveEvent(self, event):
         if self._is_tab_drag(event.mimeData()):
-            index = self.indexAt(event.pos())
+            # PyQt6 拖拽事件没有 pos()（仅 position() 返回 QPointF）
+            index = self.indexAt(event.position().toPoint())
             model = self.model()
             if index.isValid() and model:
                 if isinstance(model, QFileSystemModel) and model.isDir(index):
@@ -117,7 +147,7 @@ class DroppableTreeView(QTreeView):
                 except (ValueError, UnicodeDecodeError):
                     tab_id = None
 
-            index = self.indexAt(event.pos())
+            index = self.indexAt(event.position().toPoint())
             model = self.model()
             dest_folder = None
 
@@ -137,7 +167,12 @@ class DroppableTreeView(QTreeView):
             if dest_folder:
                 if src_filepath:
                     if os.path.dirname(os.path.abspath(src_filepath)) != os.path.abspath(dest_folder):
-                        self.file_move_requested.emit(src_filepath, dest_folder)
+                        # 先完成拖放事件，再异步弹窗询问：
+                        # 模态对话框不能嵌套在（Windows 原生）拖拽事件循环内。
+                        QTimer.singleShot(
+                            0,
+                            lambda: self._handle_saved_tab_drop(src_filepath, dest_folder),
+                        )
                 elif tab_id is not None:
                     # 未命名标签拖到文件树 = 落盘保存（源面板从拖拽发起者父级取）
                     source = event.source()
@@ -154,6 +189,9 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
 
     file_open_requested = pyqtSignal(str)
     file_move_requested = pyqtSignal(str, str)
+    file_copy_requested = pyqtSignal(str, str)
+    # (filepath, is_dir)：删除成功后通知外部同步关闭已打开的标签页
+    file_deleted = pyqtSignal(str, bool)
     # 3.5.11：(source_tabs, tab_id, dest_folder) 未命名标签落盘保存
     untitled_save_requested = pyqtSignal(object, int, str)
 
@@ -193,10 +231,15 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
         ])
         self.model.setNameFilterDisables(False)
 
+        # QFileSystemModel.readOnly 默认为 True，会导致 dropMimeData 直接返回 False，
+        # 树内拖拽（不同子文件夹之间移动/复制）完全无反应。放开只读以启用拖放。
+        self.model.setReadOnly(False)
+
         self.tree_view = DroppableTreeView()
         self.tree_view.setModel(self.model)
         self.tree_view.setRootIndex(self.model.index(notebooks_path))
         self.tree_view.file_move_requested.connect(self._on_file_move_requested)
+        self.tree_view.file_copy_requested.connect(self._on_file_copy_requested)
         self.tree_view.untitled_save_requested.connect(self._on_untitled_save_requested)
 
         self.tree_view.setHeaderHidden(True)
@@ -207,6 +250,9 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
         self.tree_view.setDragEnabled(True)
         self.tree_view.setAcceptDrops(True)
         self.tree_view.setDropIndicatorShown(True)
+        # setReadOnly(False) 后文件获得 ItemIsEditable，双击会进入行内重命名；
+        # 重命名走右键菜单（QInputDialog），禁用行内编辑避免与双击打开冲突。
+        self.tree_view.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
 
         self.tree_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree_view.customContextMenuRequested.connect(self._show_context_menu)
@@ -277,6 +323,9 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
 
     def _on_file_move_requested(self, src_filepath: str, dest_folder: str):
         self.file_move_requested.emit(src_filepath, dest_folder)
+
+    def _on_file_copy_requested(self, src_filepath: str, dest_folder: str):
+        self.file_copy_requested.emit(src_filepath, dest_folder)
 
     def _on_untitled_save_requested(self, source_tabs, tab_id: int, dest_folder: str):
         self.untitled_save_requested.emit(source_tabs, tab_id, dest_folder)
@@ -441,6 +490,9 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
             except Exception as e:
                 get_logger(__name__).error("删除失败: %s", e)
                 ErrorHandler.show_from_exception(e, ErrorCategory.FILE, "删除失败")
+            else:
+                # 删除成功后再通知外部（同步关闭已打开的标签页）
+                self.file_deleted.emit(os.path.normpath(filepath), is_dir)
 
     def refresh_external_files(self):
         external_files = self.config.get_external_files()

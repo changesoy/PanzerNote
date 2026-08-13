@@ -224,6 +224,8 @@ class MainWindow(QMainWindow):
         self.game_sidebar.view_changed.connect(self._on_view_changed)
         self.file_tree.file_open_requested.connect(self._open_file)
         self.file_tree.file_move_requested.connect(self._on_file_move_from_tree)
+        self.file_tree.file_copy_requested.connect(self._on_file_copy_from_tree)
+        self.file_tree.file_deleted.connect(self._on_file_deleted)
         self.file_tree.untitled_save_requested.connect(self._on_untitled_save_from_tree)
         self.outline_panel.heading_clicked.connect(self._on_outline_heading_clicked)
         self.find_in_files_panel.result_clicked.connect(self._on_find_in_files_result)
@@ -1133,6 +1135,20 @@ class MainWindow(QMainWindow):
             self.secretary.show_message(
                 f"已将 {os.path.basename(src_filepath)} 移动到 {os.path.basename(dest_folder)}/"
             )
+
+    def _on_file_copy_from_tree(self, src_filepath: str, dest_folder: str):
+        """文件树请求复制文件（标签拖拽到文件夹）"""
+        import os
+        success = self.editor_tabs.copy_file_to_folder(src_filepath, dest_folder)
+        if success:
+            self.secretary.show_message(
+                f"已将 {os.path.basename(src_filepath)} 复制到 {os.path.basename(dest_folder)}/"
+            )
+
+    def _on_file_deleted(self, path: str, is_dir: bool):
+        """文件树删除文件/文件夹后，同步关闭所有（含分屏）已打开的对应标签页"""
+        for tabs in [self.editor_tabs, *self.view_coordinator.split_tabs]:
+            tabs.close_tabs_of_deleted_path(path, is_dir)
 
     def _on_untitled_save_from_tree(self, source_tabs, tab_id: int, dest_folder: str):
         """3.5.11：未命名标签拖到文件树 → 落盘保存（一行委托）"""

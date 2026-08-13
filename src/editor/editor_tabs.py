@@ -1851,6 +1851,113 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             ErrorHandler.show_from_exception(e, ErrorCategory.FILE, "移动文件失败")
             return False
 
+    def copy_file_to_folder(self, filepath: str, dest_folder: str) -> bool:
+        """将文件复制到目标文件夹（标签已打开且已修改则先保存再复制，不改动原标签）"""
+        if not os.path.isfile(filepath) or not os.path.isdir(dest_folder):
+            return False
+
+        filename = os.path.basename(filepath)
+        new_path = os.path.join(dest_folder, filename)
+
+        if os.path.exists(new_path):
+            msg = QMessageBox.question(
+                self, "文件已存在",
+                f"目标文件夹中已存在 '{filename}'，是否覆盖？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No
+            )
+            if msg != QMessageBox.StandardButton.Yes:
+                return False
+
+        try:
+            # 若标签打开且已修改，先保存再复制，保证副本包含最新内容
+            for i in range(self.count()):
+                widget = self.widget(i)
+                tab_id = getattr(widget, 'tab_id', None)
+                if tab_id is not None:
+                    state = self._registry.get(tab_id)
+                    if state and state.filepath == filepath:
+                        if state.is_modified:
+                            self._save_file(widget, filepath, state.encoding)
+                        break
+
+            import shutil
+            shutil.copy2(filepath, new_path)
+            return True
+        except Exception as e:
+            get_logger(__name__).error("复制文件失败: %s", e)
+            ErrorHandler.show_from_exception(e, ErrorCategory.FILE, "复制文件失败")
+            return False
+
+    def close_tabs_of_deleted_path(self, path: str, is_dir: bool) -> None:
+        """文件树删除文件/文件夹后，同步关闭已打开的对应标签页。
+
+        - 未修改的标签直接关闭；
+        - 已修改的标签弹确认（关闭 = 放弃未保存的修改，不重新保存）。
+        这是删除语义：此时"保存"只会把已删除的文件重新创建回来。
+        """
+        norm = os.path.normpath(path)
+        indices = []
+        for i in range(self.count()):
+            widget = self.widget(i)
+            tab_id = getattr(widget, 'tab_id', None)
+            if tab_id is None:
+                continue
+            state = self._registry.get(tab_id)
+            if not state or not state.filepath:
+                continue
+            fp = os.path.normpath(state.filepath)
+            if is_dir:
+                matched = fp.startswith(norm + os.sep)
+            else:
+                matched = fp == norm
+            if matched:
+                indices.append(i)
+
+        # 从后往前关闭，避免索引随 removeTab 偏移
+        for i in reversed(indices):
+            self._close_deleted_tab(i)
+
+    def _close_deleted_tab(self, index: int) -> None:
+        """关闭单个标签（文件已被删除，不提供"保存"选项）。"""
+        widget = self.widget(index)
+        tab_id = getattr(widget, 'tab_id', None) if widget else None
+        state = self._registry.get(tab_id) if tab_id is not None else None
+
+        if tab_id is None or state is None:
+            self.removeTab(index)
+            self.tab_count_changed.emit(self.count())
+            return
+
+        if state.is_modified:
+            name = self._strip_tab_suffix(self.tabText(index))
+            msg = QMessageBox(self)
+            msg.setWindowTitle("关闭标签")
+            msg.setText(f"文件 '{name}' 已在文件树中删除。")
+            msg.setInformativeText("标签页有未保存的修改，关闭将放弃这些修改。")
+            msg.setIcon(QMessageBox.Icon.Warning)
+            close_btn = msg.addButton("关闭标签", QMessageBox.ButtonRole.DestructiveRole)
+            msg.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+            msg.setDefaultButton(close_btn)
+            msg.exec()
+            if msg.clickedButton() is not close_btn:
+                return
+
+        if state.is_new:
+            title = self._strip_tab_suffix(self.tabText(index))
+            self._release_untitled_number(title)
+        else:
+            filepath = state.filepath
+            if filepath and os.path.isfile(filepath):
+                self._record_closed_tab(filepath, widget)
+
+        if state.filepath:
+            self._session_manager.remove_autosave_for_file(state.filepath)
+
+        self._save_manager.unregister_tab(tab_id)
+        self._registry.unregister(tab_id)
+        self.removeTab(index)
+        self.tab_count_changed.emit(self.count())
+
     # === 编辑操作代理 ===
 
     def undo(self) -> bool:

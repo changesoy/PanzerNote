@@ -26,6 +26,8 @@ from ..themes.theme_aware_mixin import ThemeAwareMixin
 
 
 MIME_TAB_FILEPATH = "application/x-panzernote-tab-filepath"
+# 3.5.11：与 editor_tabs.py 同值；未命名标签（无 filepath）落盘保存时定位源标签
+MIME_TAB_ID = "application/x-panzernote-tab-id"
 
 
 class AlwaysExpandableModel(QFileSystemModel):
@@ -59,6 +61,8 @@ class ExternalFileLabel(QLabel):
 class DroppableTreeView(QTreeView):
 
     file_move_requested = pyqtSignal(str, str)
+    # 3.5.11：(source_tabs, tab_id, dest_folder) 未命名标签落盘保存
+    untitled_save_requested = pyqtSignal(object, int, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -100,6 +104,14 @@ class DroppableTreeView(QTreeView):
         if event.mimeData().hasFormat(MIME_TAB_FILEPATH):
             data = event.mimeData().data(MIME_TAB_FILEPATH)
             src_filepath = bytes(data).decode('utf-8')
+            # 3.5.11：未命名标签无 filepath，通过 tab_id 定位源标签
+            tab_id = None
+            tab_id_data = event.mimeData().data(MIME_TAB_ID)
+            if tab_id_data and not tab_id_data.isEmpty():
+                try:
+                    tab_id = int(bytes(tab_id_data).decode('utf-8'))
+                except (ValueError, UnicodeDecodeError):
+                    tab_id = None
 
             index = self.indexAt(event.pos())
             model = self.model()
@@ -118,9 +130,16 @@ class DroppableTreeView(QTreeView):
                 if model and isinstance(model, QFileSystemModel):
                     dest_folder = model.rootPath()
 
-            if dest_folder and src_filepath:
-                if os.path.dirname(os.path.abspath(src_filepath)) != os.path.abspath(dest_folder):
-                    self.file_move_requested.emit(src_filepath, dest_folder)
+            if dest_folder:
+                if src_filepath:
+                    if os.path.dirname(os.path.abspath(src_filepath)) != os.path.abspath(dest_folder):
+                        self.file_move_requested.emit(src_filepath, dest_folder)
+                elif tab_id is not None:
+                    # 未命名标签拖到文件树 = 落盘保存（源面板从拖拽发起者父级取）
+                    source = event.source()
+                    source_tabs = getattr(source, 'parent', lambda: None)()
+                    if source_tabs is not None:
+                        self.untitled_save_requested.emit(source_tabs, tab_id, dest_folder)
 
             event.acceptProposedAction()
         else:
@@ -131,6 +150,8 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
 
     file_open_requested = pyqtSignal(str)
     file_move_requested = pyqtSignal(str, str)
+    # 3.5.11：(source_tabs, tab_id, dest_folder) 未命名标签落盘保存
+    untitled_save_requested = pyqtSignal(object, int, str)
 
     def __init__(self, config: Config, theme_engine, parent=None):
         super().__init__(parent)
@@ -172,6 +193,7 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
         self.tree_view.setModel(self.model)
         self.tree_view.setRootIndex(self.model.index(notebooks_path))
         self.tree_view.file_move_requested.connect(self._on_file_move_requested)
+        self.tree_view.untitled_save_requested.connect(self._on_untitled_save_requested)
 
         self.tree_view.setHeaderHidden(True)
         self.tree_view.hideColumn(1)
@@ -251,6 +273,9 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
 
     def _on_file_move_requested(self, src_filepath: str, dest_folder: str):
         self.file_move_requested.emit(src_filepath, dest_folder)
+
+    def _on_untitled_save_requested(self, source_tabs, tab_id: int, dest_folder: str):
+        self.untitled_save_requested.emit(source_tabs, tab_id, dest_folder)
 
     def _show_context_menu(self, position):
         index = self.tree_view.indexAt(position)

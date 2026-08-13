@@ -120,6 +120,8 @@ class SaveAsDialog(QDialog):
 
 # 自定义 MIME 类型
 MIME_TAB_FILEPATH = "application/x-panzernote-tab-filepath"
+# 3.5.11：未命名标签（无 filepath）拖拽时携带 tab_id，供迁移/落盘定位源标签
+MIME_TAB_ID = "application/x-panzernote-tab-id"
 
 
 class DraggableTabBar(QTabBar):
@@ -168,22 +170,27 @@ class DraggableTabBar(QTabBar):
             super().mouseMoveEvent(event)
             return
 
-        # 获取该标签对应的文件路径
-        tab_widget = self.parent()  # QTabWidget
+        # 获取该标签对应的 tab_id 与文件路径（3.5.11：未命名标签无路径也可拖拽）
+        tab_widget = cast(QTabWidget, self.parent())
         if not tab_widget or not hasattr(tab_widget, '_get_filepath_for_index'):
             super().mouseMoveEvent(event)
             return
 
-        filepath = tab_widget._get_filepath_for_index(self._drag_tab_index)
-        if not filepath:
+        widget = tab_widget.widget(self._drag_tab_index)
+        tab_id = getattr(widget, 'tab_id', None) if widget else None
+        if tab_id is None:
             super().mouseMoveEvent(event)
             return
+
+        filepath = tab_widget._get_filepath_for_index(self._drag_tab_index) or ""
 
         # 发起 QDrag
         drag = QDrag(self)
         mime = QMimeData()
+        mime.setData(MIME_TAB_ID, str(tab_id).encode('utf-8'))
         mime.setData(MIME_TAB_FILEPATH, filepath.encode('utf-8'))
-        mime.setText(os.path.basename(filepath))
+        if filepath:
+            mime.setText(os.path.basename(filepath))
         drag.setMimeData(mime)
 
         result = drag.exec(Qt.DropAction.MoveAction | Qt.DropAction.CopyAction)
@@ -319,6 +326,20 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         super().tabInserted(index)
         btn = _TabCloseButton(self._theme_engine, self)
         self.tabBar().setTabButton(index, QTabBar.ButtonPosition.RightSide, btn)  # type: ignore[union-attr]
+        # 3.5.12：迁移过来的标签 tab_id 已存在，先刷新 tooltip（未注册时显示「未保存」）
+        self._update_tab_tooltip(index)
+
+    def _update_tab_tooltip(self, index: int) -> None:
+        """3.5.12：标签 tooltip 区分已保存（完整路径）与未保存（「未保存」）。"""
+        widget = self.widget(index)
+        tab_id = getattr(widget, 'tab_id', None)
+        if tab_id is None:
+            return
+        state = self._registry.get(tab_id)
+        if state is not None and state.filepath and not state.is_new:
+            self.setTabToolTip(index, state.filepath)
+        else:
+            self.setTabToolTip(index, "未保存")
 
     def set_find_bar(self, find_bar: FindReplaceBar):
         """设置外部传入的查找替换栏"""
@@ -448,8 +469,13 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self.addTab(widget, title)
         self._registry.register(tab_id, state)
         self._save_manager.register_tab(tab_id)
+        # 3.5.11：未命名标签迁移，编号随标签转移（源释放、目标占用）
+        if state.is_new and state.untitled_number is not None:
+            source_tabs._used_untitled_numbers.discard(state.untitled_number)
+            self._used_untitled_numbers.add(state.untitled_number)
         # 关键：每个面板 _next_tab_id 独立计数，提升避免未来生成重复 tab_id
         self._next_tab_id = max(self._next_tab_id, tab_id + 1)
+        self._update_tab_tooltip(self.indexOf(widget))
         self.tab_count_changed.emit(self.count())
         return True
 
@@ -502,6 +528,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
         self.setCurrentIndex(index)
         self.tab_count_changed.emit(self.count())
+        self._update_tab_tooltip(index)
         return int(index)
 
     def _is_markdown_file(self, filepath: str) -> bool:
@@ -628,6 +655,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if activate:
             self.setCurrentIndex(index)
         self.tab_count_changed.emit(self.count())
+        self._update_tab_tooltip(index)
 
         # 恢复书签
         saved_bookmarks = self.config.get_bookmarks(filepath)
@@ -740,6 +768,49 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                     "is_copy": not state.is_new,
                 }
 
+        return success, chars
+
+    def save_untitled_to_folder(self, tab_id: int, dest_folder: str) -> Tuple[bool, int]:
+        """3.5.11：把未命名标签直接落盘保存到目标文件夹（拖到文件树触发）。
+
+        复用通用保存链路：_save_file + _pending_save_as_info → CLEAN 回调自动完成
+        mark_new_saved / 编号释放 / 标题更新（与 save_current_as 一致）。
+        同名冲突弹框确认（默认不覆盖）；空内容也直接落盘（行为统一）。
+        """
+        state = self._registry.get(tab_id)
+        if state is None or not state.is_new or state.filepath:
+            return False, 0
+        widget = None
+        for i in range(self.count()):
+            w = self.widget(i)
+            if getattr(w, 'tab_id', None) == tab_id:
+                widget = w
+                break
+        if widget is None:
+            return False, 0
+
+        filename = state.display_name or f"未命名{state.untitled_number or 1}.txt"
+        filepath = os.path.join(dest_folder, filename)
+
+        if os.path.exists(filepath):
+            reply = QMessageBox.question(
+                self,
+                "文件已存在",
+                f"目标文件夹已存在同名文件：\n{filepath}\n\n是否覆盖？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return False, 0
+
+        success, chars = self._save_file(widget, filepath, state.encoding)
+        if success:
+            self._pending_save_as_info[tab_id] = {
+                "filepath": filepath,
+                "encoding": state.encoding,
+                "untitled_number": state.untitled_number if state.is_new else None,
+                "is_copy": False,
+            }
         return success, chars
 
     def _save_as_pdf(self, widget, filepath: str) -> Tuple[bool, int]:
@@ -1427,6 +1498,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
             if state.filepath:
                 self._session_manager.remove_autosave_for_file(state.filepath)
+            self._update_tab_tooltip(index)
             self.file_saved.emit()
             if tab_id in self._pending_close_tab_ids:
                 self._pending_close_tab_ids.discard(tab_id)

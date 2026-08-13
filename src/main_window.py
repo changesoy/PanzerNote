@@ -224,6 +224,7 @@ class MainWindow(QMainWindow):
         self.game_sidebar.view_changed.connect(self._on_view_changed)
         self.file_tree.file_open_requested.connect(self._open_file)
         self.file_tree.file_move_requested.connect(self._on_file_move_from_tree)
+        self.file_tree.untitled_save_requested.connect(self._on_untitled_save_from_tree)
         self.outline_panel.heading_clicked.connect(self._on_outline_heading_clicked)
         self.find_in_files_panel.result_clicked.connect(self._on_find_in_files_result)
         self.shortcut_panel.set_edit_callback(self._on_shortcut_edited)
@@ -1132,6 +1133,10 @@ class MainWindow(QMainWindow):
             self.secretary.show_message(
                 f"已将 {os.path.basename(src_filepath)} 移动到 {os.path.basename(dest_folder)}/"
             )
+
+    def _on_untitled_save_from_tree(self, source_tabs, tab_id: int, dest_folder: str):
+        """3.5.11：未命名标签拖到文件树 → 落盘保存（一行委托）"""
+        source_tabs.save_untitled_to_folder(tab_id, dest_folder)
 
     # === 设置 ===
 

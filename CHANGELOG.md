@@ -21,7 +21,8 @@
 **保存与导出修复**
 
 - **另存为副本语义**：另存为不再改变原标签显示名；支持另存为 PDF
-- **HTML 另存为/导出**：.html/.htm 另存为渲染为可打开的 HTML 网页；HTML 导出经 FileGuard 安全写入
+- **HTML 另存为**：.html/.htm 另存为渲染为可打开的 HTML 网页
+- **导出统一走 FileGuard 安全写入**：HTML 导出与 PDF 导出（含 PDF 另存为）均经 `safe_write_bytes`，遵守路径白名单与文件大小限制
 - **分屏保存焦点感知**：Ctrl+S 保存路由到当前焦点所在分栏（`_focused_editor_tabs`），修复分屏后保存错位
 - **会话滚动恢复兜底**：首帧布局未完成时 `setValue` 被 clamp，改用 rangeChanged 等滚动范围就绪后重试一次再断开
 - **分栏占比持久化**：编辑区/Markdown 预览分栏占比保存与恢复

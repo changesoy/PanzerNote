@@ -122,7 +122,7 @@ PanzerNote/
 │   │   ├── file_open_service.py    # 文件打开安全入口（来源校验/路径白名单/二进制检测）
 │   │   ├── file_action_controller.py # 文件动作编排（打开对话框/外部文件注册/最近文件过滤）
 │   │   ├── edit_action_controller.py # 编辑动作编排（撤销/剪贴板/查找/行操作/大小写/书签/折叠，22 个方法）
-│   │   ├── export_action_controller.py # 导出动作编排（PDF/HTML，HTML 经 FileGuard 安全写入）
+│   │   ├── export_action_controller.py # 导出动作编排（PDF/HTML，均经 FileGuard 安全写入）
 │   │   ├── settings_action_controller.py # 设置动作编排（对话框应用/导出/导入/保存/重置，show 与 apply 共享）
 │   │   ├── editor_settings_dialog.py # 记事本设置对话框
 │   │   ├── file_tree.py            # 文件树
@@ -282,13 +282,13 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 **拆分后的模块职责**：
 
 | 模块                                   | 职责                                                                                                                                                        |
-| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --- |
 | `main_window.py`                       | 主窗口协调者（~1255 行）：两阶段关闭、会话恢复协调、信号回调、拖放/键盘事件、命令面板、插件/主题集成、统一窗口显示入口（`present()`）；动作经控制器一行委托 |
 | `ui/main_window_ui.py`                 | `MainWindowUIBuilder`：顶层 widget 创建与布局（17 个组件经 `BuiltUI` 返回），不连接业务信号                                                                 |
 | `ui/view_coordinator.py`               | `ViewCoordinator`：视图/分屏/面板切换编排；`_current_view`/`_split_tabs` 状态；依赖全构造注入，回调（信号连接/菜单同步）由 MainWindow 注入                  |
 | `ui/selection_clear_filter.py`         | `SelectionClearFilter`：应用级事件过滤器，点击列表外空白清除选中高亮                                                                                        |
 | `editor/edit_action_controller.py`     | `EditActionController`：22 个编辑动作（撤销/剪贴板/查找/行操作/大小写/书签/折叠）                                                                           |
-| `editor/export_action_controller.py`   | `ExportActionController`：PDF/HTML 导出（HTML 经 FileGuard 安全写入）                                                                                       |
+| `editor/export_action_controller.py`   | `ExportActionController`：PDF/HTML 导出（均经 FileGuard 安全写入，含 PDF 回调 `_on_pdf_generated`）                                                         |     |
 | `editor/settings_action_controller.py` | `SettingsActionController`：设置动作编排（对话框应用/导出/导入/保存/重置，show 与 apply 共享 `_apply_editor_dict`）                                         |
 | `editor/webengine_runtime.py`          | WebEngine 启动锚点管理：首个预览挂载前预初始化 Qt WebEngine，挂载后释放锚点                                                                                 |
 | `core/timer_manager.py`                | 定时器生命周期管理（自动保存/统计/挂机奖励）                                                                                                                |

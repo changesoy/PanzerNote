@@ -121,8 +121,13 @@ class MainWindow(QMainWindow):
         )
 
         self._init_ui()
+        # 3.5.3：最近聚焦的编辑器面板（文件树/对话框夺焦后打开文件仍落在用户正在操作的面板）
+        self._last_focused_editor_tabs: Optional[EditorTabWidget] = self.editor_tabs
+        app = QApplication.instance()
+        if isinstance(app, QApplication):
+            app.focusChanged.connect(self._on_focus_changed)
         self._file_action_controller = FileActionController(
-            self.editor_tabs,
+            lambda: self._focused_editor_tabs() or self.editor_tabs,
             self.app_context.workspace_store,
             self.app_context.path_resolver,
             self._file_open_service,
@@ -711,23 +716,30 @@ class MainWindow(QMainWindow):
     # === 文件操作 ===
 
     def _new_file(self):
-        """新建文件"""
-        self.editor_tabs.new_file()
+        """新建文件（焦点在分屏时新建到分屏，与 Ctrl+S 焦点感知一致）"""
+        (self._focused_editor_tabs() or self.editor_tabs).new_file()
 
     def _new_folder(self):
         """新建文件夹"""
         self.file_tree.create_new_folder()
 
     def _open_file_dialog(self):
-        """打开文件对话框"""
+        """打开文件对话框
+
+        3.5.3：文件对话框会夺取焦点，目标面板须在弹窗前捕获（焦点感知），
+        否则对话框关闭后 provider 求值会落回主面板。
+        """
+        target_tabs = self._focused_editor_tabs() or self.editor_tabs
         filepath = self._file_action_controller.show_open_dialog(self)
         if filepath:
-            self._open_file(filepath)
+            self._open_file(filepath, target_tabs=target_tabs)
 
-    def _open_file(self, filepath: str):
+    def _open_file(self, filepath: str, target_tabs: Optional[EditorTabWidget] = None):
         """打开文件（编排委托 FileActionController）"""
         try:
-            _, is_external = self._file_action_controller.open_file(filepath)
+            _, is_external = self._file_action_controller.open_file(
+                filepath, target_tabs=target_tabs
+            )
         except FileOpenSecurityError as e:
             QMessageBox.warning(self, "无法打开文件", str(e))
             return
@@ -742,18 +754,32 @@ class MainWindow(QMainWindow):
             self.file_tree.refresh_external_files()
         self._update_recent_menu()
 
-    def _focused_editor_tabs(self) -> Optional[EditorTabWidget]:
-        """返回当前焦点所在的 EditorTabWidget（主面板或分屏），无则 None。
+    def _on_focus_changed(self, old, new):
+        """3.5.3：焦点变化时记录最近聚焦的编辑器面板（主面板或分屏）。
 
-        分屏聚焦时按 Ctrl+S 应保存分屏中正在编辑的文件，而非固定主面板。
+        点击编辑器内部（QTextEdit 等子控件）时 FocusIn 发往子控件而非
+        EditorTabWidget 本身，事件过滤器收不到；故用全局 focusChanged 信号。
+        焦点转移到文件树等非编辑器控件时保持最近记录不变。
+        """
+        if new is None:
+            return
+        for tabs in [self.editor_tabs, *self.view_coordinator.split_tabs]:
+            if tabs is new or tabs.isAncestorOf(new):
+                self._last_focused_editor_tabs = tabs
+                return
+
+    def _focused_editor_tabs(self) -> Optional[EditorTabWidget]:
+        """返回当前焦点所在的 EditorTabWidget（主面板或分屏），无则最近聚焦的面板。
+
+        分屏聚焦时按 Ctrl+S 应保存分屏中正在编辑的文件，而非固定主面板；
+        点击文件树等夺焦控件后打开文件，同样落在最近聚焦的面板。
         """
         focus = QApplication.focusWidget()
-        if focus is None:
-            return None
-        for tabs in [self.editor_tabs, *self.view_coordinator.split_tabs]:
-            if tabs is focus or tabs.isAncestorOf(focus):
-                return tabs
-        return None
+        if focus is not None:
+            for tabs in [self.editor_tabs, *self.view_coordinator.split_tabs]:
+                if tabs is focus or tabs.isAncestorOf(focus):
+                    return tabs
+        return self._last_focused_editor_tabs
 
     def _save_current(self):
         """保存当前文件（焦点在分屏时保存分屏）"""

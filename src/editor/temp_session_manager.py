@@ -24,6 +24,7 @@ import uuid
 from datetime import datetime
 from typing import Any, List, Dict, Optional, cast
 
+from ..security.file_guard import FileGuard
 from ..utils.logger import get_logger
 
 
@@ -36,6 +37,8 @@ class TempSessionManager:
     3. 启动时扫描旧 session，发现异常退出时提供恢复信息
     4. 保存成功后清理对应 autosave 文件
 
+    autosave 内容为用户文档副本，写入/读取统一经 FileGuard
+    （路径白名单、文件大小限制、超时控制）。
     不在后台线程创建或操作 Qt UI 对象。
     恢复提示由调用方在主线程 window.show() 之后执行。
     """
@@ -43,8 +46,9 @@ class TempSessionManager:
     MANIFEST_FILENAME = "manifest.json"
     FILES_SUBDIR = "files"
 
-    def __init__(self, temp_base_path: str):
+    def __init__(self, temp_base_path: str, file_guard: FileGuard):
         self._temp_base_path = temp_base_path
+        self._file_guard = file_guard
         self._current_session_id: Optional[str] = None
         self._current_session_dir: Optional[str] = None
 
@@ -123,8 +127,9 @@ class TempSessionManager:
             autosave_path = os.path.join(files_dir, autosave_name)
 
             try:
-                with open(autosave_path, "w", encoding=encoding, errors="replace") as fh:
-                    fh.write(content)
+                # autosave 为用户文档副本，经 FileGuard 安全写入（errors=replace 容错）
+                encoded = content.encode(encoding, errors="replace")
+                self._file_guard.safe_write_bytes(autosave_path, encoded)
             except Exception as e:
                 get_logger(__name__).error("写入 autosave 失败: %s, %s", autosave_path, e)
                 continue
@@ -252,8 +257,7 @@ class TempSessionManager:
         if not os.path.isfile(autosave_path):
             return None
         try:
-            with open(autosave_path, "r", encoding=encoding, errors="replace") as fh:
-                return fh.read()
+            return self._file_guard.safe_read(autosave_path, encoding=encoding)
         except Exception as e:
             get_logger(__name__).error("读取 autosave 失败: %s, %s", autosave_path, e)
             return None

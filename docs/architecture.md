@@ -105,7 +105,7 @@ PanzerNote/
 │   │   ├── find_in_files_panel.py  # 跨文件搜索结果面板（按文件分组 + 双击跳转）
 │   │   ├── save_task.py            # 后台文件保存任务（SaveTask + QThreadPool 异步写入）
 │   │   ├── save_task_manager.py    # 保存任务管理器（dirty→saving→clean/save_failed 状态机）
-│   │   ├── temp_session_manager.py # 临时会话恢复（异常退出 autosave session 恢复）
+│   │   ├── temp_session_manager.py # 临时会话恢复（异常退出 autosave 恢复；autosave 读写经 FileGuard）
 │   │   ├── virtual_scroll.py       # 虚拟滚动管理器（大文件延迟语法高亮）
 │   │   ├── async_highlight.py      # 异步代码高亮渲染器（QThread + 任务队列）
 │   │   ├── incremental_renderer.py # 渲染缓存（MD5 哈希缓存，全文级）

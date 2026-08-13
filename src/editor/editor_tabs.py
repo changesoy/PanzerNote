@@ -290,7 +290,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self._pending_save_info: Dict[int, Dict] = {}
         self._pending_save_as_info: Dict[int, Dict] = {}
 
-        self._session_manager = TempSessionManager(config.get_temp_path())
+        self._session_manager = TempSessionManager(config.get_temp_path(), config.get_file_guard())
 
         self._tab_bar = DraggableTabBar(self)
         self.setTabBar(self._tab_bar)

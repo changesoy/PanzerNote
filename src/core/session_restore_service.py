@@ -97,7 +97,7 @@ class SessionRestoreService:
                         render_preview=False,
                     )
                     if index >= 0:
-                        self._restore_cursor(editor_tabs, entry, index)
+                        self.restore_cursor(editor_tabs, entry, index)
 
             self._pending_files = deferred_entries
 
@@ -124,12 +124,12 @@ class SessionRestoreService:
                 render_preview=True,
             )
             if index >= 0:
-                self._restore_cursor(editor_tabs, file_info, index)
+                self.restore_cursor(editor_tabs, file_info, index)
 
         return bool(self._pending_files)
 
-    def _restore_cursor(self, editor_tabs, file_info: dict, tab_index: int) -> None:
-        """恢复指定索引标签的光标位置"""
+    def restore_cursor(self, editor_tabs, file_info: dict, tab_index: int) -> None:
+        """恢复指定索引标签的光标/滚动位置（分屏会话恢复亦复用此方法）"""
         cursor_pos = file_info.get("cursor_position")
         scroll_pos = file_info.get("scroll_position")
         if cursor_pos is None and scroll_pos is None:

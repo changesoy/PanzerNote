@@ -292,6 +292,8 @@ class MainWindow(QMainWindow):
             if active_index < self.editor_tabs.count():
                 self.editor_tabs.setCurrentIndex(active_index)
 
+        self._restore_split_state()
+
         current_view = self.config.get_current_view()
         if current_view != "editor":
             self._switch_view(current_view)
@@ -312,6 +314,42 @@ class MainWindow(QMainWindow):
             return
         QTimer.singleShot(0, self._open_next_pending_file)
 
+    def _restore_split_state(self):
+        """恢复分屏状态（方向 / 分割比例 / 各分屏文件与激活标签）。
+
+        旧配置无分屏字段（split_active 默认 False）时直接跳过，行为与
+        未分屏时一致，保证向后兼容。
+        """
+        if not self.config.get_split_active():
+            return
+        orientation = (
+            Qt.Orientation.Vertical
+            if self.config.get_split_orientation() == "Vertical"
+            else Qt.Orientation.Horizontal
+        )
+        split_tabs_config = self.config.get_split_tabs()
+        if not split_tabs_config:
+            return
+        self.view_coordinator.restore_split(orientation, self.config.get_split_sizes())
+        split_widgets = self.view_coordinator.split_tabs
+        if not split_widgets:
+            return
+        for tabs, tab_config in zip(split_widgets, split_tabs_config):
+            open_files = tab_config.get("open_files", []) if isinstance(tab_config, dict) else []
+            if not isinstance(open_files, list):
+                open_files = []
+            for entry in open_files:
+                if not isinstance(entry, dict):
+                    continue
+                filepath = entry.get("path")
+                if filepath and os.path.exists(filepath):
+                    index = tabs.open_file(filepath, activate=False)
+                    if index >= 0:
+                        self._session_restore_service.restore_cursor(tabs, entry, index)
+            active_index = tab_config.get("active_tab_index", 0) if isinstance(tab_config, dict) else 0
+            if isinstance(active_index, int) and 0 <= active_index < tabs.count():
+                tabs.setCurrentIndex(active_index)
+
     def _connect_signals(self):
         """连接信号"""
         self.event_bus.connect_signals(self)
@@ -330,6 +368,26 @@ class MainWindow(QMainWindow):
 
         self.config.set_active_tab_index(self.editor_tabs.currentIndex())
         self.config.set_current_view(self.view_coordinator.current_view)
+
+        # 分屏状态持久化（3.5.2）
+        split_tabs = self.view_coordinator.split_tabs
+        self.config.set_split_active(bool(split_tabs))
+        if split_tabs:
+            self.config.set_split_orientation(
+                "Vertical"
+                if self.editor_splitter.orientation() == Qt.Orientation.Vertical
+                else "Horizontal"
+            )
+            self.config.set_split_sizes(self.editor_splitter.sizes())
+            self.config.set_split_tabs(
+                [
+                    {
+                        "open_files": t.get_open_files_info(),
+                        "active_tab_index": t.currentIndex(),
+                    }
+                    for t in split_tabs
+                ]
+            )
 
         sizes = self.splitter.sizes()
         if len(sizes) >= 2:
@@ -359,8 +417,9 @@ class MainWindow(QMainWindow):
             )
 
     def _save_to_temp(self):
-        """保存到暂存文件"""
-        self.editor_tabs.save_all_to_temp()
+        """保存到暂存文件（主面板 + 全部分屏，3.5.2）"""
+        for tabs in [self.editor_tabs, *self.view_coordinator.split_tabs]:
+            tabs.save_all_to_temp()
 
     def _check_session_recovery(self):
         """检查是否有可恢复的异常退出会话
@@ -597,7 +656,8 @@ class MainWindow(QMainWindow):
         """最终关闭逻辑：保存窗口状态、清理临时文件、关闭窗口"""
         self._closing = True
         self._save_state()
-        self.editor_tabs.clear_temp_files()
+        for tabs in [self.editor_tabs, *self.view_coordinator.split_tabs]:
+            tabs.clear_temp_files()
         self.close()
 
     def _on_close_save_finished(self):
@@ -1082,7 +1142,10 @@ class MainWindow(QMainWindow):
 
     def _auto_save(self):
         """自动保存"""
-        if self.editor_tabs.has_modified_files():
+        if any(
+            tabs.has_modified_files()
+            for tabs in [self.editor_tabs, *self.view_coordinator.split_tabs]
+        ):
             self._save_to_temp()
 
     def _update_stats(self):

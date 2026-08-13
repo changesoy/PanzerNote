@@ -195,6 +195,38 @@ class ViewCoordinator:
         split_tabs.setParent(None)
         split_tabs.deleteLater()
 
+    def restore_split(
+        self, orientation: Qt.Orientation, sizes: List[int]
+    ) -> None:
+        """按持久化配置恢复分屏（方向 + 分割比例），供 _restore_state 调用。
+
+        与 split_editor 的区别：不新建空标签、不显示提示消息。
+        """
+        if self._split_tabs:
+            return
+        self._editor_splitter.setOrientation(orientation)
+        split_tabs = EditorTabWidget(
+            self._config,
+            theme_engine=self._theme_engine,
+            webengine_runtime=self._webengine_runtime,
+        )
+        split_tabs.set_find_bar(self._find_replace_bar)
+        self._connect_tabs_signals(split_tabs)
+        self._editor_splitter.addWidget(split_tabs)
+        self._split_tabs.append(split_tabs)
+        if (
+            isinstance(sizes, (list, tuple))
+            and len(sizes) == 2
+            and all(isinstance(s, (int, float)) and s > 0 for s in sizes)
+        ):
+            self._editor_splitter.setSizes([int(s) for s in sizes])
+        else:
+            if orientation == Qt.Orientation.Vertical:
+                total = self._editor_splitter.height()
+            else:
+                total = self._editor_splitter.width()
+            self._editor_splitter.setSizes([total // 2, total // 2])
+
     # === 行宽模式 ===
 
     def set_wrap_mode(self, mode: str) -> None:

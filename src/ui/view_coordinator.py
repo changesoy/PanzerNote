@@ -117,7 +117,11 @@ class ViewCoordinator:
         self._editor_splitter.addWidget(split_tabs)
         self._split_tabs.append(split_tabs)
         split_tabs.new_file()
-        total = self._editor_splitter.width()
+        # 水平分屏左右均分（基于宽度），垂直分屏上下均分（基于高度），两方向对称
+        if orientation == Qt.Orientation.Vertical:
+            total = self._editor_splitter.height()
+        else:
+            total = self._editor_splitter.width()
         self._editor_splitter.setSizes([total // 2, total // 2])
         self._secretary.show_message(
             "已启用分屏。注意：分屏中编辑的是独立文件，与主面板不同步。"

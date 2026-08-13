@@ -463,6 +463,12 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             return False  # 保存中拒绝迁移，避免跨面板保存状态机竞态
         title = source_tabs.tabText(index)
 
+        # 3.5.7：迁移前断开源面板的信号绑定，否则编辑器 textChanged 仍指向源面板
+        # （源面板已注销该 tab → 槽内 state 为 None 直接返回），脏标记/标题更新失效。
+        editor = source_tabs._get_editor_from_widget(widget)
+        if editor is not None:
+            source_tabs._disconnect_editor_signals(editor)
+
         # 源：移除标签 + 注销状态（removeTab 为原生方法，不触发关闭确认）
         source_tabs.removeTab(index)
         source_tabs._registry.unregister(tab_id)
@@ -473,6 +479,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self.addTab(widget, title)
         self._registry.register(tab_id, state)
         self._save_manager.register_tab(tab_id)
+        if editor is not None:
+            self._connect_editor_signals(editor)
         # 3.5.11：未命名标签迁移，编号随标签转移（源释放、目标占用）
         if state.is_new and state.untitled_number is not None:
             source_tabs._used_untitled_numbers.discard(state.untitled_number)
@@ -994,6 +1002,42 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
         return total_chars
 
+    def save_all_for_close(self) -> bool:
+        """保存本面板所有 dirty 标签以关闭（3.5.7）。
+
+        与 save_all 的区别：任一未命名「另存为」被取消或保存提交失败 → 返回
+        False（调用方应中止关闭）；已保存文件走异步 `_save_file`，其最终成败由
+        SaveTaskManager 的 `all_tasks_finished` / `get_failed_tab_ids` 兜底。
+        与 get_unsaved_tab_infos 语义一致：空未命名不弹另存为。
+        """
+        unnamed_indices = []
+        for i in range(self.count()):
+            widget = self.widget(i)
+            tab_id = getattr(widget, 'tab_id', None)
+            if tab_id is None:
+                continue
+            state = self._registry.get(tab_id)
+            if state and state.is_modified:
+                if state.filepath and not state.is_new:
+                    success, _ = self._save_file(widget, state.filepath, state.encoding)
+                    if not success:
+                        return False
+                else:
+                    editor = self._get_editor_from_widget(widget)
+                    content = editor.toPlainText() if editor else ""
+                    if state.is_new and len(content.strip()) == 0:
+                        # 空未命名跳过（与 get_unsaved_tab_infos 一致，关闭确认框未列出）
+                        continue
+                    unnamed_indices.append(i)
+
+        for i in unnamed_indices:
+            self.setCurrentIndex(i)
+            success, _ = self.save_current_as()
+            if not success:
+                return False
+
+        return True
+
     def save_all_to_temp(self):
         """保存所有 dirty 文件到暂存目录（通过 TempSessionManager 管理）
 
@@ -1064,6 +1108,16 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     def close_all_tabs(self):
         while self.count() > 0:
             if not self._close_tab(0):
+                break
+
+    def force_close_all_tabs(self):
+        """无确认强制关闭全部标签（3.5.7：分屏「不保存并关闭」路径）。
+
+        已由调用方弹过汇总确认，此处跳过逐标签确认框（避免二次弹窗）；
+        清理逻辑与 _close_tab 一致（释放未命名编号、注销注册表）。
+        """
+        while self.count() > 0:
+            if not self._close_tab(0, force=True):
                 break
 
     def reopen_closed_tab(self) -> bool:
@@ -1188,7 +1242,12 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if cursor is not None:
             self.config.set_closed_tab_memory(filepath, cursor, scroll)
 
-    def _close_tab(self, index: int) -> bool:
+    def _close_tab(self, index: int, *, force: bool = False) -> bool:
+        """关闭标签页。
+
+        force=True：跳过 dirty 确认框（调用方已确认），仅用于分屏
+        「不保存并关闭」的批量关闭。
+        """
         widget = self.widget(index)
         if not widget or not hasattr(widget, 'tab_id'):
             self.removeTab(index)
@@ -1224,7 +1283,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             self.tab_count_changed.emit(self.count())
             return True
 
-        if state.is_modified:
+        if state.is_modified and not force:
             msg_box = QMessageBox(self)
             msg_box.setWindowTitle("保存文件")
             if is_new:
@@ -1374,6 +1433,26 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         editor.cursorPositionChanged.connect(self._on_cursor_position_changed)
         if is_enabled("signal_driven_stats"):
             editor.word_count_recomputed.connect(self._on_word_count_recomputed)
+
+    def _disconnect_editor_signals(self, editor):
+        """解除编辑器与本面板的信号绑定（跨面板迁移前调用，3.5.7）。
+
+        标签拖到另一面板时，编辑器 widget 被 reparent，但 textChanged 等信号
+        仍指向源面板的槽；源面板已注销该 tab，脏标记/标题更新全部失效。
+        """
+        try:
+            editor.textChanged.disconnect(self._on_text_changed)
+        except (TypeError, RuntimeError):
+            pass
+        try:
+            editor.cursorPositionChanged.disconnect(self._on_cursor_position_changed)
+        except (TypeError, RuntimeError):
+            pass
+        if is_enabled("signal_driven_stats"):
+            try:
+                editor.word_count_recomputed.disconnect(self._on_word_count_recomputed)
+            except (TypeError, RuntimeError):
+                pass
 
     def _on_cursor_position_changed(self):
         self.cursor_position_changed.emit()
@@ -1634,6 +1713,36 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                     else:
                         unsaved.append(self._strip_tab_suffix(self.tabText(i)))
         return unsaved
+
+    def get_unsaved_tab_infos(self) -> List[Dict]:
+        """返回本面板未保存标签的结构化信息（3.5.7 关闭确认用）。
+
+        与 get_unsaved_files 语义一致（跳过空未命名），但返回
+        `{"title": str, "filepath": Optional[str]}` 列表，供
+        「未保存文件确认对话框」展示。
+        """
+        infos = []
+        for i in range(self.count()):
+            widget = self.widget(i)
+            tab_id = getattr(widget, 'tab_id', None)
+            if tab_id is not None:
+                state = self._registry.get(tab_id)
+                if state and state.is_modified:
+                    editor = self._get_editor_from_widget(widget)
+                    content = editor.toPlainText() if editor else ""
+                    if state.is_new and len(content.strip()) == 0:
+                        continue
+                    if state.filepath:
+                        infos.append({
+                            "title": os.path.basename(state.filepath),
+                            "filepath": state.filepath,
+                        })
+                    else:
+                        infos.append({
+                            "title": self._strip_tab_suffix(self.tabText(i)),
+                            "filepath": None,
+                        })
+        return infos
 
     def has_modified_files(self) -> bool:
         for state in self._registry.all_states():

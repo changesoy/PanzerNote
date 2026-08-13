@@ -31,6 +31,7 @@ from ..game.secretary_widget import SecretaryWidget
 from ..themes.theme_engine import ThemeEngine
 from .shortcut_panel import ShortcutPanel
 from .side_panel_host import SidePanelHost
+from .unsaved_files_dialog import UnsavedChoice, UnsavedFilesDialog
 
 
 class ViewCoordinator:
@@ -175,23 +176,67 @@ class ViewCoordinator:
         )
 
     def close_split(self, parent: QWidget) -> None:
-        """关闭最后一个分屏（未保存时确认）。"""
+        """关闭最后一个分屏（3.5.7：单级未保存确认，VS Code 风格）。
+
+        - 无未保存 → 直接关闭分屏
+        - 有未保存 → 弹「未保存文件确认」对话框（1 个→单文件样式，多个→汇总样式；
+          分屏场景两按钮 + 叉号/ESC 取消）
+        - 「保存并关闭」→ 全部保存（已保存静默、未命名逐个另存为；任一另存为取消或
+          提交失败 → 中止，分屏保留）→ 等待异步保存完成 → 关闭分屏 + 清理 temp
+        - 「不保存并关闭」→ 直接关闭分屏 + 清理 temp
+        - 取消 → 分屏完整保留（`_split_tabs` 不变）
+        """
         if not self._split_tabs:
             return
-        split_tabs = self._split_tabs.pop()
-        unsaved = split_tabs.get_unsaved_files()
+        split_tabs = self._split_tabs[-1]
+        unsaved = split_tabs.get_unsaved_tab_infos()
         if unsaved:
-            reply = QMessageBox.question(
-                parent, "关闭分屏",
-                "分屏中有未保存的文件，是否关闭？",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
+            choice = UnsavedFilesDialog.ask(
+                parent,
+                self._theme_engine,
+                [info["title"] for info in unsaved],
+                show_cancel=False,
+                window_title="关闭分屏",
             )
-            if reply == QMessageBox.StandardButton.No:
-                self._split_tabs.append(split_tabs)
-                return
-        split_tabs.save_all_to_temp()
-        split_tabs.close_all_tabs()
+            if choice == UnsavedChoice.CANCEL:
+                return  # 分屏保留
+            if choice == UnsavedChoice.SAVE:
+                if not split_tabs.save_all_for_close():
+                    return  # 未命名另存为取消 / 保存提交失败 → 中止，分屏保留
+        # 确认通过：先 pop。分屏标签 count==0 会触发 MainWindow._on_tab_count_changed
+        # → close_split 重入，此时 _split_tabs 已空，直接 return（避免递归）
+        self._split_tabs.pop()
+        if split_tabs.save_manager.has_pending_tasks():
+            # 异步保存完成后再真正关闭
+            cb = lambda: self._finish_close_split(split_tabs)
+            split_tabs._close_split_callback = cb
+            split_tabs.save_manager.all_tasks_finished.connect(cb)
+        else:
+            self._finish_close_split(split_tabs)
+
+    def _finish_close_split(self, split_tabs: EditorTabWidget) -> None:
+        """异步保存完成后真正关闭分屏（含失败中止，3.5.7）。"""
+        cb = getattr(split_tabs, "_close_split_callback", None)
+        if cb is not None:
+            try:
+                split_tabs.save_manager.all_tasks_finished.disconnect(cb)
+            except (TypeError, RuntimeError):
+                pass
+            split_tabs._close_split_callback = None
+
+        if split_tabs.save_manager.get_failed_tab_ids():
+            # 保存失败 → 中止关闭，分屏保留
+            self._split_tabs.append(split_tabs)
+            QMessageBox.warning(
+                split_tabs,
+                "保存失败",
+                "分屏中有文件保存失败，已取消关闭。请检查磁盘空间或文件权限。",
+            )
+            return
+
+        # 已确认（保存完成或用户选择不保存），无确认关闭全部标签
+        split_tabs.force_close_all_tabs()
+        split_tabs.clear_temp_files()
         split_tabs.setParent(None)
         split_tabs.deleteLater()
 

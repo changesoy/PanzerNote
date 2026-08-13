@@ -742,6 +742,36 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         finally:
             self._is_pasting = False
 
+    # === 拖放：本地文件 URL 放行给窗口级打开（3.5.7） ===
+    #
+    # QPlainTextEdit 默认接受 text/uri-list 拖放（把文件内容/路径插入为文本），
+    # 会吞掉从文件树/资源管理器拖入的文件，导致「拖文件到编辑区打开」失效。
+    # 仅拦截"本地文件"URL 拖放并 event.ignore() 冒泡给 MainWindow 打开文件；
+    # 文本/纯链接拖放（如浏览器拖 URL 粘贴）保留默认行为。
+
+    def _has_local_file_urls(self, mime) -> bool:
+        if not mime.hasUrls():
+            return False
+        return any(url.isLocalFile() for url in mime.urls())
+
+    def dragEnterEvent(self, event):
+        if self._has_local_file_urls(event.mimeData()):
+            event.ignore()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        if self._has_local_file_urls(event.mimeData()):
+            event.ignore()
+            return
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event):
+        if self._has_local_file_urls(event.mimeData()):
+            event.ignore()
+            return
+        super().dropEvent(event)
+
     def _handle_enter(self):
         """处理回车键 - 自动缩进、Python 关键词 dedent"""
         cursor = self.textCursor()

@@ -73,13 +73,22 @@ class FileActionController:
         self._workspace_store.add_recent_file(validated)
         return index, is_external
 
-    def open_file_bypass_service(self, filepath: str) -> Tuple[int, bool]:
+    def open_file_bypass_service(
+        self, filepath: str, target_tabs: Optional[EditorTabWidget] = None
+    ) -> Tuple[int, bool]:
         """拖放等已通过 FileOpenService 校验的路径直接打开，不再重复校验。
 
-        返回 (tab_index, is_external)。
+        target_tabs：拖放等调用方按释放位置捕获的目标面板（避免拖拽期间
+        焦点在文件树上，provider 求值落回最近聚焦面板）；未传时由 provider
+        即时求值。返回 (tab_index, is_external)。
         """
         is_external = self._register_external_if_needed(filepath)
-        index = self._editor_tabs_provider().open_file(filepath)
+        tabs = (
+            target_tabs
+            if target_tabs is not None
+            else self._editor_tabs_provider()
+        )
+        index = tabs.open_file(filepath)
         self._workspace_store.add_recent_file(filepath)
         return index, is_external
 

@@ -588,8 +588,25 @@ class MainWindow(QMainWindow):
         '.ini', '.log', '.sql', '.sh', '.go', '.rs', '',
     })
 
+    def _drop_target_panel(self, pos: QPoint) -> Optional[EditorTabWidget]:
+        """按释放位置确定目标面板（主面板/分屏，3.5.7）。
+
+        拖放期间焦点通常停留在文件树（拖拽源），焦点追踪只能回退到"最近
+        聚焦面板"，与释放位置可能不一致；改为按释放点落在哪个面板矩形内
+        决定打开目标。点落在任何面板之外（分割条、边距等）返回 None，
+        由调用方回退到焦点面板。
+        """
+        for tabs in [self.editor_tabs, *self.view_coordinator.split_tabs]:
+            if not tabs.isVisible():
+                continue
+            origin = tabs.mapTo(self, QPoint(0, 0))
+            if QRect(origin, tabs.size()).contains(pos):
+                return tabs
+        return None
+
     def dropEvent(self, event):
         if event.mimeData().hasUrls():
+            target = self._drop_target_panel(event.position().toPoint())
             for url in event.mimeData().urls():
                 if url.isLocalFile():
                     filepath = url.toLocalFile()
@@ -607,7 +624,7 @@ class MainWindow(QMainWindow):
                     except FileOpenSecurityError as e:
                         QMessageBox.warning(self, "无法打开文件", str(e))
                         continue
-                    self._open_file_bypass_service(validated)
+                    self._open_file_bypass_service(validated, target_tabs=target)
             event.acceptProposedAction()
         else:
             event.ignore()
@@ -787,9 +804,16 @@ class MainWindow(QMainWindow):
             self.file_tree.refresh_external_files()
         self._update_recent_menu()
 
-    def _open_file_bypass_service(self, filepath: str):
-        """由拖放等已通过 FileOpenService 校验后调用，不再重复校验"""
-        _, is_external = self._file_action_controller.open_file_bypass_service(filepath)
+    def _open_file_bypass_service(
+        self, filepath: str, target_tabs: Optional[EditorTabWidget] = None
+    ):
+        """由拖放等已通过 FileOpenService 校验后调用，不再重复校验。
+
+        target_tabs：拖放按释放位置确定的目标面板；未传时落最近聚焦面板。
+        """
+        _, is_external = self._file_action_controller.open_file_bypass_service(
+            filepath, target_tabs=target_tabs
+        )
         if is_external:
             self.file_tree.refresh_external_files()
         self._update_recent_menu()

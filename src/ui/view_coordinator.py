@@ -70,6 +70,8 @@ class ViewCoordinator:
 
         self._current_view = "editor"
         self._split_tabs: List[EditorTabWidget] = []
+        # 3.5.6：拖动分割条时按方向记忆分割比例（供方向切换时恢复）
+        self._editor_splitter.splitterMoved.connect(self._on_splitter_moved)
 
     @property
     def current_view(self) -> str:
@@ -103,8 +105,9 @@ class ViewCoordinator:
     # === 分屏 ===
 
     def split_editor(self, orientation: Qt.Orientation) -> None:
-        """创建独立分屏（复用 MainWindow 注入的信号连接回调）。"""
+        """创建独立分屏；已分屏时切换方向（保留内容，恢复对应方向比例）。"""
         if self._split_tabs:
+            self._switch_split_orientation(orientation)
             return
         self._editor_splitter.setOrientation(orientation)
         split_tabs = EditorTabWidget(
@@ -123,8 +126,52 @@ class ViewCoordinator:
         else:
             total = self._editor_splitter.width()
         self._editor_splitter.setSizes([total // 2, total // 2])
+        # 记录当前方向的初始均分比例（归一化，供方向切换恢复）
+        self._config.set_view_setting(self._split_ratio_key(), [0.5, 0.5])
         self._secretary.show_message(
             "已启用分屏。注意：分屏中编辑的是独立文件，与主面板不同步。"
+        )
+
+    def _split_ratio_key(self) -> str:
+        """当前分屏方向对应的比例记忆键（view_setting）。"""
+        if self._editor_splitter.orientation() == Qt.Orientation.Vertical:
+            return "split_ratio_v"
+        return "split_ratio_h"
+
+    def _switch_split_orientation(self, orientation: Qt.Orientation) -> None:
+        """已分屏时切换方向：保留面板内容，恢复目标方向上次记忆的比例（无则均分）。"""
+        if self._editor_splitter.orientation() == orientation:
+            return
+        # 记录旧方向当前比例（归一化），供切回时恢复
+        sizes = list(self._editor_splitter.sizes())
+        total = sum(sizes) or 1
+        self._config.set_view_setting(
+            self._split_ratio_key(), [s / total for s in sizes]
+        )
+        self._editor_splitter.setOrientation(orientation)
+        ratio = self._config.get_view_setting(self._split_ratio_key())
+        if orientation == Qt.Orientation.Vertical:
+            total = self._editor_splitter.height()
+        else:
+            total = self._editor_splitter.width()
+        if (
+            isinstance(ratio, (list, tuple))
+            and len(ratio) == 2
+            and all(isinstance(r, (int, float)) and r > 0 for r in ratio)
+        ):
+            first = int(total * ratio[0])
+            self._editor_splitter.setSizes([first, total - first])
+        else:
+            self._editor_splitter.setSizes([total // 2, total // 2])
+
+    def _on_splitter_moved(self, pos: int, index: int) -> None:
+        """拖动分割条时按方向记忆当前分割比例（归一化，随 save_settings 统一落盘）。"""
+        if not self._split_tabs:
+            return
+        sizes = list(self._editor_splitter.sizes())
+        total = sum(sizes) or 1
+        self._config.set_view_setting(
+            self._split_ratio_key(), [s / total for s in sizes]
         )
 
     def close_split(self, parent: QWidget) -> None:

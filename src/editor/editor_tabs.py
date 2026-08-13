@@ -387,8 +387,29 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     def new_file(self) -> int:
         """新建文件"""
         num = self._get_next_untitled_number()
+        return self._create_untitled_tab(num, f"未命名{num}.txt")
+
+    def restore_untitled_file(
+        self,
+        untitled_number: int,
+        display_name: str,
+        content: Optional[str] = None,
+    ) -> int:
+        """3.5.10：按持久化配置恢复未命名标签（沿用原编号并标记已用）。
+
+        content 非 None 时写入内容并标记 dirty（编辑过的未命名现场还原）。
+        """
+        index = self._create_untitled_tab(untitled_number, display_name or f"未命名{untitled_number}.txt")
+        if content is not None:
+            tab_id = getattr(self.widget(index), 'tab_id', None)
+            if tab_id is not None:
+                self.set_tab_content(tab_id, content)
+                self.mark_tab_dirty(tab_id)
+        return int(index)
+
+    def _create_untitled_tab(self, num: int, title: str) -> int:
+        """创建未命名标签页（new_file / restore_untitled_file 共用）"""
         self._used_untitled_numbers.add(num)
-        title = f"未命名{num}.txt"
 
         editor = Editor(self.config, theme_engine=self._theme_engine)
         self._connect_editor_signals(editor)
@@ -1504,7 +1525,14 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             if tab_id is None:
                 continue
             state = self._registry.get(tab_id)
-            if state is None or state.is_new or not state.filepath:
+            if state is None:
+                continue
+            if state.is_new or not state.filepath:
+                # 3.5.10：未命名文件（dirty 时）同步内容，随条目恢复编辑现场
+                if state.is_modified:
+                    editor = self._get_editor_from_widget(widget)
+                    if editor is not None:
+                        state.export_content = editor.toPlainText()
                 continue
             editor = self._get_editor_from_widget(widget)
             if editor is None:

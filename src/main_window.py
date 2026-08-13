@@ -355,6 +355,14 @@ class MainWindow(QMainWindow):
             for entry in open_files:
                 if not isinstance(entry, dict):
                     continue
+                if entry.get("is_new"):
+                    # 3.5.10：分屏内未命名文件恢复（沿用编号，dirty 内容一并还原）
+                    tabs.restore_untitled_file(
+                        entry.get("untitled_number") or 1,
+                        entry.get("display_name", "未命名"),
+                        entry.get("content"),
+                    )
+                    continue
                 filepath = entry.get("path")
                 if filepath and os.path.exists(filepath):
                     index = tabs.open_file(filepath, activate=False)

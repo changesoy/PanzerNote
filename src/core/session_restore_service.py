@@ -60,6 +60,10 @@ class SessionRestoreService:
 
         for idx, entry in enumerate(open_files):
             entry_with_index = {"index": idx, **entry}
+            if entry.get("is_new"):
+                # 3.5.10：未命名文件同步恢复（无 IO 开销），保持原编号与内容
+                pre_show_entries.append(entry_with_index)
+                continue
             filepath = entry.get("path")
             if filepath and os.path.exists(filepath):
                 ext = os.path.splitext(filepath)[1].lower()
@@ -88,6 +92,14 @@ class SessionRestoreService:
             pre_show_entries, deferred_entries = self.build_restore_plan(open_files)
 
             for entry in pre_show_entries:
+                if entry.get("is_new"):
+                    # 3.5.10：未命名文件恢复（沿用编号，dirty 内容一并还原）
+                    editor_tabs.restore_untitled_file(
+                        entry.get("untitled_number") or 1,
+                        entry.get("display_name", "未命名"),
+                        entry.get("content"),
+                    )
+                    continue
                 filepath = entry.get("path")
                 if filepath and os.path.exists(filepath):
                     index = editor_tabs.open_file(

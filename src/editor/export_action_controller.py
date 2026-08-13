@@ -72,8 +72,9 @@ class ExportActionController:
         """PDF 生成完成的回调：写文件 / 提示 / 失败弹窗。"""
         if pdf_data:
             try:
-                with open(filepath, 'wb') as f:
-                    f.write(pdf_data)
+                # 经 FileGuard 安全写入，遵守路径白名单与文件大小限制
+                file_guard = self._editor_tabs.config.get_file_guard()
+                file_guard.safe_write_bytes(filepath, pdf_data)
                 self._secretary.show_message(
                     f"已导出PDF: {os.path.basename(filepath)}"
                 )

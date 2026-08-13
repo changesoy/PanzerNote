@@ -14,6 +14,7 @@
 
 import os
 
+from ..security.file_access_context import FileAccessContext
 from ..utils.logger import get_logger
 from .secure_markdown_renderer import (
     render_markdown_to_safe_html,
@@ -70,7 +71,8 @@ class ExportService:
         return render_plain_text_to_safe_html(content)
 
     @staticmethod
-    def export_html(content: str, is_markdown: bool, filepath: str, colors, title: str = "") -> None:
+    def export_html(content: str, is_markdown: bool, filepath: str, colors,
+                    title: str = "", file_guard=None) -> None:
         """导出为 HTML 文件
 
         参数：
@@ -79,14 +81,18 @@ class ExportService:
           filepath：导出文件路径
           colors：ThemeColorScheme 实例，提供主题色值
           title：文档标题
+          file_guard：FileGuard 实例（必填），写入经 safe_write_bytes 安全执行
 
         异常：文件写入失败时抛出 IOError
         """
         body_html = ExportService.render_content(content, is_markdown)
         full_html = build_export_html_document(body_html, colors, title)
 
-        with open(filepath, 'w', encoding='utf-8') as f:
-            f.write(full_html)
+        file_guard.safe_write_bytes(
+            filepath,
+            full_html.encode("utf-8"),
+            context=FileAccessContext.USER_DOCUMENT_SAVE,
+        )
 
     @staticmethod
     def export_pdf(content: str, is_markdown: bool, parent_widget,

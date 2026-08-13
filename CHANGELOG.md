@@ -2,6 +2,36 @@
 
 本文件记录 PanzerNote 各版本的变更。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
 
+## v1.8.5
+
+**Wave 3 主窗口职责拆分收尾（A~E 分支）**
+
+**控制器抽取**
+
+- **EditActionController**：新增 `editor/edit_action_controller.py`，承载 22 个编辑动作（撤销/剪贴板/查找/行操作/大小写/书签/折叠），MainWindow 保留一行委托
+- **ExportActionController**：新增 `editor/export_action_controller.py`，承载导出编排；HTML 导出统一走 FileGuard 安全写入（`safe_write` + FileAccessContext），file_guard 设为必填参数防绕过
+- **SettingsActionController**：新增 `editor/settings_action_controller.py`，承载设置动作编排（对话框应用/导出/导入/保存/重置）；`_apply_editor_dict` 供 show 与 apply 共享消除重复；wrap 菜单同步收敛为 `_sync_wrap_menu`（消除三处重复）
+- **ViewCoordinator**：新增 `ui/view_coordinator.py`，承载视图/分屏/面板切换（`_current_view`/`_split_tabs` 状态迁移）；依赖全构造注入，信号连接/菜单同步回调由 MainWindow 注入
+
+**UI 组装与事件过滤**
+
+- **MainWindowUIBuilder**：新增 `ui/main_window_ui.py`，承载顶层 widget 创建与布局（17 个组件经 `BuiltUI` 返回），builder 内不连接业务信号（回应 hotfix.txt 信号集中连接约束）
+- **SelectionClearFilter**：`_SelectionClearFilter` 独立为 `ui/selection_clear_filter.py`（纯移动，行为不变）
+
+**保存与导出修复**
+
+- **另存为副本语义**：另存为不再改变原标签显示名；支持另存为 PDF
+- **HTML 另存为**：.html/.htm 另存为渲染为可打开的 HTML 网页
+- **导出统一走 FileGuard 安全写入**：HTML 导出与 PDF 导出（含 PDF 另存为）均经 `safe_write_bytes`，遵守路径白名单与文件大小限制
+- **自动保存（autosave）安全写入**：临时会话 autosave 写入/读取统一经 FileGuard（路径白名单/大小限制/超时），`TempSessionManager` 构造注入 `file_guard`
+- **分屏保存焦点感知**：Ctrl+S 保存路由到当前焦点所在分栏（`_focused_editor_tabs`），修复分屏后保存错位
+- **会话滚动恢复兜底**：首帧布局未完成时 `setValue` 被 clamp，改用 rangeChanged 等滚动范围就绪后重试一次再断开
+- **分栏占比持久化**：编辑区/Markdown 预览分栏占比保存与恢复
+
+**架构文档**
+
+- `docs/architecture.md`：职责表补充 6 个新增模块，记录行数基线（main_window.py 1669 → 1255）
+
 ## v1.8.4
 
 **文件树选中高亮交互修复**

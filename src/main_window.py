@@ -14,41 +14,34 @@ import html as html_module
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QSplitter, QMenuBar, QMenu, QStatusBar,
-    QLabel, QMessageBox, QFileDialog, QTabWidget,
-    QToolButton, QFrame, QSizePolicy, QApplication, QDialog,
-    QLineEdit, QAbstractItemView
+    QLabel, QMessageBox, QTabWidget,
+    QToolButton, QFrame, QSizePolicy, QApplication,
+    QLineEdit
 )
-from PyQt6.QtCore import Qt, QTimer, QEvent, pyqtSignal, QPoint, QObject, QRect
-from PyQt6.QtGui import QIcon, QCloseEvent, QAction, QMouseEvent
-from typing import List, Optional, cast
+from PyQt6.QtCore import Qt, QTimer, QEvent, pyqtSignal, QPoint, QRect
+from PyQt6.QtGui import QIcon, QCloseEvent, QAction
+from typing import Optional, cast
 
 from . import __version__
 from .core.app_context import AppContext
-from .core.config_import_service import ConfigImportService, ConfigImportError
 from .core.session_restore_service import SessionRestoreService
 from .core.timer_manager import TimerManager
 from .core.event_bus import EventBus
 from .core.menu_builder import MenuBuilder
 from .core.shortcut_manager import ShortcutManager
 from .game.game_engine import GameEngine
-from .game.resource_bar import ResourceBar
-from .game.game_sidebar import GameSidebar
-from .editor.file_tree import FileTreeWidget
 from .editor.editor_tabs import EditorTabWidget
 from .editor.webengine_runtime import WebEngineRuntime
-from .game.secretary_widget import SecretaryWidget
 from .editor.status_bar import StatusBarWidget
-from .editor.find_replace import FindReplaceBar
-from .editor.outline_panel import OutlinePanel
-from .ui.side_panel_host import SidePanelHost
-from .editor.editor_settings_dialog import EditorSettingsDialog
 from .editor.file_open_service import FileOpenService, FileOpenSource, FileOpenSecurityError, _is_inside_root
 from .editor.file_action_controller import FileActionController
+from .editor.export_action_controller import ExportActionController
+from .editor.edit_action_controller import EditActionController
+from .editor.settings_action_controller import SettingsActionController
 from .plugins.plugin_manager import PluginManager
 from .themes.theme_engine import ThemeEngine
 from .themes.theme_preview import ThemePreviewDialog
 from .ui.command_palette import CommandPalette
-from .editor.find_in_files_panel import FindInFilesPanel
 from .utils.logger import get_logger
 from .utils.error_handler import ErrorHandler, ErrorCategory
 from .utils.feature_flags import is_enabled
@@ -57,92 +50,9 @@ from .utils.window_theme import (
     apply_native_dark_titlebar,
     install_native_titlebar_theme_filter,
 )
-
-
-class _SelectionClearFilter(QObject):
-    """窗口级点击过滤器。
-
-    当用户在 MainWindow 范围内点击"任何项目视图
-    （QAbstractItemView/QTreeWidget/QListWidget 等）之外的区域"时，
-    清空所有子项视图的选中态，使选中高亮蓝色块在"跳出列表区域"时消失。
-
-    点击范围内：交给 Qt 内部 selectionModel 处理（切换选中项/
-    Ctrl/Shift 多选逻辑保持不变）。
-    """
-
-    def eventFilter(self, watched: Optional[QObject], event: Optional[QEvent]) -> bool:
-        if (
-            event is None
-            or not isinstance(event, QMouseEvent)
-            or event.type() != QEvent.Type.MouseButtonPress
-        ):
-            return super().eventFilter(watched, event)
-        if event.button() != Qt.MouseButton.LeftButton:
-            return super().eventFilter(watched, event)
-
-        mw = self.parent()
-        if not isinstance(mw, QMainWindow):
-            return super().eventFilter(watched, event)
-
-        # 弹出模态/菜单时不操作，避免干扰对话框列表
-        modal = QApplication.activeModalWidget()
-        if modal is not None:
-            return super().eventFilter(watched, event)
-
-        # 优先使用 globalPosition() 直接拿到屏幕坐标（对应用级过滤器最可靠）
-        screen_pos: Optional[QPoint] = None
-        if hasattr(event, "globalPosition"):
-            gp = event.globalPosition()
-            if gp is not None:
-                screen_pos = QPoint(int(gp.x()), int(gp.y()))
-
-        # 回退方案：如果 globalPosition 不可用，尝试 position() + mapToGlobal
-        if screen_pos is None and isinstance(watched, QWidget) and hasattr(event, "position"):
-            pos = event.position()
-            if pos is not None:
-                local_pt = QPoint(int(pos.x()), int(pos.y()))
-                screen_pos = watched.mapToGlobal(local_pt)
-
-        if screen_pos is None:
-            return super().eventFilter(watched, event)
-
-        # 判断点击是否落在 MainWindow 内（跨窗口点击时忽略）
-        win_rect_global = QRect(
-            mw.mapToGlobal(mw.rect().topLeft()),
-            mw.mapToGlobal(mw.rect().bottomRight()),
-        )
-        if not win_rect_global.contains(screen_pos):
-            return super().eventFilter(watched, event)
-
-        # 判断点击的屏幕坐标是否落在任何子 ItemView 的可视矩形内
-        views = mw.findChildren(QAbstractItemView)
-        for view in views:
-            if not view.isVisible():
-                continue
-            vp = view.viewport()
-            if vp is None:
-                continue
-            view_rect_global = QRect(
-                vp.mapToGlobal(vp.rect().topLeft()),
-                vp.mapToGlobal(vp.rect().bottomRight()),
-            )
-            if view_rect_global.contains(screen_pos):
-                # 范围点击：保留原有选中切换逻辑
-                return super().eventFilter(watched, event)
-
-        # 点击不在任何 ItemView 的可视矩形内：清空全部选中
-        for view in views:
-            if not view.isVisible():
-                continue
-            sel_model = view.selectionModel()
-            if sel_model is not None and sel_model.hasSelection():
-                sel_model.clearSelection()
-            # 同时清空 currentIndex，避免焦点矩形残留
-            model = view.model()
-            invalid_idx = model.index(-1, -1) if model is not None else view.rootIndex()
-            view.setCurrentIndex(invalid_idx)
-
-        return super().eventFilter(watched, event)
+from .ui.main_window_ui import MainWindowUIBuilder
+from .ui.selection_clear_filter import SelectionClearFilter
+from .ui.view_coordinator import ViewCoordinator
 
 
 class MainWindow(QMainWindow):
@@ -158,7 +68,7 @@ class MainWindow(QMainWindow):
         self._wrap_no_wrap_action: QAction
         self._wrap_limit_action: QAction
         # 保存引用，避免事件过滤器被 GC
-        self._selection_clear_filter: Optional[_SelectionClearFilter] = None
+        self._selection_clear_filter: Optional[SelectionClearFilter] = None
         self._file_open_service = FileOpenService(
             self.config.get_path_validator(),
             self.config.get_notebooks_path(),
@@ -167,7 +77,6 @@ class MainWindow(QMainWindow):
             self.app_context.workspace_store,
             self._file_open_service,
         )
-        self._current_view = "editor"
         self._closing = False
         self._closing_pending_save = False
         self.setAcceptDrops(True)
@@ -204,12 +113,37 @@ class MainWindow(QMainWindow):
         self._save_notify_timer.setSingleShot(True)
         self._save_notify_timer.timeout.connect(self._do_save_notify)
 
+        self._ui_builder = MainWindowUIBuilder(
+            self.config,
+            self.theme_engine,
+            self.shortcut_manager,
+            self.webengine_runtime,
+        )
+
         self._init_ui()
         self._file_action_controller = FileActionController(
             self.editor_tabs,
             self.app_context.workspace_store,
             self.app_context.path_resolver,
             self._file_open_service,
+        )
+        self.export_actions = ExportActionController(
+            self.editor_tabs,
+            self.theme_engine,
+            self.secretary,
+            self,
+        )
+        self.edit_actions = EditActionController(
+            self.editor_tabs,
+            self.secretary,
+        )
+        self.settings_actions = SettingsActionController(
+            self.config,
+            self.editor_tabs,
+            self.secretary,
+            self.timer_manager,
+            self._file_open_service,
+            self,
         )
         self._init_menubar()
         self._init_statusbar()
@@ -225,7 +159,7 @@ class MainWindow(QMainWindow):
 
         # 安装应用级点击过滤器，用于点击空白处取消选中高亮
         # 必须在 _init_ui 之后安装，确保所有子视图已创建
-        self._selection_clear_filter = _SelectionClearFilter(self)
+        self._selection_clear_filter = SelectionClearFilter(self)
         app = QApplication.instance()
         if app is not None:
             app.installEventFilter(self._selection_clear_filter)
@@ -233,148 +167,71 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._check_session_recovery)
 
     def _init_ui(self):
-        """初始化UI"""
+        """初始化UI：widget 创建与布局委托给 MainWindowUIBuilder，信号集中连接"""
         self.setWindowTitle("PanzerNote")
         self.setMinimumSize(scale(800), scale(600))
 
-        # 中心部件
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-
-        # 主布局
-        main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
-
-        # 资源栏
-        self.resource_bar = ResourceBar(self.config, theme_engine=self.theme_engine)
-        main_layout.addWidget(self.resource_bar)
-
-        # 分隔线
-        self.line1 = QFrame()
-        self.line1.setFrameShape(QFrame.Shape.NoFrame)
-        self.line1.setFixedHeight(1)
-        main_layout.addWidget(self.line1)
-
-        # 内容区域
-        content_layout = QHBoxLayout()
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(0)
-
-        # 游戏图标侧边栏
-        self.game_sidebar = GameSidebar(theme_engine=self.theme_engine)
-        self.game_sidebar.setFixedWidth(scale(50))
-        self.game_sidebar.view_changed.connect(self._on_view_changed)
-        content_layout.addWidget(self.game_sidebar)
-
-        # 分隔线
-        self.line2 = QFrame()
-        self.line2.setFrameShape(QFrame.Shape.NoFrame)
-        self.line2.setFixedWidth(1)
-        content_layout.addWidget(self.line2)
-
-        # 分割器
-        self.splitter = QSplitter(Qt.Orientation.Horizontal)
-
-        # 侧栏面板宿主（统一管理文件树、大纲等面板）
-        self.side_panel_host = SidePanelHost(theme_engine=self.theme_engine)
-
-        # 文件树注册到宿主（默认面板）
-        self.file_tree = FileTreeWidget(self.config, theme_engine=self.theme_engine)
-        self.file_tree.file_open_requested.connect(self._open_file)
-        self.file_tree.file_move_requested.connect(self._on_file_move_from_tree)
-        self.side_panel_host.register_panel("filetree", self.file_tree, "≡", "文件树")
-
-        # 大纲面板注册到宿主
-        self.outline_panel = OutlinePanel()
-        self.outline_panel.heading_clicked.connect(self._on_outline_heading_clicked)
-        self.side_panel_host.register_panel("outline", self.outline_panel, "§", "大纲")
-
-        # 跨文件搜索面板注册到宿主
-        self.find_in_files_panel = FindInFilesPanel(
-            self.config.get_notebooks_path,
-            get_open_files=lambda: self.editor_tabs.get_open_filepaths(),
-                get_recent_files=lambda: self.config.get_recent_files(),
-            theme_engine=self.theme_engine,
-        )
-        self.find_in_files_panel.result_clicked.connect(self._on_find_in_files_result)
-        self.side_panel_host.register_panel("search", self.find_in_files_panel, "🔍", "跨文件搜索")
-
-        self.side_panel_host.setMinimumWidth(scale(100))
-        self.splitter.addWidget(self.side_panel_host)
-
-        self.side_panel_host.show_panel("filetree")
-
-        # 编辑区容器
-        self.editor_container = QWidget()
-        editor_layout = QVBoxLayout(self.editor_container)
-        editor_layout.setContentsMargins(0, 0, 0, 0)
-        editor_layout.setSpacing(0)
-
-        # v1.5.4: 查找替换栏（嵌入在编辑器标签页上方）
-        self.find_replace_bar = FindReplaceBar(theme_engine=self.theme_engine)
-        self.find_replace_bar.hide()
-        editor_layout.addWidget(self.find_replace_bar)
-
-        # 编辑器分屏容器
-        self.editor_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.editor_splitter.setChildrenCollapsible(False)
-
-        # 编辑器标签页
-        self.editor_tabs = EditorTabWidget(
-            self.config,
-            theme_engine=self.theme_engine,
-            webengine_runtime=self.webengine_runtime,
-        )
-        self.editor_tabs.set_find_bar(self.find_replace_bar)
-        self.editor_tabs.current_changed.connect(self._on_tab_changed)
-        self.editor_tabs.content_modified.connect(self._on_content_modified)
-        self.editor_tabs.tab_count_changed.connect(self._on_tab_count_changed)
-        self.editor_tabs.chars_typed.connect(self._on_chars_typed)
-        self.editor_tabs.cursor_position_changed.connect(self._update_stats)
-        self.editor_tabs.word_count_updated.connect(self._update_stats)
-        self.editor_tabs.file_saved.connect(self._on_file_saved)
-        self.editor_splitter.addWidget(self.editor_tabs)
-
-        self._split_tabs: List[EditorTabWidget] = []
-
-        editor_layout.addWidget(self.editor_splitter)
-
-        self.splitter.addWidget(self.editor_container)
+        ui = self._ui_builder.build(self)
+        # 解包
+        self.resource_bar = ui.resource_bar
+        self.line1 = ui.line1
+        self.game_sidebar = ui.game_sidebar
+        self.line2 = ui.line2
+        self.splitter = ui.splitter
+        self.side_panel_host = ui.side_panel_host
+        self.file_tree = ui.file_tree
+        self.outline_panel = ui.outline_panel
+        self.find_in_files_panel = ui.find_in_files_panel
+        self.editor_container = ui.editor_container
+        self.find_replace_bar = ui.find_replace_bar
+        self.editor_splitter = ui.editor_splitter
+        self.editor_tabs = ui.editor_tabs
+        self.game_view_container = ui.game_view_container
+        self._game_placeholder = ui.game_placeholder
+        self.secretary = ui.secretary
+        self.shortcut_panel = ui.shortcut_panel
 
         self.webengine_runtime.prepare_startup_anchor(self.editor_container)
+        self.view_coordinator = ViewCoordinator(
+            self.config,
+            self.theme_engine,
+            self.webengine_runtime,
+            self.editor_splitter,
+            self.editor_tabs,
+            self.find_replace_bar,
+            self.side_panel_host,
+            self.splitter,
+            self.game_view_container,
+            self.game_sidebar,
+            self.secretary,
+            self.shortcut_panel,
+            self._connect_editor_tabs_signals,
+            lambda _mode: self._sync_wrap_menu(),
+        )
+        self._connect_ui_signals()
 
-        # 设置分割器初始大小
-        sidebar_width = self.config.get_view_setting("sidebar_width", 200)
-        editor_width = self.config.get_view_setting("editor_area_width", 800)
-        self.splitter.setSizes([sidebar_width, editor_width])
+    def _connect_ui_signals(self):
+        """集中连接主 UI 信号（与重构前散落 connect 逐项核对一致）。
 
-        content_layout.addWidget(self.splitter)
-
-        # 内容容器
-        content_widget = QWidget()
-        content_widget.setLayout(content_layout)
-        main_layout.addWidget(content_widget, 1)
-
-        # 游戏界面容器
-        self.game_view_container = QWidget()
-        self.game_view_container.hide()
-        _game_layout = QVBoxLayout(self.game_view_container)
-        _game_layout.setContentsMargins(0, 0, 0, 0)
-        self._game_placeholder = QLabel("该功能尚在开发中")
-        self._game_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._game_placeholder.setStyleSheet(f"color: {self.theme_engine.get_active_theme().colors.text_disabled}; font-size: 18px;")
-        _game_layout.addWidget(self._game_placeholder)
-        main_layout.addWidget(self.game_view_container)
-
-        # 小秘书（覆盖在编辑区右下角，自动跟随父容器大小变化）
-        self.secretary = SecretaryWidget(self.config, theme_engine=self.theme_engine, parent=self.editor_container)
-
-        # 快捷键提示面板
-        from .ui.shortcut_panel import ShortcutPanel
-        self.shortcut_panel = ShortcutPanel(self.shortcut_manager, theme_engine=self.theme_engine, parent=self)
+        仅包含 _init_ui 创建的组件信号；状态栏信号在 _init_statusbar 连接。
+        """
+        self.game_sidebar.view_changed.connect(self._on_view_changed)
+        self.file_tree.file_open_requested.connect(self._open_file)
+        self.file_tree.file_move_requested.connect(self._on_file_move_from_tree)
+        self.outline_panel.heading_clicked.connect(self._on_outline_heading_clicked)
+        self.find_in_files_panel.result_clicked.connect(self._on_find_in_files_result)
         self.shortcut_panel.set_edit_callback(self._on_shortcut_edited)
-        self.shortcut_panel.hide()
+        self._connect_editor_tabs_signals(self.editor_tabs)
+
+    def _connect_editor_tabs_signals(self, tabs: EditorTabWidget):
+        """主面板与分屏复用，保证信号配置永远一致。"""
+        tabs.current_changed.connect(self._on_tab_changed)
+        tabs.content_modified.connect(self._on_content_modified)
+        tabs.tab_count_changed.connect(self._on_tab_count_changed)
+        tabs.chars_typed.connect(self._on_chars_typed)
+        tabs.cursor_position_changed.connect(self._update_stats)
+        tabs.word_count_updated.connect(self._update_stats)
+        tabs.file_saved.connect(self._on_file_saved)
 
     def _init_menubar(self):
         """初始化菜单栏"""
@@ -472,7 +329,7 @@ class MainWindow(QMainWindow):
         self.config.set_open_files(open_files)
 
         self.config.set_active_tab_index(self.editor_tabs.currentIndex())
-        self.config.set_current_view(self._current_view)
+        self.config.set_current_view(self.view_coordinator.current_view)
 
         sizes = self.splitter.sizes()
         if len(sizes) >= 2:
@@ -783,7 +640,7 @@ class MainWindow(QMainWindow):
 
     def keyPressEvent(self, event):
         """键盘事件"""
-        if event.key() == Qt.Key.Key_Escape and self._current_view != "editor":
+        if event.key() == Qt.Key.Key_Escape and self.view_coordinator.current_view != "editor":
             self._switch_view("editor")
             return
         if event.key() == Qt.Key.Key_F1:
@@ -825,76 +682,42 @@ class MainWindow(QMainWindow):
             self.file_tree.refresh_external_files()
         self._update_recent_menu()
 
+    def _focused_editor_tabs(self) -> Optional[EditorTabWidget]:
+        """返回当前焦点所在的 EditorTabWidget（主面板或分屏），无则 None。
+
+        分屏聚焦时按 Ctrl+S 应保存分屏中正在编辑的文件，而非固定主面板。
+        """
+        focus = QApplication.focusWidget()
+        if focus is None:
+            return None
+        for tabs in [self.editor_tabs, *self.view_coordinator.split_tabs]:
+            if tabs is focus or tabs.isAncestorOf(focus):
+                return tabs
+        return None
+
     def _save_current(self):
-        """保存当前文件"""
-        self.editor_tabs.save_current()
+        """保存当前文件（焦点在分屏时保存分屏）"""
+        tabs = self._focused_editor_tabs() or self.editor_tabs
+        tabs.save_current()
 
     def _save_as(self):
-        """另存为"""
-        self.editor_tabs.save_current_as()
+        """另存为（焦点在分屏时另存为分屏）"""
+        tabs = self._focused_editor_tabs() or self.editor_tabs
+        tabs.save_current_as()
 
     def _save_all(self):
-        """保存所有文件"""
+        """保存所有文件（主面板 + 全部分屏）"""
         self.editor_tabs.save_all()
+        for tabs in self.view_coordinator.split_tabs:
+            tabs.save_all()
 
     def _export_pdf(self):
-        from .editor.export_service import ExportService
-        try:
-            editor = self.editor_tabs.current_editor()
-            if not editor:
-                return
-            filepath, _ = QFileDialog.getSaveFileName(
-                self, "导出PDF", "", "PDF文件 (*.pdf)"
-            )
-            if not filepath:
-                return
-
-            content = editor.toPlainText()
-            widget = self.editor_tabs.currentWidget()
-            widget_type = type(widget).__name__ if widget else ""
-            is_md = ExportService.is_markdown_content(content, widget_type)
-
-            def on_pdf_ready(pdf_data):
-                self._on_pdf_generated(pdf_data, filepath)
-
-            ExportService.export_pdf(content, is_md, self, on_pdf_ready,
-                                     self.theme_engine.get_active_theme().colors)
-        except RuntimeError as e:
-            QMessageBox.warning(self, "导出失败", str(e))
-
-    def _on_pdf_generated(self, pdf_data, filepath):
-        if pdf_data:
-            try:
-                with open(filepath, 'wb') as f:
-                    f.write(pdf_data)
-                self.secretary.show_message(f"已导出PDF: {os.path.basename(filepath)}")
-            except Exception as e:
-                ErrorHandler.show_from_exception(e, ErrorCategory.FILE, f"写入PDF文件失败：{os.path.basename(filepath)}")
-        else:
-            QMessageBox.warning(self, "导出失败", "PDF生成失败")
+        """导出当前文档为 PDF（委托 ExportActionController）"""
+        self.export_actions.export_pdf()
 
     def _export_html(self):
-        from .editor.export_service import ExportService
-        editor = self.editor_tabs.current_editor()
-        if not editor:
-            return
-        filepath, _ = QFileDialog.getSaveFileName(
-            self, "导出HTML", "", "HTML文件 (*.html)"
-        )
-        if not filepath:
-            return
-
-        content = editor.toPlainText()
-        widget = self.editor_tabs.currentWidget()
-        widget_type = type(widget).__name__ if widget else ""
-        is_md = ExportService.is_markdown_content(content, widget_type)
-
-        try:
-            ExportService.export_html(content, is_md, filepath,
-                                     self.theme_engine.get_active_theme().colors)
-            self.secretary.show_message(f"已导出HTML: {os.path.basename(filepath)}")
-        except Exception as e:
-            QMessageBox.warning(self, "导出失败", str(e))
+        """导出当前文档为 HTML（委托 ExportActionController）"""
+        self.export_actions.export_html()
 
     def _close_current_tab(self):
         """关闭当前标签"""
@@ -937,98 +760,91 @@ class MainWindow(QMainWindow):
 
     def _undo(self):
         """撤销"""
-        if not self.editor_tabs.undo():
-            self.secretary.show_message("当前没有可撤销的操作")
+        self.edit_actions.undo()
 
     def _redo(self):
         """重做"""
-        self.editor_tabs.redo()
+        self.edit_actions.redo()
 
     def _cut(self):
         """剪切"""
-        self.editor_tabs.cut()
+        self.edit_actions.cut()
 
     def _copy(self):
         """复制"""
-        self.editor_tabs.copy()
+        self.edit_actions.copy()
 
     def _paste(self):
         """粘贴"""
-        self.editor_tabs.paste()
+        self.edit_actions.paste()
 
     def _select_all(self):
         """全选"""
-        self.editor_tabs.select_all()
+        self.edit_actions.select_all()
 
     def _find(self):
         """查找"""
-        self.editor_tabs.show_find_dialog()
+        self.edit_actions.find()
 
     def _replace(self):
         """替换"""
-        self.editor_tabs.show_replace_dialog()
+        self.edit_actions.replace()
 
     # === 行操作 ===
 
     def _delete_current_line(self):
-        self.editor_tabs.delete_current_line()
+        self.edit_actions.delete_current_line()
 
     def _move_line_up(self):
-        self.editor_tabs.move_line_up()
+        self.edit_actions.move_line_up()
 
     def _move_line_down(self):
-        self.editor_tabs.move_line_down()
+        self.edit_actions.move_line_down()
 
     def _copy_line(self):
-        self.editor_tabs.copy_line()
+        self.edit_actions.copy_line()
 
     def _paste_line(self):
-        self.editor_tabs.paste_line()
+        self.edit_actions.paste_line()
 
     def _goto_line(self):
-        self.editor_tabs.show_goto_line_dialog()
+        self.edit_actions.goto_line()
 
     # === 大小写转换 ===
 
     def _toggle_case(self):
-        self.editor_tabs.toggle_case()
+        self.edit_actions.toggle_case()
 
     def _to_uppercase(self):
-        self.editor_tabs.to_uppercase()
+        self.edit_actions.to_uppercase()
 
     def _to_lowercase(self):
-        self.editor_tabs.to_lowercase()
+        self.edit_actions.to_lowercase()
 
     def _to_titlecase(self):
-        self.editor_tabs.to_titlecase()
+        self.edit_actions.to_titlecase()
+
+    # === 书签与折叠 ===
 
     def _toggle_bookmark(self):
-        editor = self.editor_tabs.current_editor()
-        if editor:
-            editor.toggle_bookmark()
+        self.edit_actions.toggle_bookmark()
 
     def _next_bookmark(self):
-        editor = self.editor_tabs.current_editor()
-        if editor:
-            editor.next_bookmark()
+        self.edit_actions.next_bookmark()
 
     def _prev_bookmark(self):
-        editor = self.editor_tabs.current_editor()
-        if editor:
-            editor.prev_bookmark()
+        self.edit_actions.prev_bookmark()
 
     def _toggle_fold_all(self):
         """折叠/展开全部 Markdown 标题。"""
-        editor = self.editor_tabs.current_editor()
-        if editor:
-            editor.toggle_fold_all()
+        self.edit_actions.toggle_fold_all()
 
     # === 视图操作 ===
 
     def _on_view_changed(self, view: str):
         """游戏侧边栏视图切换"""
         if view == "back":
-            if self._current_view != "editor":
+            if self.view_coordinator.current_view != "editor":
                 self._switch_view("editor")
             else:
                 self._undo()
@@ -1036,119 +852,48 @@ class MainWindow(QMainWindow):
             self._switch_view(view)
 
     def _switch_view(self, view: str):
-        """切换视图"""
-        if view == self._current_view:
-            return
-
-        if view == "editor":
-            self.side_panel_host.show_panel("filetree")
-            self.splitter.show()
-            self.game_view_container.hide()
-            self.game_sidebar.set_current_view(None)
-        else:
-            self.splitter.hide()
-            self.game_view_container.show()
-            self.game_sidebar.set_current_view(view)
-
-        self._current_view = view
+        """切换视图（委托 ViewCoordinator）"""
+        self.view_coordinator.switch_view(view)
 
     def _set_wrap_mode(self, mode: str):
-        """设置行宽模式"""
-        self.config.set_editor_setting("wrap_mode", mode)
-        self.editor_tabs.set_wrap_mode_all(mode)
-
-        # 更新菜单选中状态
-        self._wrap_no_wrap_action.setChecked(mode == "no_wrap")
-        self._wrap_limit_action.setChecked(mode == "limit_width")
+        """设置行宽模式（委托 ViewCoordinator）"""
+        self.view_coordinator.set_wrap_mode(mode)
 
     def _toggle_md_preview(self):
-        """切换Markdown预览"""
-        self.editor_tabs.toggle_md_preview()
+        """切换Markdown预览（委托 ViewCoordinator）"""
+        self.view_coordinator.toggle_md_preview()
 
     def _toggle_minimap(self):
-        """切换代码缩略图"""
-        self.editor_tabs.toggle_minimap()
+        """切换代码缩略图（委托 ViewCoordinator）"""
+        self.view_coordinator.toggle_minimap()
 
     def _split_editor_horizontal(self):
-        """水平分屏"""
-        self._split_editor(Qt.Orientation.Horizontal)
+        """水平分屏（委托 ViewCoordinator）"""
+        self.view_coordinator.split_editor(Qt.Orientation.Horizontal)
 
     def _split_editor_vertical(self):
-        """垂直分屏"""
-        self._split_editor(Qt.Orientation.Vertical)
-
-    def _split_editor(self, orientation):
-        if self._split_tabs:
-            return
-        self.editor_splitter.setOrientation(orientation)
-        split_tabs = EditorTabWidget(
-            self.config,
-            theme_engine=self.theme_engine,
-            webengine_runtime=self.webengine_runtime,
-        )
-        split_tabs.set_find_bar(self.find_replace_bar)
-        split_tabs.current_changed.connect(self._on_tab_changed)
-        split_tabs.content_modified.connect(self._on_content_modified)
-        split_tabs.tab_count_changed.connect(self._on_tab_count_changed)
-        split_tabs.chars_typed.connect(self._on_chars_typed)
-        split_tabs.cursor_position_changed.connect(self._update_stats)
-        split_tabs.word_count_updated.connect(self._update_stats)
-        self.editor_splitter.addWidget(split_tabs)
-        self._split_tabs.append(split_tabs)
-        split_tabs.new_file()
-        total = self.editor_splitter.width()
-        self.editor_splitter.setSizes([total // 2, total // 2])
-        self.secretary.show_message("已启用分屏。注意：分屏中编辑的是独立文件，与主面板不同步。")
+        """垂直分屏（委托 ViewCoordinator）"""
+        self.view_coordinator.split_editor(Qt.Orientation.Vertical)
 
     def _close_split(self):
-        """关闭分屏"""
-        if not self._split_tabs:
-            return
-        split_tabs = self._split_tabs.pop()
-        unsaved = split_tabs.get_unsaved_files()
-        if unsaved:
-            reply = QMessageBox.question(
-                self, "关闭分屏",
-                "分屏中有未保存的文件，是否关闭？",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No
-            )
-            if reply == QMessageBox.StandardButton.No:
-                self._split_tabs.append(split_tabs)
-                return
-        split_tabs.save_all_to_temp()
-        split_tabs.close_all_tabs()
-        split_tabs.setParent(None)
-        split_tabs.deleteLater()
+        """关闭分屏（委托 ViewCoordinator）"""
+        self.view_coordinator.close_split(self)
 
     def _toggle_file_tree(self):
-        """切换文件树显示/隐藏"""
-        self.side_panel_host.toggle("filetree")
+        """切换文件树显示/隐藏（委托 ViewCoordinator）"""
+        self.view_coordinator.toggle_file_tree()
 
     def _toggle_side_panel(self):
-        """切换侧栏面板宿主显示/隐藏"""
-        if self.side_panel_host.isVisible():
-            self.side_panel_host.hide_panel()
-        else:
-            current_id = self.side_panel_host.current_panel_id()
-            if current_id is not None:
-                self.side_panel_host.show_panel(current_id)
-            else:
-                # 无激活面板时默认显示大纲
-                self.side_panel_host.show_panel("outline")
+        """切换侧栏面板宿主显示/隐藏（委托 ViewCoordinator）"""
+        self.view_coordinator.toggle_side_panel()
 
     def _toggle_secretary(self):
-        """切换小秘书显示/隐藏"""
-        self.secretary.setVisible(not self.secretary.isVisible())
-        self.config.set_secretary_setting("show_secretary", self.secretary.isVisible())
+        """切换小秘书显示/隐藏（委托 ViewCoordinator）"""
+        self.view_coordinator.toggle_secretary()
 
     def _toggle_shortcut_panel(self):
-        """切换快捷键提示面板"""
-        if self.shortcut_panel.isVisible():
-            self.shortcut_panel.hide()
-        else:
-            self.shortcut_panel.refresh()
-            self.shortcut_panel.show()
-            self.shortcut_panel.raise_()
+        """切换快捷键提示面板（委托 ViewCoordinator）"""
+        self.view_coordinator.toggle_shortcut_panel()
 
     def _on_shortcut_edited(self, action_id: str, new_shortcut: str):
         """快捷键编辑回调"""
@@ -1275,168 +1020,42 @@ class MainWindow(QMainWindow):
     # === 设置 ===
 
     def _show_editor_settings(self):
-        """显示记事本设置"""
-        dialog = EditorSettingsDialog(self.config, self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            settings = dialog.get_settings()
-            editor = settings["editor"]
-            secretary = settings["secretary"]
+        """显示记事本设置（委托 SettingsActionController，完成后同步换行菜单）"""
+        self.settings_actions.show_editor_settings()
+        self._sync_wrap_menu()
 
-            # 保存编辑器设置
-            for key, value in editor.items():
-                self.config.set_editor_setting(key, value)
-
-            # 保存小秘书设置
-            for key, value in secretary.items():
-                self.config.set_secretary_setting(key, value)
-
-            self.config.save_settings()
-
-            # 应用设置
-            # 显示行号
-            self.editor_tabs.set_line_numbers_all(editor["show_line_numbers"])
-
-            # 高亮当前行
-            self.editor_tabs.set_highlight_current_line_all(editor["highlight_current_line"])
-
-            # 字体和字体大小
-            self.editor_tabs.set_font_all(editor["font_family"], editor["font_size"])
-
-            # 行宽模式
-            self.editor_tabs.set_wrap_mode_all(editor["wrap_mode"])
-            self._wrap_no_wrap_action.setChecked(editor["wrap_mode"] == "no_wrap")
-            self._wrap_limit_action.setChecked(editor["wrap_mode"] == "limit_width")
-
-            # 自动缩略图
-            self.editor_tabs.apply_auto_minimap_all()
-
-            # 缩进配置
-            self.editor_tabs.update_indent_settings_all()
-
-            # 自动保存间隔
-            self.timer_manager.update_auto_save_interval(editor["auto_save_interval"])
-
-            # 自动补全
-            self.editor_tabs.set_completion_enabled_all(editor.get("enable_completion", False))
-
-            # 小秘书设置
-            if secretary["show_secretary"]:
-                self.secretary.show()
-                self.secretary.set_size_percent(secretary["size_percent"])
-            else:
-                self.secretary.hide()
-
-            self.secretary.show_message("设置已保存并应用")
+    def _sync_wrap_menu(self):
+        """同步换行菜单选中态（show/apply/reset/import 后统一调用）"""
+        wrap_mode = self.config.get_editor_setting("wrap_mode", "no_wrap")
+        self._wrap_no_wrap_action.setChecked(wrap_mode == "no_wrap")
+        self._wrap_limit_action.setChecked(wrap_mode == "limit_width")
 
     def _show_game_settings(self):
         """显示游戏设置"""
         QMessageBox.information(self, "提示", "该功能尚在开发中")
 
     def _export_settings(self):
-        filepath, _ = QFileDialog.getSaveFileName(
-            self, "导出设置", "panzernote_settings.json", "JSON文件 (*.json)"
-        )
-        if not filepath:
-            return
-        import json as json_module
-        try:
-            export_data = {
-                "version": __version__,
-                "settings": self.config.get_settings(),
-                "workspace": self.config.get_workspace(),
-            }
-            with open(filepath, 'w', encoding='utf-8') as f:
-                json_module.dump(export_data, f, ensure_ascii=False, indent=2)
-            self.secretary.show_message(f"设置已导出到 {os.path.basename(filepath)}")
-        except Exception as e:
-            QMessageBox.warning(self, "导出失败", str(e))
+        """导出设置（委托 SettingsActionController）"""
+        self.settings_actions.export_settings()
 
     def _import_settings(self):
-        filepath, _ = QFileDialog.getOpenFileName(
-            self, "导入设置", "", "JSON文件 (*.json)"
-        )
-        if not filepath:
-            return
-        import json as json_module
-        try:
-            validated = self._file_open_service.validate_open_request(
-                filepath, FileOpenSource.SETTINGS_IMPORT
-            )
-        except FileOpenSecurityError as e:
-            QMessageBox.warning(self, "导入失败", str(e))
-            return
-
-        try:
-            content = self.config.get_file_guard().safe_read(
-                validated, encoding='utf-8',
-                context=self.config.INTERNAL_CONFIG_CTX
-            )
-            data = json_module.loads(content)
-            if not isinstance(data, dict) or "settings" not in data:
-                QMessageBox.warning(self, "导入失败", "无效的设置文件格式")
-                return
-            reply = QMessageBox.question(
-                self, "确认导入",
-                "导入设置将覆盖当前所有设置，是否继续？",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No
-            )
-            if reply == QMessageBox.StandardButton.No:
-                return
-            service = ConfigImportService(self.config)
-            skipped = service.import_from_json(content)
-            if skipped:
-                QMessageBox.warning(
-                    self, "导入完成（部分跳过）",
-                    "以下字段因格式不正确已跳过：\n" + "\n".join(skipped[:10])
-                )
-            self._apply_editor_settings()
-            self.secretary.show_message("设置已导入，部分设置将在重启后生效")
-        except ConfigImportError as e:
-            QMessageBox.warning(self, "导入失败", str(e))
-        except Exception as e:
-            QMessageBox.warning(self, "导入失败", str(e))
+        """导入设置（委托 SettingsActionController，完成后同步换行菜单）"""
+        self.settings_actions.import_settings()
+        self._sync_wrap_menu()
 
     def _save_settings(self):
-        """保存设置"""
-        self.config.save_settings()
-        self.secretary.show_message("设置已保存")
+        """保存设置（委托 SettingsActionController）"""
+        self.settings_actions.save_settings()
 
     def _apply_editor_settings(self):
-        """从 config 读取当前设置并应用到 UI"""
-        self.editor_tabs.set_line_numbers_all(self.config.get_editor_setting("show_line_numbers", True))
-        self.editor_tabs.set_highlight_current_line_all(self.config.get_editor_setting("highlight_current_line", True))
-        self.editor_tabs.set_font_all(
-            self.config.get_editor_setting("font_family", "Microsoft YaHei"),
-            self.config.get_editor_setting("font_size", 12)
-        )
-        self.editor_tabs.set_wrap_mode_all(self.config.get_editor_setting("wrap_mode", "no_wrap"))
-        wrap_mode = self.config.get_editor_setting("wrap_mode", "no_wrap")
-        self._wrap_no_wrap_action.setChecked(wrap_mode == "no_wrap")
-        self._wrap_limit_action.setChecked(wrap_mode == "limit_width")
-        self.editor_tabs.apply_auto_minimap_all()
-        self.timer_manager.update_auto_save_interval(self.config.get_editor_setting("auto_save_interval", 30))
-        if self.config.get_secretary_setting("show_secretary", True):
-            self.secretary.show()
-            self.secretary.set_size_percent(self.config.get_secretary_setting("size_percent", 7))
-        else:
-            self.secretary.hide()
+        """从 config 读取当前设置并应用到 UI（委托，完成后同步换行菜单）"""
+        self.settings_actions.apply_editor_settings()
+        self._sync_wrap_menu()
 
     def _reset_settings(self):
-        """恢复默认设置"""
-        msg_box = QMessageBox(self)
-        msg_box.setWindowTitle("确认")
-        msg_box.setText("确定要恢复所有设置为默认值吗？")
-        msg_box.setIcon(QMessageBox.Icon.Question)
-
-        yes_btn = msg_box.addButton("确定", QMessageBox.ButtonRole.AcceptRole)
-        no_btn = msg_box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
-
-        msg_box.exec()
-
-        if msg_box.clickedButton() == yes_btn:
-            self.config.reset_to_defaults()
-            self._apply_editor_settings()
-            self.secretary.show_message("设置已恢复为默认值")
+        """恢复默认设置（委托 SettingsActionController，完成后同步换行菜单）"""
+        self.settings_actions.reset_settings()
+        self._sync_wrap_menu()
 
     # === 帮助 ===
 
@@ -1498,7 +1117,7 @@ class MainWindow(QMainWindow):
         """根据当前编辑器类型显示/隐藏大纲面板"""
         # 从所有 tab widget 中找到当前编辑器
         editor = None
-        for tw in [self.editor_tabs] + self._split_tabs:
+        for tw in [self.editor_tabs] + self.view_coordinator.split_tabs:
             e = tw.current_editor()
             if e is not None:
                 editor = e

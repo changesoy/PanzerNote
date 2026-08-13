@@ -70,7 +70,7 @@ PanzerNote/
 │
 ├── src/                            # ══════ 源代码 ══════
 │   ├── __init__.py                 # 版本号唯一真相源（__version__/get_version/get_version_tuple）
-│   ├── main_window.py              # 主窗口（菜单栏 + 布局组装 + 事件路由 + 插件/主题集成）
+│   ├── main_window.py              # 主窗口协调者（两阶段关闭/会话恢复协调/信号回调/窗口事件/命令面板/插件主题集成；动作经控制器一行委托）
 │   │
 │   ├── core/                       # ── 核心模块 ──
 │   │   ├── config.py               # 配置门面（委托 PathResolver/SettingsStore/WorkspaceStore/SavegameManager/SecurityManager，对外保持完整接口）
@@ -105,7 +105,7 @@ PanzerNote/
 │   │   ├── find_in_files_panel.py  # 跨文件搜索结果面板（按文件分组 + 双击跳转）
 │   │   ├── save_task.py            # 后台文件保存任务（SaveTask + QThreadPool 异步写入）
 │   │   ├── save_task_manager.py    # 保存任务管理器（dirty→saving→clean/save_failed 状态机）
-│   │   ├── temp_session_manager.py # 临时会话恢复（异常退出 autosave session 恢复）
+│   │   ├── temp_session_manager.py # 临时会话恢复（异常退出 autosave 恢复；autosave 读写经 FileGuard）
 │   │   ├── virtual_scroll.py       # 虚拟滚动管理器（大文件延迟语法高亮）
 │   │   ├── async_highlight.py      # 异步代码高亮渲染器（QThread + 任务队列）
 │   │   ├── incremental_renderer.py # 渲染缓存（MD5 哈希缓存，全文级）
@@ -121,6 +121,9 @@ PanzerNote/
 │   │   ├── export_service.py       # 导出服务（HTML/PDF 统一安全管线）
 │   │   ├── file_open_service.py    # 文件打开安全入口（来源校验/路径白名单/二进制检测）
 │   │   ├── file_action_controller.py # 文件动作编排（打开对话框/外部文件注册/最近文件过滤）
+│   │   ├── edit_action_controller.py # 编辑动作编排（撤销/剪贴板/查找/行操作/大小写/书签/折叠，22 个方法）
+│   │   ├── export_action_controller.py # 导出动作编排（PDF/HTML，均经 FileGuard 安全写入）
+│   │   ├── settings_action_controller.py # 设置动作编排（对话框应用/导出/导入/保存/重置，show 与 apply 共享）
 │   │   ├── editor_settings_dialog.py # 记事本设置对话框
 │   │   ├── file_tree.py            # 文件树
 │   │   └── status_bar.py           # 状态栏
@@ -132,6 +135,9 @@ PanzerNote/
 │   │   └── secretary_widget.py     # 小秘书组件
 │   │
 │   ├── ui/                         # ── UI 组件 ──
+│   │   ├── main_window_ui.py       # UI 组装（MainWindowUIBuilder：顶层 widget 创建与布局，BuiltUI 返回 17 组件，不连业务信号）
+│   │   ├── view_coordinator.py     # 视图协调器（ViewCoordinator：视图/分屏/面板切换，_current_view/_split_tabs 状态）
+│   │   ├── selection_clear_filter.py # 选中高亮清除过滤器（SelectionClearFilter：点击列表外空白清除选中）
 │   │   ├── first_run_dialog.py     # 首次运行对话框
 │   │   ├── command_palette.py      # 命令面板（Ctrl+Shift+P / F1 唤起，搜索并执行命令）
 │   │   ├── side_panel_host.py      # 侧栏面板宿主（管理多面板注册/切换/持久化）
@@ -275,14 +281,27 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 
 **拆分后的模块职责**：
 
-| 模块                          | 职责                                                                             |
-| ----------------------------- | -------------------------------------------------------------------------------- |
-| `main_window.py`              | 布局组装、菜单动作代理、状态管理、插件/主题集成、统一窗口显示入口（`present()`） |
-| `editor/webengine_runtime.py` | WebEngine 启动锚点管理：首个预览挂载前预初始化 Qt WebEngine，挂载后释放锚点      |
-| `core/timer_manager.py`       | 定时器生命周期管理（自动保存/统计/挂机奖励）                                     |
-| `core/event_bus.py`           | 信号连接集中管理，解耦模块间通信                                                 |
-| `core/menu_builder.py`        | 菜单栏构建逻辑，已接入 ShortcutManager                                           |
-| `game/game_engine.py`         | 挂机收益计算（在线/离线奖励、打字奖励、资源上限检查）                            |
+| 模块                                   | 职责                                                                                                                                                        |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --- |
+| `main_window.py`                       | 主窗口协调者（~1255 行）：两阶段关闭、会话恢复协调、信号回调、拖放/键盘事件、命令面板、插件/主题集成、统一窗口显示入口（`present()`）；动作经控制器一行委托 |
+| `ui/main_window_ui.py`                 | `MainWindowUIBuilder`：顶层 widget 创建与布局（17 个组件经 `BuiltUI` 返回），不连接业务信号                                                                 |
+| `ui/view_coordinator.py`               | `ViewCoordinator`：视图/分屏/面板切换编排；`_current_view`/`_split_tabs` 状态；依赖全构造注入，回调（信号连接/菜单同步）由 MainWindow 注入                  |
+| `ui/selection_clear_filter.py`         | `SelectionClearFilter`：应用级事件过滤器，点击列表外空白清除选中高亮                                                                                        |
+| `editor/edit_action_controller.py`     | `EditActionController`：22 个编辑动作（撤销/剪贴板/查找/行操作/大小写/书签/折叠）                                                                           |
+| `editor/export_action_controller.py`   | `ExportActionController`：PDF/HTML 导出（均经 FileGuard 安全写入，含 PDF 回调 `_on_pdf_generated`）                                                         |     |
+| `editor/settings_action_controller.py` | `SettingsActionController`：设置动作编排（对话框应用/导出/导入/保存/重置，show 与 apply 共享 `_apply_editor_dict`）                                         |
+| `editor/webengine_runtime.py`          | WebEngine 启动锚点管理：首个预览挂载前预初始化 Qt WebEngine，挂载后释放锚点                                                                                 |
+| `core/timer_manager.py`                | 定时器生命周期管理（自动保存/统计/挂机奖励）                                                                                                                |
+| `core/event_bus.py`                    | 信号连接集中管理，解耦模块间通信                                                                                                                            |
+| `core/menu_builder.py`                 | 菜单栏构建逻辑，已接入 ShortcutManager                                                                                                                      |
+| `game/game_engine.py`                  | 挂机收益计算（在线/离线奖励、打字奖励、资源上限检查）                                                                                                       |
+
+**行数基线**（Wave 3 A~E 五分支完成后的记录）：
+
+- `main_window.py`：1669 行（重构前）→ **1255 行**（A~E 后，超出方案预期 1000~1150，属 Qt 主窗口协调者合理规模）。
+- 拆分收益：编辑+导出区块（-120）、设置区块（-145）、视图/分屏区块（-150）、SelectionClearFilter（-85）、UI 组装（-110），动作均为控制器一行委托。
+- 可单测控制器 5 个 + 独立 QObject 1 个：`EditActionController` / `ExportActionController` / `SettingsActionController` / `ViewCoordinator` / `MainWindowUIBuilder` / `SelectionClearFilter`。
+- 明确保留不拆的职责块（详见《Wave3剩余分支重构方案.md》第 6 节）：信号回调群、两阶段关闭流程、会话恢复协调、拖放处理、命令面板、插件回调等。
 
 **定时器**（由 `TimerManager` 管理）：
 
@@ -724,7 +743,7 @@ LOADED → on_unload() → UNLOADED
 **版本传播链路**：
 
 ```
-src/__init__.py (__version__ = "1.8.3")
+src/__init__.py (__version__ = "1.8.5")
   ├─→ main.py                    (from src import __version__)
   ├─→ src/main_window.py         (from . import __version__)
   ├─→ src/plugins/plugin_base.py (from .. import __version__ as _app_version)
@@ -991,7 +1010,7 @@ pip install mypy>=1.20                         # 类型检查
 39. **集中式版本管理**：`src/__init__.py` 中的 `__version__` 为唯一真相源，所有模块通过 `from src import __version__` 引用。`pyproject.toml` 使用动态版本配置，`scripts/verify_version.py` 提供一致性验证，`main.py` 启动时自动检查
 40. **依赖梳理**：`pyproject.toml` 分组 format/dev/all，所有运行时依赖均为必需
 41. **增量渲染器命名澄清**：`incremental_renderer.py` 确认为全文 hash 渲染缓存，文档不宣称"真正增量渲染"
-42. **分屏语义**：`_split_editor()` 打开新空白文件而非当前文件副本，避免双标签编辑同一文件的数据覆盖风险。菜单文本标注"独立编辑"
+42. **分屏语义**：`ViewCoordinator.split_editor()` 打开新空白文件而非当前文件副本，避免双标签编辑同一文件的数据覆盖风险。菜单文本标注"独立编辑"
 43. **封装规范**：禁止通过 `self.config._savegame_manager` 等私有属性访问，使用 `self.config.savegame_manager` 公开属性；新代码优先经 `app_context.<子模块>` 直连（hotfix 阶段 7），Config 门面仅作过渡兼容
 44. **数据防泄漏**：对外暴露配置/存档数据一律走只读视图或拷贝——`savegame_manager.get_savegame()` 返回 MappingProxyType、`get_resources()` 返回拷贝、`settings_store.as_dict()`/`workspace_store.as_dict()` 返回深拷贝。禁止直接返回内部可变 dict 引用
 45. **类型化标签状态**：标签页元数据使用 `TabState`（dataclass）+ `TabStateRegistry`，禁止回退到无类型 `_tab_info` dict
@@ -999,4 +1018,4 @@ pip install mypy>=1.20                         # 类型检查
 
 ---
 
-_本文档基于 PanzerNote v1.8.3 源码整理。版本变更见 [../CHANGELOG.md](../CHANGELOG.md)，未完成规划见 [roadmap.md](roadmap.md)。_
+_本文档基于 PanzerNote v1.8.5 源码整理。版本变更见 [../CHANGELOG.md](../CHANGELOG.md)，未完成规划见 [roadmap.md](roadmap.md)。_

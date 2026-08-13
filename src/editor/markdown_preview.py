@@ -915,7 +915,10 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             )
 
         self.splitter.addWidget(self.preview)
-        self.splitter.setSizes([500, 500])
+        # 恢复编辑区/预览分栏占比（与侧栏分栏的 view_setting 模式一致）
+        editor_w = self.config.get_view_setting("preview_editor_width", 500)
+        preview_w = self.config.get_view_setting("preview_width", 500)
+        self.splitter.setSizes([editor_w, preview_w])
         layout.addWidget(self.splitter)
 
         if (
@@ -940,10 +943,19 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
                 # 预览 -> 编辑器：JS 经 document.title 回传顶部源码行
                 page.titleChanged.connect(self._on_preview_title)
 
-        # 拖动分隔条改变预览宽度后，锚点像素位置整体变化，需重新同步
-        self.splitter.splitterMoved.connect(lambda *_: self._schedule_resync())
+        # 拖动分隔条改变预览宽度后，锚点像素位置整体变化，需重新同步；
+        # 同时保存编辑区/预览分栏占比
+        self.splitter.splitterMoved.connect(self._on_splitter_moved)
 
         self._init_theme(self._theme_engine)
+
+    def _on_splitter_moved(self, *args):
+        """保存编辑区/预览分栏占比，并重新同步预览锚点"""
+        sizes = self.splitter.sizes()
+        if len(sizes) >= 2:
+            self.config.set_view_setting("preview_editor_width", sizes[0])
+            self.config.set_view_setting("preview_width", sizes[1])
+        self._schedule_resync()
 
     def _apply_theme_colors(self, colors):
         if isinstance(self.preview, PreviewBrowser):

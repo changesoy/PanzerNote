@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
     QInputDialog, QMessageBox,
     QHeaderView, QFrame, QScrollArea, QStyledItemDelegate
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QDir, QModelIndex, QSortFilterProxyModel
+from PyQt6.QtCore import Qt, pyqtSignal, QDir, QModelIndex, QMimeData, QSortFilterProxyModel
 from PyQt6.QtGui import QFont, QAction, QFileSystemModel
 
 from ..core.config import Config
@@ -78,14 +78,18 @@ class DroppableTreeView(QTreeView):
                 self.setCurrentIndex(QModelIndex())
         super().mousePressEvent(event)
 
+    def _is_tab_drag(self, mime: QMimeData) -> bool:
+        """标签拖拽：已保存文件（MIME_TAB_FILEPATH）或未命名标签（MIME_TAB_ID）。"""
+        return mime.hasFormat(MIME_TAB_FILEPATH) or mime.hasFormat(MIME_TAB_ID)
+
     def dragEnterEvent(self, event):
-        if event.mimeData().hasFormat(MIME_TAB_FILEPATH):
+        if self._is_tab_drag(event.mimeData()):
             event.acceptProposedAction()
         else:
             super().dragEnterEvent(event)
 
     def dragMoveEvent(self, event):
-        if event.mimeData().hasFormat(MIME_TAB_FILEPATH):
+        if self._is_tab_drag(event.mimeData()):
             index = self.indexAt(event.pos())
             model = self.model()
             if index.isValid() and model:
@@ -101,7 +105,7 @@ class DroppableTreeView(QTreeView):
             super().dragMoveEvent(event)
 
     def dropEvent(self, event):
-        if event.mimeData().hasFormat(MIME_TAB_FILEPATH):
+        if self._is_tab_drag(event.mimeData()):
             data = event.mimeData().data(MIME_TAB_FILEPATH)
             src_filepath = bytes(data).decode('utf-8')
             # 3.5.11：未命名标签无 filepath，通过 tab_id 定位源标签
@@ -425,7 +429,9 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
             try:
                 try:
                     from send2trash import send2trash
-                    send2trash(filepath)
+                    # QFileSystemModel 返回正斜杠路径；send2trash 加 \\?\ 前缀后
+                    # 混合分隔符会导致 SHFileOperationW 报"找不到文件"，先规范化。
+                    send2trash(os.path.normpath(filepath))
                 except ImportError:
                     if is_dir:
                         import shutil

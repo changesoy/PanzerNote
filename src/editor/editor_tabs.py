@@ -185,11 +185,13 @@ class DraggableTabBar(QTabBar):
         filepath = tab_widget._get_filepath_for_index(self._drag_tab_index) or ""
 
         # 发起 QDrag
+        # 注意：MIME_TAB_FILEPATH 仅对已保存文件设置——空数据格式在平台拖拽协议中
+        # 可能被丢弃，导致目标 hasFormat 判断失败；未命名标签靠 MIME_TAB_ID 识别。
         drag = QDrag(self)
         mime = QMimeData()
         mime.setData(MIME_TAB_ID, str(tab_id).encode('utf-8'))
-        mime.setData(MIME_TAB_FILEPATH, filepath.encode('utf-8'))
         if filepath:
+            mime.setData(MIME_TAB_FILEPATH, filepath.encode('utf-8'))
             mime.setText(os.path.basename(filepath))
         drag.setMimeData(mime)
 
@@ -410,8 +412,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     # === 3.5.4 跨分屏标签迁移（拖拽） ===
 
     def dragEnterEvent(self, event):
-        """接受标签迁移拖拽（MIME_TAB_FILEPATH）；其余（如文件 URL）放行给窗口级拖放。"""
-        if event.mimeData().hasFormat(MIME_TAB_FILEPATH):
+        """接受标签迁移拖拽（MIME_TAB_FILEPATH / MIME_TAB_ID）；其余放行给窗口级拖放。"""
+        if (event.mimeData().hasFormat(MIME_TAB_FILEPATH)
+                or event.mimeData().hasFormat(MIME_TAB_ID)):
             event.acceptProposedAction()
         else:
             event.ignore()
@@ -419,7 +422,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     def dropEvent(self, event):
         """跨分屏标签迁移：源标签栏位于另一个 EditorTabWidget 时执行迁移。"""
         source = event.source()
-        if not event.mimeData().hasFormat(MIME_TAB_FILEPATH):
+        if not (event.mimeData().hasFormat(MIME_TAB_FILEPATH)
+                or event.mimeData().hasFormat(MIME_TAB_ID)):
             event.ignore()
             return
         if not isinstance(source, DraggableTabBar):

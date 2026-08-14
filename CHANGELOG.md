@@ -41,6 +41,19 @@
 - **跨面板并发写盘防护**：共享 Document 以 Document 级保存状态机（`request_save`/`on_save_succeeded`/`on_save_failed`）为跨面板唯一门闩——主面板与分屏的 `SaveTaskManager` 相互独立，`document_key` 合并仅面板内有效，接线后同一 Document 全局同时最多一个实际写盘任务，最新内容必然最后落盘；保存期间编辑 + 再次请求自动补保存；门闩直接连 `SaveTask.signals.finished` 释放（标签已注销也不卡死 SAVING）
 - **safe_write 原子化**：同目录临时文件（`.pn_tmp_*` 前缀便于识别残留）+ `os.replace` 原子替换——写入中途崩溃/断电不留下半写文件，并发写目标始终是完整版本（last-write-wins）；失败时清理临时文件并重新抛出；保留原文件权限；`safe_write`/`safe_write_bytes` 统一走 `_atomic_write`
 
+**Wave 4 编辑器内部质量优化（批次 A~E）**
+
+- **跨文件搜索补全（批次 A）**：忽略规则支持 .gitignore / 忽略列表；跳过二进制文件；取消搜索不再阻塞主线程
+- **Markdown 体验增强（批次 B）**：GFM 任务列表渲染；WebEngine 预览链接点击改为外部浏览器打开
+- **HTML render cache（批次 C）**：新增 `editor/document_render_cache.py`，Document 改动渲染一次、多 View 共用缓存（`markdown_incremental` 一并启用）
+- **淘汰 TabState（批次 D）**：`core/document_model.py`（TabState/TabStateRegistry）彻底删除，运行状态单一源收敛为 SharedDocument / ViewState，序列化唯一出口 `core/workspace_entries.py` 适配层（workspace schema 不变）
+- **性能优化（批次 E）**：
+  - E1 profiling：新增 `utils/perf_probe.py` 运行时埋点（大文件加载/首屏/滚动热路径计时，debug 级日志过滤高频滚动噪音）
+  - E2 lazy 高亮多 View 加固：`LazyHighlightManager` 由 per-View 改为 Document 级协作，`visibleRanges(Document) = range(View A) ∪ range(View B)`，与 Document 级共享 highlighter 协调
+  - E3 Large File Mode：达阈值（≥1 万行）自动降级补全/折叠/Minimap/预览等高成本功能，`large_file_mode` flag 可配置可回退
+  - E4 阈值自动启用：lazy 高亮随 Large File Mode 达阈值启用，flag 默认 False 无全局残留
+- **收尾清理（2026-08-15）**：死函数/死变量清理（shared_document/editor_tabs/workspace_entries/markdown_preview）、`reopen_closed_tab` 失败判断修复（`index is None` → `-1`）、`set_current_eol` 行尾未变不置脏、`find_in_files` `search_finished` 双重发射修复、import 格式修整与类型注解一致性
+
 ## v1.8.5
 
 **Wave 3 主窗口职责拆分收尾（A~E 分支）**

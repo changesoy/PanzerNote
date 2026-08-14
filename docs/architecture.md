@@ -19,38 +19,39 @@ PanzerNote 是一款以已停服二次元游戏《战车少女》（PanzerMaiden
 
 ## 2. 模块状态总览
 
-| 模块                 | 状态      | 说明                                                                                          |
-| -------------------- | --------- | --------------------------------------------------------------------------------------------- |
-| 多标签文本编辑器     | ✅ 完成   | 行号、语法高亮、自动缩进、括号配对、括号匹配高亮、行操作、大小写转换、转到行、JSON/XML 格式化 |
-| 缩进/行尾配置        | ✅ 完成   | indent_size/use_tabs 配置；LF/CRLF 探测与规范化；状态栏切换行尾格式                           |
-| 文本统计             | ✅ 完成   | CJK 按字计数 + 拉丁按词计数；状态栏信号驱动统计                                               |
-| Markdown 分屏预览    | ✅ 完成   | 实时渲染 + 代码块高亮 + 一键复制 + 本地图片 + 源码行号同步 + 折叠同步                         |
-| 代码缩略图 (Minimap) | ✅ 完成   | 鸟瞰图、点击/拖拽导航、块级缓存增量失效、跳过折叠隐藏块                                       |
-| Markdown 标题折叠    | ✅ 完成   | 标题层级折叠 + 代码缩进折叠 + 工作区持久化 + 跳转自动展开                                     |
-| Markdown 大纲导航    | ✅ 完成   | 解析标题树、点击跳转、按文件类型显隐                                                          |
-| 命令面板             | ✅ 完成   | Ctrl+Shift+P / F1 唤起、搜索执行命令、位置记忆                                                |
-| 跨文件搜索           | ✅ 完成   | 后台线程遍历 + 正则/纯文本匹配 + 按文件分组 + 双击跳转                                        |
-| 文档缓冲区自动补全   | ✅ 完成   | 词频匹配 + Enter/Tab 接受 + IME 组字期间不弹出                                                |
-| 增强型查找替换       | ✅ 完成   | 正则、大小写敏感、全词匹配、匹配计数、ExtraSelections 高亮                                    |
-| 侧栏面板宿主         | ✅ 完成   | 多面板注册/切换/宽度记忆                                                                      |
-| 文件树               | ✅ 完成   | 文件树 + 外部文件区 + 右键菜单 + 接受标签拖拽移动文件                                         |
-| 标签页拖拽           | ✅ 完成   | 标签内排序 + 拖拽到文件树移动文件                                                             |
-| 分屏多视图           | ✅ 完成   | 分屏布局/状态持久化、方向切换、跨分屏标签拖拽、共享 Document 跨面板联动编辑（同一文档多视图） |
-| 资源栏               | ✅ 完成   | 四资源显示 + 打字统计                                                                         |
-| 在线/离线挂机        | ✅ 完成   | 在线每分钟 +5/+5/+5、铝材每3分钟+5；离线 1/3 向大取整，上限 24h                               |
-| 打字奖励             | ✅ 完成   | textChanged 接入 → 递减收益算法 → 资源奖励（1:1:1:0.2）                                       |
-| 每日签到             | ✅ 完成   | 每日首次启动发放奖励（各+100）                                                                |
-| 小秘书               | ✅ 完成   | 立绘 + 台词气泡 + 事件台词 + 自定义角色/皮肤/状态                                             |
-| 书签持久化           | ✅ 完成   | 书签保存到 workspace.json，关闭重开后恢复                                                     |
-| 设置系统             | ✅ 完成   | settings.json + workspace.json + savegame.json，首次运行对话框                                |
-| 安全防护体系         | ✅ 完成   | 路径验证/文件操作安全/输入验证/拖放白名单                                                     |
-| 插件系统             | ✅ 完成   | 生命周期/线程包装/12 种权限/热加载，2 个示例插件 + API 文档                                   |
-| 主题系统             | ✅ 完成   | JSON/YAML 外部主题/解析引擎/QSS 生成/预览/ThemeAwareMixin 全局生效/原生标题栏深色             |
-| 集中式版本管理       | ✅ 完成   | `src/__init__.py` 唯一真相源 + `verify_version.py` 一致性验证                                 |
-| 建造系统             | 🔲 规划中 | 详见 [roadmap.md](roadmap.md)                                                                 |
-| 图鉴系统             | 🔲 规划中 | 详见 [roadmap.md](roadmap.md)                                                                 |
-| 车库系统             | 🔲 规划中 | 详见 [roadmap.md](roadmap.md)                                                                 |
-| 游戏设置界面         | 🔲 规划中 | 详见 [roadmap.md](roadmap.md)                                                                 |
+| 模块                 | 状态      | 说明                                                                                                                                                         |
+| -------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 多标签文本编辑器     | ✅ 完成   | 行号、语法高亮、自动缩进、括号配对、括号匹配高亮、行操作、大小写转换、转到行、JSON/XML 格式化                                                                |
+| 缩进/行尾配置        | ✅ 完成   | indent_size/use_tabs 配置；LF/CRLF 探测与规范化；状态栏切换行尾格式                                                                                          |
+| 文本统计             | ✅ 完成   | CJK 按字计数 + 拉丁按词计数；状态栏信号驱动统计                                                                                                              |
+| Markdown 分屏预览    | ✅ 完成   | 实时渲染 + 代码块高亮 + 一键复制 + 本地图片 + 源码行号同步 + 折叠同步                                                                                        |
+| 代码缩略图 (Minimap) | ✅ 完成   | 鸟瞰图、点击/拖拽导航、块级缓存增量失效、跳过折叠隐藏块                                                                                                      |
+| 大文件性能优化       | ✅ 完成   | Wave 4 E：运行时探针埋点（perf_probe）、lazy 高亮 Document 级多 View 协作（visibleRanges = ∪）、Large File Mode 达阈值自动降级（可配置可回退）、阈值自动启用 |
+| Markdown 标题折叠    | ✅ 完成   | 标题层级折叠 + 代码缩进折叠 + 工作区持久化 + 跳转自动展开                                                                                                    |
+| Markdown 大纲导航    | ✅ 完成   | 解析标题树、点击跳转、按文件类型显隐                                                                                                                         |
+| 命令面板             | ✅ 完成   | Ctrl+Shift+P / F1 唤起、搜索执行命令、位置记忆                                                                                                               |
+| 跨文件搜索           | ✅ 完成   | 后台线程遍历 + 正则/纯文本匹配 + 按文件分组 + 双击跳转                                                                                                       |
+| 文档缓冲区自动补全   | ✅ 完成   | 词频匹配 + Enter/Tab 接受 + IME 组字期间不弹出                                                                                                               |
+| 增强型查找替换       | ✅ 完成   | 正则、大小写敏感、全词匹配、匹配计数、ExtraSelections 高亮                                                                                                   |
+| 侧栏面板宿主         | ✅ 完成   | 多面板注册/切换/宽度记忆                                                                                                                                     |
+| 文件树               | ✅ 完成   | 文件树 + 外部文件区 + 右键菜单 + 接受标签拖拽移动文件                                                                                                        |
+| 标签页拖拽           | ✅ 完成   | 标签内排序 + 拖拽到文件树移动文件                                                                                                                            |
+| 分屏多视图           | ✅ 完成   | 分屏布局/状态持久化、方向切换、跨分屏标签拖拽、共享 Document 跨面板联动编辑（同一文档多视图）                                                                |
+| 资源栏               | ✅ 完成   | 四资源显示 + 打字统计                                                                                                                                        |
+| 在线/离线挂机        | ✅ 完成   | 在线每分钟 +5/+5/+5、铝材每3分钟+5；离线 1/3 向大取整，上限 24h                                                                                              |
+| 打字奖励             | ✅ 完成   | textChanged 接入 → 递减收益算法 → 资源奖励（1:1:1:0.2）                                                                                                      |
+| 每日签到             | ✅ 完成   | 每日首次启动发放奖励（各+100）                                                                                                                               |
+| 小秘书               | ✅ 完成   | 立绘 + 台词气泡 + 事件台词 + 自定义角色/皮肤/状态                                                                                                            |
+| 书签持久化           | ✅ 完成   | 书签保存到 workspace.json，关闭重开后恢复                                                                                                                    |
+| 设置系统             | ✅ 完成   | settings.json + workspace.json + savegame.json，首次运行对话框                                                                                               |
+| 安全防护体系         | ✅ 完成   | 路径验证/文件操作安全/输入验证/拖放白名单                                                                                                                    |
+| 插件系统             | ✅ 完成   | 生命周期/线程包装/12 种权限/热加载，2 个示例插件 + API 文档                                                                                                  |
+| 主题系统             | ✅ 完成   | JSON/YAML 外部主题/解析引擎/QSS 生成/预览/ThemeAwareMixin 全局生效/原生标题栏深色                                                                            |
+| 集中式版本管理       | ✅ 完成   | `src/__init__.py` 唯一真相源 + `verify_version.py` 一致性验证                                                                                                |
+| 建造系统             | 🔲 规划中 | 详见 [roadmap.md](roadmap.md)                                                                                                                                |
+| 图鉴系统             | 🔲 规划中 | 详见 [roadmap.md](roadmap.md)                                                                                                                                |
+| 车库系统             | 🔲 规划中 | 详见 [roadmap.md](roadmap.md)                                                                                                                                |
+| 游戏设置界面         | 🔲 规划中 | 详见 [roadmap.md](roadmap.md)                                                                                                                                |
 
 ---
 
@@ -79,10 +80,10 @@ PanzerNote/
 │   │   ├── settings_store.py       # 设置存储（settings dict / 命名空间设置 / reset_to_defaults）
 │   │   ├── workspace_store.py      # 工作区存储（workspace dict / 会话状态 / 书签 / 折叠 / 关闭标签记忆）
 │   │   ├── app_context.py          # 应用上下文容器（持有已拆子模块，供服务层组装）
-│   │   ├── document_model.py       # 文档状态模型（TabState + TabStateRegistry，替代无类型 _tab_info）
 │   │   ├── shared_document.py      # 共享文档模型（SharedDocument 拥有 QTextDocument + ViewState + SaveSnapshot）
 │   │   ├── document_registry.py    # 全局文档注册表（document_id/路径索引/View 关联/生命周期 release）
 │   │   ├── document_view_binding.py # View↔Document 信号接线器（attach/detach 幂等，生命周期随 View）
+│   │   ├── workspace_entries.py    # workspace 序列化适配层（SharedDocument ↔ entry，schema 不变；3.5.10 未命名条目）
 │   │   ├── session_restore_service.py # 会话恢复服务（崩溃恢复检测 / 恢复计划 / 恢复执行）
 │   │   ├── config_import_service.py # 配置导入服务（类型校验 + 白名单，复用 WorkspaceStore 白名单）
 │   │   ├── savegame_manager.py     # 存档管理器（加载/保存/每日签到/只读视图防泄漏）
@@ -110,9 +111,10 @@ PanzerNote/
 │   │   ├── save_task.py            # 后台文件保存任务（SaveTask + QThreadPool 异步写入）
 │   │   ├── save_task_manager.py    # 保存任务管理器（dirty→saving→clean/save_failed 状态机）
 │   │   ├── temp_session_manager.py # 临时会话恢复（异常退出 autosave 恢复；autosave 读写经 FileGuard）
-│   │   ├── virtual_scroll.py       # 虚拟滚动管理器（大文件延迟语法高亮）
+│   │   ├── virtual_scroll.py       # 虚拟滚动管理器（大文件延迟语法高亮；Wave 4 E2：Document 级多 View 协作）
 │   │   ├── async_highlight.py      # 异步代码高亮渲染器（QThread + 任务队列）
 │   │   ├── incremental_renderer.py # 渲染缓存（MD5 哈希缓存，全文级）
+│   │   ├── document_render_cache.py # Markdown HTML render cache（Wave 4 C：Document 改动渲染一次、多 View 共用）
 │   │   ├── syntax_highlighter.py   # 语法高亮（Pygments 适配器 + Markdown 专用高亮器）
 │   │   ├── highlight_themes.py     # 代码高亮主题
 │   │   ├── webengine_runtime.py     # WebEngine 启动锚点管理（预初始化 + 锚点释放）
@@ -174,7 +176,8 @@ PanzerNote/
 │       ├── dpi_helper.py           # 高 DPI 缩放适配
 │       ├── feature_flags.py        # Feature Flag 系统
 │       ├── window_theme.py         # Windows 原生标题栏深色辅助（DWM 非客户区）
-│       └── lazy_loader.py          # 启动性能分析（StartupProfiler）
+│       ├── lazy_loader.py          # 启动性能分析（StartupProfiler）
+│       └── perf_probe.py           # 运行时性能探针（Wave 4 E1：大文件加载/首屏/滚动热路径计时）
 │
 ├── scripts/
 │   └── verify_version.py           # 版本一致性验证工具
@@ -336,23 +339,23 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 
 基于 `QPlainTextEdit`，使用 Mixin 模式组合功能。类继承：`Editor(AutoPairHandlerMixin, EditorActionsMixin, QPlainTextEdit)`
 
-| 模块                              | 职责                                                               |
-| --------------------------------- | ------------------------------------------------------------------ |
-| `editor/editor.py`                | 核心编辑器（行号、缩略图、语法高亮、自动缩进、虚拟滚动、粘贴检测） |
-| `editor/editor_actions.py`        | 行操作、大小写转换、JSON/XML 格式化（Mixin）                       |
-| `editor/auto_pair_handler.py`     | 括号/引号自动配对（Mixin，frozenset O(1) 过滤）                    |
-| `editor/bracket_matcher.py`       | 括号匹配高亮（纯函数，扫描配对位置，支持中英文括号）               |
-| `editor/indentation.py`           | 缩进统一入口（缩进宽度/缩进文本，禁止硬编码）                      |
-| `editor/eol_utils.py`             | 行尾探测与规范化纯函数（LF/CRLF/CR）                               |
-| `editor/text_stats.py`            | 文本统计纯函数（CJK 按字计数 + 拉丁按词计数）                      |
-| `editor/folding.py`               | 折叠管理器（Markdown 标题折叠 + 代码缩进折叠）                     |
-| `editor/outline_parser.py`        | Markdown 标题解析器（纯函数，提取标题层级与行号）                  |
-| `editor/outline_panel.py`         | Markdown 大纲导航面板（QTreeWidget 展示标题树）                    |
-| `editor/completion.py`            | 文档缓冲区自动补全（词频匹配 + IME 组字期间不弹出）                |
-| `editor/find_in_files_service.py` | 跨文件搜索后台服务（QThread 遍历 + 正则/纯文本匹配）               |
-| `editor/find_in_files_panel.py`   | 跨文件搜索结果面板（按文件分组 + 双击跳转）                        |
-| `editor/save_task.py`             | 后台文件保存任务（SaveTask + QThreadPool 异步写入）                |
-| `editor/virtual_scroll.py`        | 延迟高亮管理器（大文件延迟语法高亮）                               |
+| 模块                              | 职责                                                                                            |
+| --------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `editor/editor.py`                | 核心编辑器（行号、缩略图、语法高亮、自动缩进、虚拟滚动、粘贴检测）                              |
+| `editor/editor_actions.py`        | 行操作、大小写转换、JSON/XML 格式化（Mixin）                                                    |
+| `editor/auto_pair_handler.py`     | 括号/引号自动配对（Mixin，frozenset O(1) 过滤）                                                 |
+| `editor/bracket_matcher.py`       | 括号匹配高亮（纯函数，扫描配对位置，支持中英文括号）                                            |
+| `editor/indentation.py`           | 缩进统一入口（缩进宽度/缩进文本，禁止硬编码）                                                   |
+| `editor/eol_utils.py`             | 行尾探测与规范化纯函数（LF/CRLF/CR）                                                            |
+| `editor/text_stats.py`            | 文本统计纯函数（CJK 按字计数 + 拉丁按词计数）                                                   |
+| `editor/folding.py`               | 折叠管理器（Markdown 标题折叠 + 代码缩进折叠）                                                  |
+| `editor/outline_parser.py`        | Markdown 标题解析器（纯函数，提取标题层级与行号）                                               |
+| `editor/outline_panel.py`         | Markdown 大纲导航面板（QTreeWidget 展示标题树）                                                 |
+| `editor/completion.py`            | 文档缓冲区自动补全（词频匹配 + IME 组字期间不弹出）                                             |
+| `editor/find_in_files_service.py` | 跨文件搜索后台服务（QThread 遍历 + 正则/纯文本匹配）                                            |
+| `editor/find_in_files_panel.py`   | 跨文件搜索结果面板（按文件分组 + 双击跳转）                                                     |
+| `editor/save_task.py`             | 后台文件保存任务（SaveTask + QThreadPool 异步写入）                                             |
+| `editor/virtual_scroll.py`        | 延迟高亮管理器（大文件延迟语法高亮；Wave 4 E2 起为 Document 级多 View 协作，visibleRanges = ∪） |
 
 主要功能块：
 
@@ -381,20 +384,20 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 
 ### 4.4 标签页管理 (`editor/editor_tabs.py`)
 
-| 组件              | 说明                                                                                                                                                                                     |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DraggableTabBar` | 继承 `QTabBar`，标签内拖拽 = 重排序，拖出标签栏 = 发起 `QDrag`（携带文件路径 MIME）                                                                                                      |
-| `EditorTabWidget` | 继承 `QTabWidget`，配合 `TabStateRegistry`（`core/document_model.py`）管理类型化标签状态（TabState：filepath/is_new/is_modified/encoding/is_markdown/cursor_position 等，hotfix 阶段 1） |
-| `SaveAsDialog`    | 自定义另存为对话框，支持编码选择（UTF-8/GBK/UTF-16）                                                                                                                                     |
+| 组件              | 说明                                                                                                                                                                                                           |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DraggableTabBar` | 继承 `QTabBar`，标签内拖拽 = 重排序，拖出标签栏 = 发起 `QDrag`（携带文件路径 MIME）                                                                                                                            |
+| `EditorTabWidget` | 继承 `QTabWidget`，配合 `SharedDocument`/`ViewState`（`core/shared_document.py`）管理标签状态（3.5.8 起：内容/编码/eol/dirty/折叠/书签单一源在 Document；Wave 4 D：TabState 已淘汰，`document_model.py` 删除） |
+| `SaveAsDialog`    | 自定义另存为对话框，支持编码选择（UTF-8/GBK/UTF-16）                                                                                                                                                           |
 
 **核心逻辑**：
 
 - `open_file()` — 编码级联检测（UTF-8 → GBK → UTF-16 → 容错UTF-8），Markdown 文件自动使用 `MarkdownPreviewWidget`；新增 `render_preview` 参数（默认 `True`），设为 `False` 时延迟预览渲染以加速启动恢复；3.5.8：另一面板已打开同一文件时经 `DocumentRegistry.get_by_path` 命中共享 Document，直接新建 View attach（不重新读盘）
 - `_on_text_changed()` — 比较当前内容与 `last_saved_content`，决定是否标记为已修改（标签名加 ` *`）；粘贴操作不计入打字奖励
-- `move_file_to_folder()` — 先保存最新内容 → `shutil.move` → 更新 TabState 中的 filepath；3.5.8：共享 Document 走 `DocumentRegistry.move_path` re-key + `bind_path` 广播（所有 View 路径/标题同步），移动前检查目标路径未被其它 Document 占用
-- 保存状态副作用集中到 TabState：`_on_save_state_changed(tab_id, state_name)` 的 CLEAN 分支统一处理 `mark_saved()` / `mark_new_saved()`（hotfix 阶段 1/5）
+- `move_file_to_folder()` — 先保存最新内容 → `shutil.move` → 更新 Document 的 filepath（`DocumentRegistry.move_path` re-key + `bind_path` 广播，所有 View 路径/标题同步），移动前检查目标路径未被其它 Document 占用
+- 保存状态副作用集中在 Document：`_on_save_state_changed(tab_id, state_name)` 的 CLEAN 分支统一处理 `mark_saved()` / `mark_new_saved()`
 - 所有编辑操作（undo/redo/cut/copy/paste/行操作/大小写/格式化）通过代理方法转发给当前编辑器
-- 3.5.8：每个 View 持有 `shared_doc` 与 `DocumentViewBinding`（`_connect_doc_binding`），dirtyChanged → 标题脏标记、nameChanged → 标题跟随、pathChanged → TabState 路径 + Markdown 预览基准跟随；关闭/迁移前 `_disconnect_doc_binding` 断开；共享 Document 以 Document 侧 `dirty` 为单一源（save_all / save_all_for_close / get_unsaved_tab_infos / 关闭判定同规则）
+- 3.5.8：每个 View 持有 `shared_doc` 与 `DocumentViewBinding`（`_connect_doc_binding`），dirtyChanged → 标题脏标记、nameChanged → 标题跟随、pathChanged → 共享 Document 路径 + Markdown 预览基准跟随；关闭/迁移前 `_disconnect_doc_binding` 断开；共享 Document 以 Document 侧 `dirty` 为单一源（save_all / save_all_for_close / get_unsaved_tab_infos / 关闭判定同规则）
 
 ### 4.5 Markdown 预览 (`editor/markdown_preview.py`)
 
@@ -422,6 +425,7 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 **增量渲染**（Feature Flag `markdown_incremental` 控制）：
 
 - `IncrementalRenderer` 基于文本 MD5 哈希缓存渲染结果，相同文本直接返回缓存（全文级缓存，非行级增量）
+- **HTML render cache**（Wave 4 C）：`document_render_cache.py` 以 Document 为键缓存最终 HTML，Document 改动渲染一次、多 View 共用（revision 单调递增作为缓存键）；分屏多 View 场景避免每次编辑各自全量重渲染
 
 **浮动复制按钮** (`PreviewBrowser`)：
 
@@ -805,6 +809,7 @@ src/__init__.py (__version__ = "1.9.0")
 - **状态收敛 Document 级**：折叠（2.10）与书签（2.12）随 Document 共享；`dirty` 单一源在 Document，各 View 标题经 dirtyChanged 同步（`_on_view_dirty`）
   > **Known limitation / Future research**：每 View 独立折叠未实现——`FoldingManager` 通过 `QTextBlock.setVisible` 落状态于共享 QTextDocument 的 QTextBlock 上，View 级边界在 Qt 当前实现下不成立（规格 2.10 已核查）。当前行为：View A 折叠 → View B 同步折叠。实现每 View 独立折叠需重写呈现机制（per-view layout / paint），留作未来独立增强。
 - **高亮**：两种高亮器（Markdown / Pygments）均实现 `set_dark_mode`，主题切换不经过 `set_file_type`（避免重建时摘除共享高亮）；关闭最后 View 前 `_detach_shared_from_widget` + release，杜绝悬垂引用（C++ deleted 崩溃）
+- **lazy 高亮 Document 级协作**（Wave 4 E2）：`LazyHighlightManager` 由 per-View 改为 Document 级——同 Document 共享一个 coordinator，可视区高亮范围取各 View 的并集 `visibleRanges(Document) = range(View A) ∪ range(View B)`；滚动事件按 View 上报、coordinator 聚合调度，与 Document 级共享 highlighter 协作；仅大文件（≥1 万行）且 `large_file_mode` 激活时启用（E3/E4，flag 默认 False，运行时按需激活，无全局残留）
 - **未保存聚合**：`get_unsaved_tab_infos` 返回含 `document_id`，`MainWindow.closeEvent` 按 document_id 跨面板去重（同一共享文件只列一次）；`save_all_for_close` 以 Document 侧 dirty 为准
 
 ---
@@ -888,7 +893,7 @@ src/__init__.py (__version__ = "1.9.0")
         → EditorTabWidget.open_file(filepath)
            → 编码级联检测
            → 判断是否 Markdown → 创建 Editor 或 MarkdownPreviewWidget
-           → 生成 tab_id，写入 TabStateRegistry（document_model.py）
+           → 经 DocumentRegistry 注册 document_id（已打开同路径 → attach 共享 Document）
            → set_file_type() → 绑定语法高亮 + auto_minimap
         → 最近文件记录（refresh_recent_files 过滤已不存在路径并持久化）
      → MainWindow 保留 UI 副作用（错误弹窗 / 文件树刷新 / 菜单重建）
@@ -917,7 +922,7 @@ DraggableTabBar.mouseMoveEvent (鼠标离开标签栏)
      → FileTreeWidget.file_move_requested(src, dest)
      → MainWindow._on_file_move_from_tree(src, dest)
         → EditorTabWidget.move_file_to_folder(src, dest)
-           → 保存最新内容 → shutil.move → 更新 TabState
+           → 保存最新内容 → shutil.move → DocumentRegistry.move_path re-key + bind_path 广播
         → secretary.show_message("已移动...")
 ```
 
@@ -984,7 +989,7 @@ pip install mypy>=1.20                         # 类型检查
 
 ### 通用约束
 
-1. **编码保持**：打开文件时检测编码并记录在 TabState.encoding，保存时使用相同编码
+1. **编码保持**：打开文件时检测编码并记录在 `SharedDocument.encoding`，保存时使用相同编码
 2. **资源文件路径**：立绘/图标始终从 `_app_dir`（程序目录）读取，不随 `_base_path` 变化
 3. **auto_minimap**：开启时 .txt/.md 不显示缩略图，关闭时使用全局 `show_minimap` 设置
 4. **打字统计日期重置**：`get_today_chars_typed()` 自动比较 `today_date` 并在跨日时归零
@@ -1033,20 +1038,24 @@ pip install mypy>=1.20                         # 类型检查
 33. **Minimap 块级增量失效**：`MinimapWidget` 改用 `QTextDocument.contentsChange` 信号，精确计算受影响缓存块范围并标记为脏块（`_block_dirty`），仅重新渲染脏块。常规打字仅重绘 1 个块，节省约 95% 渲染开销
 34. **状态栏信号驱动统计**：`signal_driven_stats` 默认开启，`characterCount()` 避免全文复制，词数 800ms 防抖，行列号由 `cursorPositionChanged` 驱动
 35. **搜索高亮集中管理**：`SearchService` 封装查找/替换，`QTextDocument.find()` 权威光标位置，`ExtraSelectionManager` 统一高亮层，`replace_all` 从后向前逐匹配替换
+36. **运行时性能探针（Wave 4 E1）**：大文件加载/首屏/滚动热路径经 `utils/perf_probe.py` 的 `measure(name, fn, threshold_ms)` 埋点，debug 级日志过滤高频滚动噪音；新增热路径计时默认经探针，不裸写 `time.time()`
+37. **lazy 高亮多 View 协作（Wave 4 E2）**：`DocumentLazyHighlightCoordinator` 以 Document 为粒度聚合各 View 可视区（并集），禁止回到 per-View 独立高亮（会破坏 Document 级共享 highlighter 的一致性）；滚动上报按 View、调度归 coordinator
+38. **Large File Mode（Wave 4 E3/E4）**：达阈值（≥1 万行）自动降级补全/折叠/Minimap/预览等高成本功能，`large_file_mode` / `lazy_highlight` flag 默认 False（运行时按需激活），禁用全局残留；降级功能须可配置可回退
+39. **Markdown HTML render cache（Wave 4 C）**：`document_render_cache.py` 以 Document revision 为键缓存最终 HTML，Document 改动只渲染一次、多 View 共用；新增 Markdown 渲染路径应优先走缓存
 
 ### 工程约束
 
-36. **快捷键管理**：`ShortcutManager` 已接入 `MenuBuilder`，所有菜单项通过 `manager.register()` 注册，自定义快捷键功能已生效。新增菜单项必须通过 ShortcutManager 注册
-37. **错误提示**：使用 `ErrorHandler.show_error()` / `ErrorHandler.show_from_exception()` 替代直接 `QMessageBox`，确保敏感信息过滤和统一分类提示
-38. **设置导入校验**：`ConfigImportService` 逐字段校验类型/值范围，非法字段跳过并报告，不直接 `_settings.update()`
-39. **集中式版本管理**：`src/__init__.py` 中的 `__version__` 为唯一真相源，所有模块通过 `from src import __version__` 引用。`pyproject.toml` 使用动态版本配置，`scripts/verify_version.py` 提供一致性验证，`main.py` 启动时自动检查
-40. **依赖梳理**：`pyproject.toml` 分组 format/dev/all，所有运行时依赖均为必需
-41. **增量渲染器命名澄清**：`incremental_renderer.py` 确认为全文 hash 渲染缓存，文档不宣称"真正增量渲染"
-42. **分屏与共享文档语义**：`ViewCoordinator.split_editor()` 打开新空白文件（菜单文本标注"独立编辑"）；同一文件在多个面板打开时共享同一 `SharedDocument`（3.5.8，跨面板联动编辑）——内容/编码/eol/dirty/折叠/书签单一源，每个 View 只持有自己的 `ViewState` 与 `DocumentViewBinding`。共享 Document 的保存以 Document 级状态机为跨面板唯一门闩（全局同时最多一个写盘任务）。禁止创建两个不同 Document 指向同一路径（`DocumentRegistry` 路径占用拒绝）
-43. **封装规范**：禁止通过 `self.config._savegame_manager` 等私有属性访问，使用 `self.config.savegame_manager` 公开属性；新代码优先经 `app_context.<子模块>` 直连（hotfix 阶段 7），Config 门面仅作过渡兼容
-44. **数据防泄漏**：对外暴露配置/存档数据一律走只读视图或拷贝——`savegame_manager.get_savegame()` 返回 MappingProxyType、`get_resources()` 返回拷贝、`settings_store.as_dict()`/`workspace_store.as_dict()` 返回深拷贝。禁止直接返回内部可变 dict 引用
-45. **类型化标签状态**：标签页元数据使用 `TabState`（dataclass）+ `TabStateRegistry`，禁止回退到无类型 `_tab_info` dict
-46. **白名单单一来源**：workspace 字段白名单由 `WorkspaceStore._KNOWN_WORKSPACE_KEYS`（由 `DEFAULT_WORKSPACE` 派生）提供，`ConfigImportService` 直接复用，禁止另行复制定义
+40. **快捷键管理**：`ShortcutManager` 已接入 `MenuBuilder`，所有菜单项通过 `manager.register()` 注册，自定义快捷键功能已生效。新增菜单项必须通过 ShortcutManager 注册
+41. **错误提示**：使用 `ErrorHandler.show_error()` / `ErrorHandler.show_from_exception()` 替代直接 `QMessageBox`，确保敏感信息过滤和统一分类提示
+42. **设置导入校验**：`ConfigImportService` 逐字段校验类型/值范围，非法字段跳过并报告，不直接 `_settings.update()`
+43. **集中式版本管理**：`src/__init__.py` 中的 `__version__` 为唯一真相源，所有模块通过 `from src import __version__` 引用。`pyproject.toml` 使用动态版本配置，`scripts/verify_version.py` 提供一致性验证，`main.py` 启动时自动检查
+44. **依赖梳理**：`pyproject.toml` 分组 format/dev/all，所有运行时依赖均为必需
+45. **增量渲染器命名澄清**：`incremental_renderer.py` 确认为全文 hash 渲染缓存，文档不宣称"真正增量渲染"
+46. **分屏与共享文档语义**：`ViewCoordinator.split_editor()` 打开新空白文件（菜单文本标注"独立编辑"）；同一文件在多个面板打开时共享同一 `SharedDocument`（3.5.8，跨面板联动编辑）——内容/编码/eol/dirty/折叠/书签单一源，每个 View 只持有自己的 `ViewState` 与 `DocumentViewBinding`。共享 Document 的保存以 Document 级状态机为跨面板唯一门闩（全局同时最多一个写盘任务）。禁止创建两个不同 Document 指向同一路径（`DocumentRegistry` 路径占用拒绝）
+47. **封装规范**：禁止通过 `self.config._savegame_manager` 等私有属性访问，使用 `self.config.savegame_manager` 公开属性；新代码优先经 `app_context.<子模块>` 直连（hotfix 阶段 7），Config 门面仅作过渡兼容
+48. **数据防泄漏**：对外暴露配置/存档数据一律走只读视图或拷贝——`savegame_manager.get_savegame()` 返回 MappingProxyType、`get_resources()` 返回拷贝、`settings_store.as_dict()`/`workspace_store.as_dict()` 返回深拷贝。禁止直接返回内部可变 dict 引用
+49. **状态单一源**：标签状态一律走 `SharedDocument`（内容/编码/eol/dirty/折叠/书签）与 `ViewState`（cursor/scroll），禁止回退到影子状态模型（Wave 4 D 已删除 TabState/document_model.py）；workspace 序列化唯一出口为 `workspace_entries.py` 适配层
+50. **白名单单一来源**：workspace 字段白名单由 `WorkspaceStore._KNOWN_WORKSPACE_KEYS`（由 `DEFAULT_WORKSPACE` 派生）提供，`ConfigImportService` 直接复用，禁止另行复制定义
 
 ---
 

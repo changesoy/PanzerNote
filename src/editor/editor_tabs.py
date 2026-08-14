@@ -949,7 +949,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         """3.5.11：把未命名标签直接落盘保存到目标文件夹（拖到文件树触发）。
 
         复用通用保存链路：_save_file + _pending_save_as_info → CLEAN 回调自动完成
-        mark_new_saved / 编号释放 / 标题更新（与 save_current_as 一致）。
+        编号释放 / 标题更新（与 save_current_as 一致）。
         同名冲突弹框确认（默认不覆盖）；空内容也直接落盘（行为统一）。
         """
         widget = None

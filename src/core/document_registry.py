@@ -53,12 +53,22 @@ class DocumentRegistry:
     def _new_document_id(self) -> str:
         return uuid.uuid4().hex
 
-    def create_untitled(self) -> SharedDocument:
-        """创建未命名 Document：编号在 Document 创建时分配（View 不参与编号）。"""
-        num = self._next_untitled_number()
+    def create_untitled(
+        self,
+        untitled_number: Optional[int] = None,
+        display_name: Optional[str] = None,
+    ) -> SharedDocument:
+        """创建未命名 Document。
+
+        untitled_number / display_name 由调用方（View 层编号池）指定时沿用；
+        缺省时 Document 自分配编号（独立使用场景）。编号池以 View 层为准，
+        Document 仅记录编号供 release 时归还（3.5.8 R4 未命名共享入口）。
+        """
+        num = untitled_number if untitled_number is not None else self._next_untitled_number()
+        name = display_name or f"未命名-{num}"
         doc = SharedDocument(
             self._new_document_id(),
-            display_name=f"未命名-{num}",
+            display_name=name,
             filepath=None,
             untitled_number=num,
         )

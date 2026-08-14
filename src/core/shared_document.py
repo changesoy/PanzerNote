@@ -96,6 +96,11 @@ class SharedDocument(QObject):
         self._word_count = 0
         self._word_count_dirty = True  # 构造后首次访问才重算
 
+        # 语法高亮（3.5.8 R1 收敛）：同 Document 只建一次 highlighter，所有 View
+        # 复用。core 层不依赖 editor，仅作为 View 层扩展槽（editor.set_file_type 写入）。
+        self._highlighter: Optional[object] = None
+        self._highlighter_file_type: str = "Text"
+
         # 内容本体：SharedDocument 为 parent（QObject ownership 契约）；
         # 必须显式设置 QPlainTextDocumentLayout，否则 QPlainTextEdit.setDocument 静默不绑定。
         # 注意：QTextDocument.setPlainText() 会把 isModified 置 True，须立即复位，

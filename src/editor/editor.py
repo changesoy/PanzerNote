@@ -20,7 +20,7 @@ import os
 import json
 import xml.dom.minidom as minidom
 from contextlib import contextmanager
-from typing import Generator, Optional, Set
+from typing import Generator, Optional, Set, cast
 from PyQt6.QtWidgets import (
     QPlainTextEdit, QWidget, QTextEdit, QVBoxLayout,
     QMenu, QMessageBox, QPlainTextDocumentLayout
@@ -128,7 +128,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self.config = config
         self._theme_engine = theme_engine
         self.tab_id: Optional[int] = None
-        self._highlighter = None
+        self._highlighter: Optional[QSyntaxHighlighter] = None
         self._file_type = "纯文本"
         self._filepath_or_ext: str = ""
         self._wrap_mode = "no_wrap"
@@ -616,7 +616,12 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
     # ═══════════════════ 语法高亮 ═══════════════════
 
     def set_file_type(self, filepath_or_ext: str):
-        """根据文件类型设置语法高亮"""
+        """根据文件类型设置语法高亮
+
+        3.5.8（R1 收敛）：共享 Document 只建一次 highlighter——同一 qdocument
+        若有多个 View，后续 View 直接复用（避免多个 QSyntaxHighlighter 反复
+        重排同一 document，高亮重叠/性能浪费）。
+        """
         if self._highlighter:
             self._highlighter.setDocument(None)
             self._highlighter = None
@@ -624,10 +629,22 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self._filepath_or_ext = filepath_or_ext
         doc = self.document()
         assert doc is not None
+        shared = self._shared_doc
+        if shared is not None:
+            existing = shared._highlighter
+            if existing is not None:
+                self._highlighter = cast(QSyntaxHighlighter, existing)
+                self._file_type = shared._highlighter_file_type
+                self._lazy_highlight.set_highlighter(self._highlighter)
+                self.apply_auto_minimap()
+                return
         is_dark = self._theme_engine.get_active_theme().is_dark
         self._highlighter, self._file_type = get_highlighter_for_file(
             doc, filepath_or_ext, theme_engine=self._theme_engine, is_dark=is_dark
         )
+        if shared is not None:
+            shared._highlighter = self._highlighter
+            shared._highlighter_file_type = self._file_type
 
         self._lazy_highlight.set_highlighter(self._highlighter)
         self.apply_auto_minimap()

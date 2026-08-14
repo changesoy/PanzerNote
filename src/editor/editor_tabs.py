@@ -1150,10 +1150,34 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         shared_doc = getattr(widget, "shared_doc", None)
         document_key = shared_doc.document_id if shared_doc is not None else None
 
+        # 3.5.8（跨面板并发写盘防护）：document_key 合并仅在本面板的
+        # SaveTaskManager 内有效（各面板 Manager 相互独立），无法阻止主面板与
+        # 分屏对同一共享文件并发写盘（safe_write 非原子直写）。这里以 Document
+        # 级保存状态机（SAVING/IDLE/FAILED）作为跨面板唯一门闩——同一 Document
+        # 全局同时最多一个实际写盘任务。
+        # 仅限「写回当前绑定路径」的正常保存；副本另存为 / 未命名首次保存
+        # （目标路径尚未绑定）不参与，避免误拦跨路径保存。
+        gated = (shared_doc is not None and not is_copy
+                 and shared_doc.filepath is not None and filepath == shared_doc.filepath)
+
         if self._save_manager.is_saving(tab_id):
             # 3.5.8 单槽合并：保存中再次保存请求 → 仅置 pending，不并发写盘
             self._save_manager.request_resave(tab_id, document_key=document_key)
+            if gated:
+                # 同面板保存中再次请求 → 置 Document 级 pending，由
+                # _on_shared_save_finished 统一兜底补保存
+                assert shared_doc is not None  # gated 蕴含 shared_doc 非空
+                shared_doc.pending_save = True
             return False, 0
+
+        snapshot = None
+        if gated:
+            assert shared_doc is not None  # gated 蕴含 shared_doc 非空
+            snapshot = shared_doc.request_save()
+            if snapshot is None:
+                # 另一面板正在保存同一 Document：内容共享，本次请求已并入（已置
+                # pending_save，保存完成后若内容已变会自动补保存）→ 视为已受理。
+                return True, 0
 
         state = self._registry.get(tab_id)
         if state is None:
@@ -1189,6 +1213,14 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             on_resave=lambda: self._on_resave_requested(tab_id),
             document_key=document_key,
         )
+        if gated:
+            # Document 级保存门闩释放：直接连接任务完成信号（在面板 Manager
+            # 回调之后触发，连接顺序保证）——即使标签已注销、面板级回调提前
+            # 返回，门闩也会释放，避免 Document 卡死 SAVING 使后续保存被永久合并。
+            task.signals.finished.connect(
+                lambda success, fp, exc, sd=shared_doc, snap=snapshot, tid=tab_id:
+                    self._on_shared_save_finished(sd, snap, tid, success)
+            )
         pool = QThreadPool.globalInstance()
         if pool is not None:
             pool.start(task)
@@ -1220,6 +1252,22 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             if state and state.filepath:
                 self._save_file(widget, state.filepath, state.encoding)
             return
+
+    def _on_shared_save_finished(self, shared_doc, snapshot, tab_id: int,
+                                 success: bool) -> None:
+        """共享 Document 保存完成回调（3.5.8 跨面板保存门闩释放）。
+
+        直接连接 SaveTask.signals.finished（在面板 SaveTaskManager 回调之后
+        触发，连接顺序保证，此时面板状态已恢复 idle）：
+        - 成功：on_save_succeeded 按「当前内容 == 快照」判定 Document dirty；
+          返回 True（保存期间编辑 + pending 请求）→ 以最新内容补保存一次。
+        - 失败：on_save_failed → FAILED、保持 dirty，由用户重新触发。
+        """
+        if success:
+            if shared_doc.on_save_succeeded(snapshot):
+                self._on_resave_requested(tab_id)
+        else:
+            shared_doc.on_save_failed()
 
     def save_all(self) -> int:
         total_chars = 0

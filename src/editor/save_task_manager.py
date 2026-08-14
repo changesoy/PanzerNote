@@ -13,7 +13,7 @@
     否则                     → CLEAN
 - 保存成功时按「当前内容 == 保存快照」判定 dirty（保存成功 ≠ 当前 Document clean）。
 - 单槽合并：同一 tab 同时最多一个实际保存任务；保存中再次请求 → 仅置 pending，
-  成功且仍 dirty 时通过 resave_requested 通知调用方以最新内容补保存一次。
+  成功且仍 dirty 时通过 on_resave 回调通知调用方以最新内容补保存一次。
 """
 
 from enum import Enum
@@ -44,7 +44,6 @@ class SaveTaskManager(QObject):
 
     save_state_changed = pyqtSignal(int, str)
     save_failed = pyqtSignal(int, str, object)
-    resave_requested = pyqtSignal(int)
     all_tasks_finished = pyqtSignal()
 
     def __init__(self, parent=None):

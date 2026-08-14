@@ -327,7 +327,6 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self._save_manager = SaveTaskManager(self)
         self._save_manager.save_state_changed.connect(self._on_save_state_changed)
         self._save_manager.save_failed.connect(self._on_save_failed)
-        self._save_manager.resave_requested.connect(self._on_resave_requested)
 
         self._pending_close_tab_ids: Set[int] = set()
         self._pending_save_info: Dict[int, Dict] = {}
@@ -1179,7 +1178,6 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
         from PyQt6.QtCore import QThreadPool
         from .save_task import SaveTask
-        from .eol_utils import normalize_eol
 
         task = SaveTask(self.config.get_file_guard(), filepath, content, encoding.lower())
         # 3.5.8：提交时附带内容快照 + 当前内容提供者，保存成功按「当前 == 快照」判定

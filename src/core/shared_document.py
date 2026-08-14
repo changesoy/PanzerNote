@@ -125,9 +125,9 @@ class SharedDocument(QObject):
         self.last_saved_snapshot: Optional[SaveSnapshot] = None
         self.content_version: int = 0
 
-        # 保存统计（D3a：TabState.last_saved_* 迁移至 Document 级——内容共享，
-        # 字数增量 / 新字数按 Document 粒度统计，避免跨 View 漏计/重计）。
-        # 初始值 = 创建时内容长度（对应旧 TabState 构造时的 last_saved_chars）。
+        # 保存统计（D3a：迁移至 Document 级——内容共享，字数增量 / 新字数
+        # 按 Document 粒度统计，避免跨 View 漏计/重计）。
+        # 初始值 = 创建时内容长度（对应构造时的 last_saved_chars）。
         self.last_saved_chars: int = len(content)
         self.last_text_length: int = len(content)
 
@@ -241,7 +241,7 @@ class SharedDocument(QObject):
         current == snapshot → clean；否则保持 dirty（保存成功 ≠ 当前 clean）。
         """
         self.last_saved_snapshot = snapshot
-        # D3a：保存统计随成功保存更新（对应旧 TabState.mark_saved 语义）
+        # D3a：保存统计随成功保存更新（对应 mark_saved 语义）
         self.last_saved_chars = len(snapshot.content)
         self.last_text_length = len(snapshot.content)
         retry = False

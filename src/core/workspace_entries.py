@@ -2,15 +2,13 @@
 """
 workspace 序列化适配层（Wave 4 批次 D2）
 
-SharedDocument / ViewState ↔ workspace.json open_files 条目的纯函数转换。
-
-替代 document_model.py 的 TabState.to_open_files_entry / from_open_files_entry /
-TabStateRegistry.to_open_files_list，语义逐键等价（workspace schema 不动）：
+SharedDocument / ViewState ↔ workspace.json open_files 条目的纯函数转换
+（workspace schema 不动）：
 - 具名文件条目：{path, cursor_position, scroll_position}
 - 未命名条目：{is_new, untitled_number, display_name, content}
   （content 仅 dirty 时携带，恢复编辑现场）
 
-D4 删除 document_model.py 后，本模块是序列化的唯一出口。
+本模块是 workspace 序列化的唯一出口（D4 删除 document_model.py 后）。
 """
 
 from typing import Any, Dict, Optional

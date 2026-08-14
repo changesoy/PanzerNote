@@ -163,7 +163,10 @@ class DraggableTabBar(QTabBar):
 
         # 只有鼠标离开标签栏区域才发起外部拖拽
         if self.rect().contains(event.pos()):
-            super().mouseMoveEvent(event)
+            # 3.5.8（R6）：不调用 super() 的原生 movable 逻辑——原生行为是
+            # 拖动中途扫过其它标签就实时 moveTab 换位，用户拖拽会被"替换"。
+            # 改为只在鼠标释放时按落点一次性落位（见 mouseReleaseEvent）。
+            event.accept()
             return
 
         # 距离阈值
@@ -199,6 +202,24 @@ class DraggableTabBar(QTabBar):
 
         result = drag.exec(Qt.DropAction.MoveAction | Qt.DropAction.CopyAction)
         self._drag_tab_index = -1
+
+    def mouseReleaseEvent(self, event):
+        # 3.5.8（R6）：标签栏内拖动结束时按落点一次性落位（替代原生实时换位）。
+        # moveTab 会 emit tabMoved，QTabWidget 据此同步 widget 顺序。
+        # 注意：落位后必须直接 return，不能调用 super().mouseReleaseEvent()——
+        # QTabBar 原生释放逻辑会再做一次内部换位，与 moveTab 叠加导致落位偏差。
+        if (
+            event.button() == Qt.MouseButton.LeftButton
+            and self._drag_tab_index >= 0
+            and self.rect().contains(event.pos())
+        ):
+            target = self.tabAt(event.pos())
+            if target >= 0 and target != self._drag_tab_index:
+                self.moveTab(self._drag_tab_index, target)
+            self._drag_tab_index = -1
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
 
 # ════════════════════════════════════════════════════════
@@ -281,6 +302,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         webengine_runtime: WebEngineRuntime | None = None,
         document_registry=None,
         session_manager=None,
+        panel_name: str = "main",
         parent=None,
     ):
         super().__init__(parent)
@@ -289,6 +311,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self.config = config
         self._theme_engine = theme_engine
         self._webengine_runtime = webengine_runtime
+        # 3.5.8（R6）：面板标识——崩溃恢复时 autosave 按此字段路由回原面板
+        # （主面板 "main"，分屏 "split_0" / "split_1" ...）
+        self._panel_name = panel_name
         # 3.5.8（批次 4a）：跨面板共享 DocumentRegistry——主面板与分屏注入同一实例，
         # 多 View 打开同一文件时共享同一 Document（规格 2.1）。未传入时自建（独立使用）。
         self._document_registry = document_registry or DocumentRegistry()
@@ -318,7 +343,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self.setTabBar(self._tab_bar)
 
         self.setTabsClosable(True)
-        self.setMovable(True)
+        # 3.5.8（R6）：禁用原生 movable——原生拖拽扫过其它标签会实时 moveTab
+        # "替换"拖拽对象。内部 reorder 由 DraggableTabBar 自行接管（释放时落位）。
+        self.setMovable(False)
         self.setDocumentMode(True)
         # 3.5.4：接受跨分屏标签迁移拖拽（MIME_TAB_FILEPATH）
         self.setAcceptDrops(True)
@@ -1295,6 +1322,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 "is_new": state.is_new,
                 "is_modified": True,
                 "doc_key": doc_key,
+                "panel": self._panel_name,
             })
 
         if tab_infos:

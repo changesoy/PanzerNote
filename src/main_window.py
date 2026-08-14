@@ -505,7 +505,10 @@ class MainWindow(QMainWindow):
         """恢复指定会话的文件（逻辑委托 SessionRestoreService）"""
         session_mgr = self.editor_tabs.session_manager
         self._session_restore_service.restore_after_crash(
-            self.editor_tabs, session, session_mgr
+            self.editor_tabs,
+            session,
+            session_mgr,
+            split_tabs=list(self.view_coordinator.split_tabs),
         )
 
     # === 挂机机制 ===

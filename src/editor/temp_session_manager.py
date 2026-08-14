@@ -144,7 +144,9 @@ class TempSessionManager:
                 "display_name": display_name,
                 "encoding": encoding,
                 "dirty": True,
-                "is_new": is_new
+                "is_new": is_new,
+                # 3.5.8（R6）：面板归属——崩溃恢复按此路由回原面板（main / split_N）
+                "panel": info.get("panel", "main")
             }
 
             if filepath and filepath in existing_files:
@@ -153,16 +155,20 @@ class TempSessionManager:
                 new_files.append(file_entry)
 
         merged = []
-        seen_tab_ids = set()
+        # 3.5.8（R6）：按 autosave 文件名去重——tab_id 各面板独立计数，
+        # 跨面板共享 session 后主面板与分屏的 tab_id 会相同，按 tab_id 去重
+        # 会把第二个面板的 dirty 文件误判为重复而丢弃。
+        seen_names = set()
         for f in manifest.get("files", []):
-            tid = f.get("tab_id")
-            if tid is not None:
-                seen_tab_ids.add(tid)
-            merged.append(f)
+            name = f.get("autosave_path")
+            if name is not None and name not in seen_names:
+                seen_names.add(name)
+                merged.append(f)
 
         for f in new_files:
-            tid = f.get("tab_id")
-            if tid is None or tid not in seen_tab_ids:
+            name = f.get("autosave_path")
+            if name is not None and name not in seen_names:
+                seen_names.add(name)
                 merged.append(f)
 
         manifest["files"] = merged

@@ -489,6 +489,16 @@ window.updateFoldVisibility = function(collapsedLinesJson) {{
 
 (function() {{
     document.addEventListener('click', function(e) {{
+        // 链接点击 → 外部浏览器打开（经 document.title 桥回传，阻止 WebEngine 内部导航）
+        var a = e.target.closest('a');
+        if (a) {{
+            var href = a.getAttribute('href');
+            if (href != null && href.charAt(0) !== '#') {{
+                e.preventDefault();
+                document.title = '__pnopen__:' + href;
+                return;
+            }}
+        }}
         var btn = e.target.closest('.code-copy-btn');
         if (!btn) return;
         e.stopPropagation();
@@ -1069,9 +1079,11 @@ a {{
         md.enable(["table", "strikethrough"])
         try:
             from mdit_py_plugins.deflist import deflist_plugin
+            from mdit_py_plugins.tasklists import tasklists_plugin
             deflist_plugin(md)
+            tasklists_plugin(md)
         except ImportError:
-            get_logger(__name__).debug("mdit_py_plugins 未安装，定义列表语法不可用")
+            get_logger(__name__).debug("mdit_py_plugins 未安装，扩展语法（定义列表/任务列表）不可用")
         return md
 
     def _render_markdown(self, text: str) -> str:
@@ -1617,8 +1629,11 @@ a {{
     # ──────────── 预览 -> 编辑器 反向同步 ────────────
 
     def _on_preview_title(self, title: str):
-        """JS 经 document.title 回传消息，据此滚动编辑器或执行复制。"""
+        """JS 经 document.title 回传消息，据此滚动编辑器、执行复制或打开链接。"""
         if not title:
+            return
+        if title.startswith("__pnopen__:"):
+            self._open_external_link(title[len("__pnopen__:"):])
             return
         if title.startswith("__pncopy__:"):
             try:
@@ -1640,6 +1655,12 @@ a {{
         except ValueError:
             return
         self._scroll_editor_to_line(frac_line)
+
+    def _open_external_link(self, url: str) -> None:
+        """预览链接点击 → 系统外部浏览器打开（与 QTextBrowser 回退路径一致）。"""
+        if not url:
+            return
+        QDesktopServices.openUrl(QUrl(url))
 
     def _scroll_editor_to_line(self, frac_line: float):
         """把源码行 frac_line 滚到编辑器视口顶部(不移动光标)。

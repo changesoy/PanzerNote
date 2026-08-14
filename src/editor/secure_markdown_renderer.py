@@ -16,6 +16,7 @@
 
 import re
 import html as html_module
+from typing import List
 
 from ..utils.logger import get_logger
 
@@ -34,6 +35,13 @@ except ImportError:
 _DANGEROUS_TAG_RE = re.compile(
     r'<(script|iframe|object|embed|form|input|textarea|button|link|meta|base)'
     r'[\s>]',
+    re.IGNORECASE,
+)
+# 任务列表 checkbox 白名单：仅放行带 type="checkbox" 且 disabled 的 <input>（GFM 任务列表渲染产物），
+# 其余 input 仍由 _DANGEROUS_TAG_RE 转义
+_CHECKBOX_INPUT_RE = re.compile(
+    r'<input\b(?=[^>]*\btype\s*=\s*["\']checkbox["\'])'
+    r'(?=[^>]*\bdisabled\b)[^>]*>',
     re.IGNORECASE,
 )
 _DANGEROUS_ATTR_RE = re.compile(
@@ -61,12 +69,27 @@ def strip_dangerous_html(html_text: str) -> str:
       - script, iframe, object, embed, form, input, textarea, button, link, meta, base
       - on* 事件属性（带引号和不带引号）
       - javascript: URL（带引号和不带引号）
+
+    例外：任务列表 checkbox（<input type="checkbox" disabled>，GFM 任务列表渲染产物）
+    经白名单保护，其余 input 仍按危险标签转义。
     """
+    placeholders: List[str] = []
+
+    def _protect_checkbox(match: re.Match[str]) -> str:
+        placeholders.append(match.group(0))
+        return f"__pn_checkbox_{len(placeholders) - 1}__"
+
+    html_text = _CHECKBOX_INPUT_RE.sub(_protect_checkbox, html_text)
     html_text = _DANGEROUS_TAG_RE.sub('&lt;\\1', html_text)
     html_text = _DANGEROUS_ATTR_RE.sub('', html_text)
     html_text = _DANGEROUS_ATTR_UNQUOTED_RE.sub('', html_text)
     html_text = _JAVASCRIPT_URL_RE.sub('\\1="about:blank"', html_text)
     html_text = _JAVASCRIPT_URL_UNQUOTED_RE.sub('\\1="about:blank"', html_text)
+    for idx, original in enumerate(placeholders):
+        html_text = html_text.replace(f"__pn_checkbox_{idx}__", original)
+    # 恢复的 checkbox 在保护期间未经过属性清洗，补一轮（幂等）
+    html_text = _DANGEROUS_ATTR_RE.sub('', html_text)
+    html_text = _DANGEROUS_ATTR_UNQUOTED_RE.sub('', html_text)
     return html_text
 
 
@@ -83,6 +106,11 @@ def render_markdown_to_safe_html(markdown_text: str) -> str:
     if HAS_MARKDOWN_IT:
         try:
             md = _MarkdownIt("commonmark", {"html": False})
+            try:
+                from mdit_py_plugins.tasklists import tasklists_plugin
+                tasklists_plugin(md)
+            except ImportError:
+                get_logger(__name__).debug("mdit_py_plugins 未安装，任务列表语法不可用")
             return strip_dangerous_html(md.render(markdown_text))
         except Exception:
             get_logger(__name__).debug("markdown-it 渲染失败，回退到 python-markdown")

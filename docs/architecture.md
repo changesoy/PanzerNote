@@ -796,7 +796,7 @@ src/__init__.py (__version__ = "1.9.0")
 - **自动共享**（规格 2.1）：`open_file` 先查 `DocumentRegistry.get_by_path`，命中则 `_create_shared_view` 直接 attach（内容/编码/eol 单一源，不重复读盘）；面板内同 Document 至多一个 View
 - **关闭决策树**（规格 2.3）：非最后 View → 直接关（不弹确认、不销毁 Document、不动未命名编号）；最后 View → dirty 确认 → `release()`（含未命名编号归还与 path_index 清理）
 - **路径 re-key**（规格 2.2）：Save As 走 `reserve_path`（pending 预留）→ 成功后 `commit_path`（pending → path_index + `bind_path` 广播 pathChanged/nameChanged）；文件树移动走 `move_path`（直接换键，无 pending）；目标路径被其它 Document 占用一律拒绝
-- **保存竞态防护**（规格 2.4）：`SaveTaskManager` 按 `(tab_id × save_status)` 两维度管理；`SharedDocument.request_save()` 单槽合并（SAVING 期间仅置 pending_save，不并发写盘），`on_save_succeeded()` 以快照判定 dirty 最终权威
+- **保存竞态防护**（规格 2.4）：`SaveTaskManager` 按 `(tab_id × save_status)` 两维度管理（面板内）；`SharedDocument.request_save()`/`on_save_succeeded()`/`on_save_failed()` 接线为**跨面板唯一门闩**——主面板与分屏的 Manager 相互独立，`document_key` 合并仅面板内有效，门闩保证同一 Document 全局同时最多一个实际写盘任务（最新内容必然最后落盘），保存完成直接连 `SaveTask.signals.finished` 释放（标签已注销也不卡死）；`safe_write` 原子化（同目录临时文件 + os.replace），并发写目标始终是完整版本
 - **状态收敛 Document 级**：折叠（2.10）与书签（2.12）随 Document 共享；`dirty` 单一源在 Document，各 View 标题经 dirtyChanged 同步（`_on_view_dirty`）
 - **高亮**：两种高亮器（Markdown / Pygments）均实现 `set_dark_mode`，主题切换不经过 `set_file_type`（避免重建时摘除共享高亮）；关闭最后 View 前 `_detach_shared_from_widget` + release，杜绝悬垂引用（C++ deleted 崩溃）
 - **未保存聚合**：`get_unsaved_tab_infos` 返回含 `document_id`，`MainWindow.closeEvent` 按 document_id 跨面板去重（同一共享文件只列一次）；`save_all_for_close` 以 Document 侧 dirty 为准
@@ -992,7 +992,7 @@ pip install mypy>=1.20                         # 类型检查
 ### 安全约束
 
 11. **路径安全**：所有文件操作路径必须通过 `PathValidator` 白名单验证，禁止直接使用用户输入构造文件路径。`config.py` 在初始化时将 `_app_dir` 和 `_base_path` 加入白名单
-12. **文件操作安全**：使用 `FileGuard.safe_read()` / `safe_write()` 替代直接 `open()`，确保文件大小和超时控制
+12. **文件操作安全**：使用 `FileGuard.safe_read()` / `safe_write()` 替代直接 `open()`，确保文件大小和超时控制。`safe_write`/`safe_write_bytes` 原子写入（同目录临时文件 + `os.replace`），崩溃/断电不留下半写文件
 13. **输入验证**：所有用户输入（文件名、搜索内容、设置值）必须通过 `InputValidator` 验证。文件名用 `validate_filename_strict()`，搜索内容用 `validate_search()`，设置值用 `validate_setting()`
 14. **存档保存失败提示**：`SavegameManager.save()` 返回 `SavegameSaveResult` 枚举，写入失败时返回 `WRITE_FAILED`。MainWindow 在关闭时检查此状态并弹出警告
 15. **导出安全**：Markdown 转 PDF/HTML 时显式禁用 raw HTML（`MarkdownIt("commonmark", {"html": False})`），python-markdown fallback 仅启用 `tables` 扩展
@@ -1022,7 +1022,7 @@ pip install mypy>=1.20                         # 类型检查
 28. **自动配对性能**：`AutoPairHandlerMixin` 使用 `frozenset` 缓存实现 O(1) 入口过滤，`_doc_char_at()` 替代 `toPlainText()` 全文复制，`_wrap_selection()` 替代 `selectedText()` 大字符串复制。修改 `AUTO_PAIR_CHARS` 字典后缓存自动失效重建
 29. **粘贴检测**：`Editor` 重写 `insertFromMimeData()` 设置 `_is_pasting` 标志，`EditorTabWidget._on_text_changed()` 检查此标志跳过粘贴的打字奖励计数。`_PASTE_THRESHOLD = 50`，仅字符增量 ≤50 且非粘贴时计入奖励
 30. **MarkdownIt 实例复用**：`MarkdownPreviewWidget._create_md_parser()` 在 `__init__` 中创建一次解析器实例并缓存为 `_md_parser`，`_render_markdown()` 直接调用缓存实例渲染
-31. **文件保存异步化**：`SaveTask`（`QRunnable`）+ `SaveTaskSignals`（`QObject`）将 `safe_write` 磁盘 IO 放到 `QThreadPool.globalInstance()` 后台线程执行。保存失败时回滚修改状态并恢复标签页 `*` 标记
+31. **文件保存异步化**：`SaveTask`（`QRunnable`）+ `SaveTaskSignals`（`QObject`）将 `safe_write` 磁盘 IO 放到 `QThreadPool.globalInstance()` 后台线程执行；`safe_write` 原子化（同目录临时文件 + `os.replace`），并发写目标始终是完整版本（last-write-wins），共享 Document 另有跨面板唯一门闩保证最新内容最后落盘。保存失败时回滚修改状态并恢复标签页 `*` 标记
 32. **Markdown 预览 JS 局部更新**：首次渲染走 `setHtml` 加载完整模板，`loadFinished` 信号触发后标记 `_html_template_loaded = True`，后续渲染通过 `runJavaScript` 仅更新 `innerHTML`。切换文档时自动重置标志。非 WebEngine 模式仍走全量路径。注意：这不是真正 block 级增量渲染
 33. **Minimap 块级增量失效**：`MinimapWidget` 改用 `QTextDocument.contentsChange` 信号，精确计算受影响缓存块范围并标记为脏块（`_block_dirty`），仅重新渲染脏块。常规打字仅重绘 1 个块，节省约 95% 渲染开销
 34. **状态栏信号驱动统计**：`signal_driven_stats` 默认开启，`characterCount()` 避免全文复制，词数 800ms 防抖，行列号由 `cursorPositionChanged` 驱动
@@ -1036,7 +1036,7 @@ pip install mypy>=1.20                         # 类型检查
 39. **集中式版本管理**：`src/__init__.py` 中的 `__version__` 为唯一真相源，所有模块通过 `from src import __version__` 引用。`pyproject.toml` 使用动态版本配置，`scripts/verify_version.py` 提供一致性验证，`main.py` 启动时自动检查
 40. **依赖梳理**：`pyproject.toml` 分组 format/dev/all，所有运行时依赖均为必需
 41. **增量渲染器命名澄清**：`incremental_renderer.py` 确认为全文 hash 渲染缓存，文档不宣称"真正增量渲染"
-42. **分屏与共享文档语义**：`ViewCoordinator.split_editor()` 打开新空白文件（菜单文本标注"独立编辑"）；同一文件在多个面板打开时共享同一 `SharedDocument`（3.5.8，跨面板联动编辑）——内容/编码/eol/dirty/折叠/书签单一源，每个 View 只持有自己的 `ViewState` 与 `DocumentViewBinding`。禁止创建两个不同 Document 指向同一路径（`DocumentRegistry` 路径占用拒绝）
+42. **分屏与共享文档语义**：`ViewCoordinator.split_editor()` 打开新空白文件（菜单文本标注"独立编辑"）；同一文件在多个面板打开时共享同一 `SharedDocument`（3.5.8，跨面板联动编辑）——内容/编码/eol/dirty/折叠/书签单一源，每个 View 只持有自己的 `ViewState` 与 `DocumentViewBinding`。共享 Document 的保存以 Document 级状态机为跨面板唯一门闩（全局同时最多一个写盘任务）。禁止创建两个不同 Document 指向同一路径（`DocumentRegistry` 路径占用拒绝）
 43. **封装规范**：禁止通过 `self.config._savegame_manager` 等私有属性访问，使用 `self.config.savegame_manager` 公开属性；新代码优先经 `app_context.<子模块>` 直连（hotfix 阶段 7），Config 门面仅作过渡兼容
 44. **数据防泄漏**：对外暴露配置/存档数据一律走只读视图或拷贝——`savegame_manager.get_savegame()` 返回 MappingProxyType、`get_resources()` 返回拷贝、`settings_store.as_dict()`/`workspace_store.as_dict()` 返回深拷贝。禁止直接返回内部可变 dict 引用
 45. **类型化标签状态**：标签页元数据使用 `TabState`（dataclass）+ `TabStateRegistry`，禁止回退到无类型 `_tab_info` dict

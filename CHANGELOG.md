@@ -36,6 +36,11 @@
 - **未保存跨面板去重**：退出确认框按 `document_id` 去重，同一共享文件只列一次
 - **依赖声明**：`shiboken6` 显式写入 `requirements.txt`
 
+**收尾修复（跨面板保存安全）**
+
+- **跨面板并发写盘防护**：共享 Document 以 Document 级保存状态机（`request_save`/`on_save_succeeded`/`on_save_failed`）为跨面板唯一门闩——主面板与分屏的 `SaveTaskManager` 相互独立，`document_key` 合并仅面板内有效，接线后同一 Document 全局同时最多一个实际写盘任务，最新内容必然最后落盘；保存期间编辑 + 再次请求自动补保存；门闩直接连 `SaveTask.signals.finished` 释放（标签已注销也不卡死 SAVING）
+- **safe_write 原子化**：同目录临时文件（`.pn_tmp_*` 前缀便于识别残留）+ `os.replace` 原子替换——写入中途崩溃/断电不留下半写文件，并发写目标始终是完整版本（last-write-wins）；失败时清理临时文件并重新抛出；保留原文件权限；`safe_write`/`safe_write_bytes` 统一走 `_atomic_write`
+
 ## v1.8.5
 
 **Wave 3 主窗口职责拆分收尾（A~E 分支）**

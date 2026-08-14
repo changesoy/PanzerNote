@@ -1152,9 +1152,11 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
         # 3.5.8（跨面板并发写盘防护）：document_key 合并仅在本面板的
         # SaveTaskManager 内有效（各面板 Manager 相互独立），无法阻止主面板与
-        # 分屏对同一共享文件并发写盘（safe_write 非原子直写）。这里以 Document
-        # 级保存状态机（SAVING/IDLE/FAILED）作为跨面板唯一门闩——同一 Document
-        # 全局同时最多一个实际写盘任务。
+        # 分屏并发保存同一共享文件。safe_write 已原子化（临时文件 + os.replace，
+        # 文件不会字节交错损坏），但并发时旧快照可能最后落盘覆盖新内容；且
+        # Document 级 dirty/保存状态需要单一权威。这里以 Document 级保存状态机
+        # （SAVING/IDLE/FAILED）作为跨面板唯一门闩——同一 Document 全局同时
+        # 最多一个实际写盘任务，最新内容必然最后落盘。
         # 仅限「写回当前绑定路径」的正常保存；副本另存为 / 未命名首次保存
         # （目标路径尚未绑定）不参与，避免误拦跨路径保存。
         gated = (shared_doc is not None and not is_copy

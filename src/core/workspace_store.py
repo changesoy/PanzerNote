@@ -27,7 +27,13 @@ class WorkspaceStore:
             "current_view": "editor",
             "file_tree_state": {
                 "expanded_folders": []
-            }
+            },
+            # 分屏状态（3.5.2）：旧配置无这些字段时由 merge_dicts 填充默认值，
+            # 默认 split_active=False，行为与未分屏时完全一致（向后兼容）。
+            "split_active": False,
+            "split_orientation": "Horizontal",
+            "split_sizes": [],
+            "split_tabs": [],
         },
         "bookmarks": {},
         "folds": {},
@@ -103,6 +109,40 @@ class WorkspaceStore:
 
     def get_current_view(self) -> str:
         return str(self._workspace.get("last_session", {}).get("current_view", "editor"))
+
+    # === 分屏状态（3.5.2） ===
+
+    def set_split_active(self, active: bool) -> None:
+        self._workspace["last_session"]["split_active"] = bool(active)
+
+    def get_split_active(self) -> bool:
+        return bool(self._workspace.get("last_session", {}).get("split_active", False))
+
+    def set_split_orientation(self, orientation: str) -> None:
+        self._workspace["last_session"]["split_orientation"] = orientation
+
+    def get_split_orientation(self) -> str:
+        return str(
+            self._workspace.get("last_session", {}).get("split_orientation", "Horizontal")
+        )
+
+    def set_split_sizes(self, sizes: List[int]) -> None:
+        self._workspace["last_session"]["split_sizes"] = list(sizes)
+
+    def get_split_sizes(self) -> List[int]:
+        sizes = self._workspace.get("last_session", {}).get("split_sizes", [])
+        if not isinstance(sizes, list):
+            return []
+        return [int(s) for s in sizes if isinstance(s, (int, float))]
+
+    def set_split_tabs(self, tabs: List[Dict]) -> None:
+        self._workspace["last_session"]["split_tabs"] = list(tabs)
+
+    def get_split_tabs(self) -> List[Dict]:
+        tabs = self._workspace.get("last_session", {}).get("split_tabs", [])
+        if not isinstance(tabs, list):
+            return []
+        return cast(List[Dict[str, Any]], [t for t in tabs if isinstance(t, dict)])
 
     # === bookmarks / folds ===
 

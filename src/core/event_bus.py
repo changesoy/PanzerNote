@@ -36,6 +36,7 @@ class EventBus(QObject):
         mw.game_sidebar.view_changed.connect(mw._on_view_changed)
         mw.file_tree.file_open_requested.connect(mw._open_file)
         mw.file_tree.file_move_requested.connect(mw._on_file_move_from_tree)
+        # 主面板信号统一由 MainWindow._connect_editor_tabs_signals 连接（含分屏），
+        # 此处不再重复连接 editor_tabs 信号，避免旧签名单参数冲突与双重触发。
         mw.editor_tabs.current_changed.connect(mw._on_tab_changed)
         mw.editor_tabs.content_modified.connect(mw._on_content_modified)
-        mw.editor_tabs.tab_count_changed.connect(mw._on_tab_count_changed)

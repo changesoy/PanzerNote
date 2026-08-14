@@ -31,6 +31,7 @@ from ..game.secretary_widget import SecretaryWidget
 from ..themes.theme_engine import ThemeEngine
 from .shortcut_panel import ShortcutPanel
 from .side_panel_host import SidePanelHost
+from .unsaved_files_dialog import UnsavedChoice, UnsavedFilesDialog
 
 
 class ViewCoordinator:
@@ -52,10 +53,12 @@ class ViewCoordinator:
         shortcut_panel: ShortcutPanel,
         connect_tabs_signals: Callable[[EditorTabWidget], None],
         on_wrap_mode_changed: Callable[[str], None],
+        document_registry=None,
     ) -> None:
         self._config = config
         self._theme_engine = theme_engine
         self._webengine_runtime = webengine_runtime
+        self._document_registry = document_registry
         self._editor_splitter = editor_splitter
         self._editor_tabs = editor_tabs
         self._find_replace_bar = find_replace_bar
@@ -70,6 +73,8 @@ class ViewCoordinator:
 
         self._current_view = "editor"
         self._split_tabs: List[EditorTabWidget] = []
+        # 3.5.6：拖动分割条时按方向记忆分割比例（供方向切换时恢复）
+        self._editor_splitter.splitterMoved.connect(self._on_splitter_moved)
 
     @property
     def current_view(self) -> str:
@@ -103,7 +108,162 @@ class ViewCoordinator:
     # === 分屏 ===
 
     def split_editor(self, orientation: Qt.Orientation) -> None:
-        """创建独立分屏（复用 MainWindow 注入的信号连接回调）。"""
+        """创建独立分屏；已分屏时切换方向（保留内容，恢复对应方向比例）。"""
+        if self._split_tabs:
+            self._switch_split_orientation(orientation)
+            return
+        self._editor_splitter.setOrientation(orientation)
+        split_tabs = EditorTabWidget(
+            self._config,
+            theme_engine=self._theme_engine,
+            webengine_runtime=self._webengine_runtime,
+            document_registry=self._document_registry,
+            session_manager=self._editor_tabs.session_manager,
+            panel_name=f"split_{len(self._split_tabs)}",
+        )
+        split_tabs.set_find_bar(self._find_replace_bar)
+        self._connect_tabs_signals(split_tabs)
+        self._editor_splitter.addWidget(split_tabs)
+        self._split_tabs.append(split_tabs)
+        split_tabs.new_file()
+        # 水平分屏左右均分（基于宽度），垂直分屏上下均分（基于高度），两方向对称
+        if orientation == Qt.Orientation.Vertical:
+            total = self._editor_splitter.height()
+        else:
+            total = self._editor_splitter.width()
+        self._editor_splitter.setSizes([total // 2, total // 2])
+        # 记录当前方向的初始均分比例（归一化，供方向切换恢复）
+        self._config.set_view_setting(self._split_ratio_key(), [0.5, 0.5])
+        self._secretary.show_message(
+            "已启用分屏。注意：分屏中编辑的是独立文件，与主面板不同步。"
+        )
+
+    def _split_ratio_key(self) -> str:
+        """当前分屏方向对应的比例记忆键（view_setting）。"""
+        if self._editor_splitter.orientation() == Qt.Orientation.Vertical:
+            return "split_ratio_v"
+        return "split_ratio_h"
+
+    def _switch_split_orientation(self, orientation: Qt.Orientation) -> None:
+        """已分屏时切换方向：保留面板内容，恢复目标方向上次记忆的比例（无则均分）。"""
+        if self._editor_splitter.orientation() == orientation:
+            return
+        # 记录旧方向当前比例（归一化），供切回时恢复
+        sizes = list(self._editor_splitter.sizes())
+        total = sum(sizes) or 1
+        self._config.set_view_setting(
+            self._split_ratio_key(), [s / total for s in sizes]
+        )
+        self._editor_splitter.setOrientation(orientation)
+        ratio = self._config.get_view_setting(self._split_ratio_key())
+        if orientation == Qt.Orientation.Vertical:
+            total = self._editor_splitter.height()
+        else:
+            total = self._editor_splitter.width()
+        if (
+            isinstance(ratio, (list, tuple))
+            and len(ratio) == 2
+            and all(isinstance(r, (int, float)) and r > 0 for r in ratio)
+        ):
+            first = int(total * ratio[0])
+            self._editor_splitter.setSizes([first, total - first])
+        else:
+            self._editor_splitter.setSizes([total // 2, total // 2])
+
+    def _on_splitter_moved(self, pos: int, index: int) -> None:
+        """拖动分割条时按方向记忆当前分割比例（归一化，随 save_settings 统一落盘）。"""
+        if not self._split_tabs:
+            return
+        sizes = list(self._editor_splitter.sizes())
+        total = sum(sizes) or 1
+        self._config.set_view_setting(
+            self._split_ratio_key(), [s / total for s in sizes]
+        )
+
+    def close_split(self, parent: QWidget) -> None:
+        """关闭最后一个分屏（3.5.7：单级未保存确认，VS Code 风格）。
+
+        - 无未保存 → 直接关闭分屏
+        - 有未保存 → 弹「未保存文件确认」对话框（1 个→单文件样式，多个→汇总样式；
+          分屏场景两按钮 + 叉号/ESC 取消）
+        - 「保存并关闭」→ 全部保存（已保存静默、未命名逐个另存为；任一另存为取消或
+          提交失败 → 中止，分屏保留）→ 等待异步保存完成 → 关闭分屏 + 清理 temp
+        - 「不保存并关闭」→ 直接关闭分屏 + 清理 temp
+        - 取消 → 分屏完整保留（`_split_tabs` 不变）
+        """
+        if not self._split_tabs:
+            return
+        split_tabs = self._split_tabs[-1]
+        unsaved = split_tabs.get_unsaved_tab_infos()
+        if unsaved:
+            choice = UnsavedFilesDialog.ask(
+                parent,
+                self._theme_engine,
+                [info["title"] for info in unsaved],
+                show_cancel=False,
+                window_title="关闭分屏",
+            )
+            if choice == UnsavedChoice.CANCEL:
+                return  # 分屏保留
+            if choice == UnsavedChoice.SAVE:
+                if not split_tabs.save_all_for_close():
+                    return  # 未命名另存为取消 / 保存提交失败 → 中止，分屏保留
+        # 确认通过：先 pop。分屏标签 count==0 会触发 MainWindow._on_tab_count_changed
+        # → close_split 重入，此时 _split_tabs 已空，直接 return（避免递归）
+        self._split_tabs.pop()
+        if split_tabs.save_manager.has_pending_tasks():
+            # 异步保存完成后再真正关闭
+            cb = lambda: self._finish_close_split(split_tabs)
+            setattr(split_tabs, "_close_split_callback", cb)
+            split_tabs.save_manager.all_tasks_finished.connect(cb)
+        else:
+            self._finish_close_split(split_tabs)
+
+    def _finish_close_split(self, split_tabs: EditorTabWidget) -> None:
+        """异步保存完成后真正关闭分屏（含失败中止，3.5.7）。"""
+        cb = getattr(split_tabs, "_close_split_callback", None)
+        if cb is not None:
+            try:
+                split_tabs.save_manager.all_tasks_finished.disconnect(cb)
+            except (TypeError, RuntimeError):
+                pass
+            setattr(split_tabs, "_close_split_callback", None)
+
+        if split_tabs.save_manager.get_failed_tab_ids():
+            # 保存失败 → 中止关闭，分屏保留
+            self._split_tabs.append(split_tabs)
+            QMessageBox.warning(
+                split_tabs,
+                "保存失败",
+                "分屏中有文件保存失败，已取消关闭。请检查磁盘空间或文件权限。",
+            )
+            return
+
+        # 已确认（保存完成或用户选择不保存），无确认关闭全部标签
+        split_tabs.force_close_all_tabs()
+        split_tabs.clear_temp_files()
+        split_tabs.setParent(None)
+        split_tabs.deleteLater()
+
+    def reset_split_layout(self) -> None:
+        """重置分屏布局：清空方向/比例记忆；有分屏时立即均分（恢复默认水平方向）。
+
+        3.5.9：方向/比例记忆的可控出口（菜单「重置分屏布局」），无分屏时仅清记忆。
+        """
+        self._config.set_view_setting("split_ratio_h", [])
+        self._config.set_view_setting("split_ratio_v", [])
+        if self._split_tabs:
+            self._editor_splitter.setOrientation(Qt.Orientation.Horizontal)
+            total = self._editor_splitter.width()
+            self._editor_splitter.setSizes([total // 2, total // 2])
+
+    def restore_split(
+        self, orientation: Qt.Orientation, sizes: List[int]
+    ) -> None:
+        """按持久化配置恢复分屏（方向 + 分割比例），供 _restore_state 调用。
+
+        与 split_editor 的区别：不新建空标签、不显示提示消息。
+        """
         if self._split_tabs:
             return
         self._editor_splitter.setOrientation(orientation)
@@ -111,38 +271,26 @@ class ViewCoordinator:
             self._config,
             theme_engine=self._theme_engine,
             webengine_runtime=self._webengine_runtime,
+            document_registry=self._document_registry,
+            session_manager=self._editor_tabs.session_manager,
+            panel_name=f"split_{len(self._split_tabs)}",
         )
         split_tabs.set_find_bar(self._find_replace_bar)
         self._connect_tabs_signals(split_tabs)
         self._editor_splitter.addWidget(split_tabs)
         self._split_tabs.append(split_tabs)
-        split_tabs.new_file()
-        total = self._editor_splitter.width()
-        self._editor_splitter.setSizes([total // 2, total // 2])
-        self._secretary.show_message(
-            "已启用分屏。注意：分屏中编辑的是独立文件，与主面板不同步。"
-        )
-
-    def close_split(self, parent: QWidget) -> None:
-        """关闭最后一个分屏（未保存时确认）。"""
-        if not self._split_tabs:
-            return
-        split_tabs = self._split_tabs.pop()
-        unsaved = split_tabs.get_unsaved_files()
-        if unsaved:
-            reply = QMessageBox.question(
-                parent, "关闭分屏",
-                "分屏中有未保存的文件，是否关闭？",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if reply == QMessageBox.StandardButton.No:
-                self._split_tabs.append(split_tabs)
-                return
-        split_tabs.save_all_to_temp()
-        split_tabs.close_all_tabs()
-        split_tabs.setParent(None)
-        split_tabs.deleteLater()
+        if (
+            isinstance(sizes, (list, tuple))
+            and len(sizes) == 2
+            and all(isinstance(s, (int, float)) and s > 0 for s in sizes)
+        ):
+            self._editor_splitter.setSizes([int(s) for s in sizes])
+        else:
+            if orientation == Qt.Orientation.Vertical:
+                total = self._editor_splitter.height()
+            else:
+                total = self._editor_splitter.width()
+            self._editor_splitter.setSizes([total // 2, total // 2])
 
     # === 行宽模式 ===
 

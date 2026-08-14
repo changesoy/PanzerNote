@@ -10,7 +10,7 @@
   _close_current_tab / _close_all_tabs / _reopen_closed_tab
 """
 import os
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 from PyQt6.QtWidgets import QFileDialog
 
@@ -26,43 +26,69 @@ from .file_open_service import (
 
 
 class FileActionController:
-    """文件打开动作编排（依赖编辑器、工作区、路径、安全打开服务）。"""
+    """文件打开动作编排（依赖编辑器、工作区、路径、安全打开服务）。
+
+    3.5.3：目标面板改为构造注入 Callable 提供者（焦点感知），
+    MainWindow 传入 `lambda: self._focused_editor_tabs() or self.editor_tabs`，
+    使打开的文件进入当前焦点的分屏而非固定主面板。
+    """
 
     def __init__(
         self,
-        editor_tabs: EditorTabWidget,
+        editor_tabs_provider: Callable[[], EditorTabWidget],
         workspace_store: WorkspaceStore,
         path_resolver: PathResolver,
         file_open_service: FileOpenService,
     ):
-        self._editor_tabs = editor_tabs
+        self._editor_tabs_provider = editor_tabs_provider
         self._workspace_store = workspace_store
         self._path_resolver = path_resolver
         self._file_open_service = file_open_service
 
     # === 打开 ===
 
-    def open_file(self, filepath: str) -> Tuple[int, bool]:
+    def open_file(
+        self,
+        filepath: str,
+        target_tabs: Optional[EditorTabWidget] = None,
+    ) -> Tuple[int, bool]:
         """编排打开文件：安全校验 → 外部文件判定 → 打开 → 最近文件。
 
         安全校验失败抛出 FileOpenSecurityError（由调用方负责提示）。
         返回 (tab_index, is_external)。
+
+        3.5.3：target_tabs 为调用方在弹窗前捕获的目标面板（避免文件对话框
+        夺焦导致 provider 求值落回主面板）；未传时由 provider 即时求值。
         """
         validated = self._file_open_service.validate_open_request(
             filepath, FileOpenSource.USER_DIALOG
         )
         is_external = self._register_external_if_needed(validated)
-        index = self._editor_tabs.open_file(validated)
+        tabs = (
+            target_tabs
+            if target_tabs is not None
+            else self._editor_tabs_provider()
+        )
+        index = tabs.open_file(validated)
         self._workspace_store.add_recent_file(validated)
         return index, is_external
 
-    def open_file_bypass_service(self, filepath: str) -> Tuple[int, bool]:
+    def open_file_bypass_service(
+        self, filepath: str, target_tabs: Optional[EditorTabWidget] = None
+    ) -> Tuple[int, bool]:
         """拖放等已通过 FileOpenService 校验的路径直接打开，不再重复校验。
 
-        返回 (tab_index, is_external)。
+        target_tabs：拖放等调用方按释放位置捕获的目标面板（避免拖拽期间
+        焦点在文件树上，provider 求值落回最近聚焦面板）；未传时由 provider
+        即时求值。返回 (tab_index, is_external)。
         """
         is_external = self._register_external_if_needed(filepath)
-        index = self._editor_tabs.open_file(filepath)
+        tabs = (
+            target_tabs
+            if target_tabs is not None
+            else self._editor_tabs_provider()
+        )
+        index = tabs.open_file(filepath)
         self._workspace_store.add_recent_file(filepath)
         return index, is_external
 

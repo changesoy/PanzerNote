@@ -222,6 +222,30 @@ class Config:
     def get_current_view(self) -> str:
         return self._workspace_store.get_current_view()
 
+    def set_split_active(self, active: bool) -> None:
+        self._workspace_store.set_split_active(active)
+
+    def get_split_active(self) -> bool:
+        return self._workspace_store.get_split_active()
+
+    def set_split_orientation(self, orientation: str) -> None:
+        self._workspace_store.set_split_orientation(orientation)
+
+    def get_split_orientation(self) -> str:
+        return self._workspace_store.get_split_orientation()
+
+    def set_split_sizes(self, sizes: List[int]) -> None:
+        self._workspace_store.set_split_sizes(sizes)
+
+    def get_split_sizes(self) -> List[int]:
+        return self._workspace_store.get_split_sizes()
+
+    def set_split_tabs(self, tabs: List[Dict]) -> None:
+        self._workspace_store.set_split_tabs(tabs)
+
+    def get_split_tabs(self) -> List[Dict]:
+        return self._workspace_store.get_split_tabs()
+
     def get_bookmarks(self, filepath: str) -> list:
         return self._workspace_store.get_bookmarks(filepath)
 

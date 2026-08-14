@@ -34,6 +34,7 @@ class PygmentsHighlighter(QSyntaxHighlighter):
     def __init__(self, document: QTextDocument, lexer, theme_engine):
         super().__init__(document)
         self._lexer = lexer
+        self._theme_engine = theme_engine
         self._formats = get_editor_formats(theme_engine)
 
     def _get_format(self, token_type):
@@ -44,6 +45,16 @@ class PygmentsHighlighter(QSyntaxHighlighter):
                 return self._formats[tt]
             tt = tt.parent if hasattr(tt, 'parent') else None
         return None
+
+    def set_dark_mode(self, is_dark: bool) -> None:
+        """3.5.8（批次 5 修复）：主题切换时重建 formats 并重绘。
+
+        Pygments 配色取自 theme_engine 当前主题（get_editor_formats），
+        调用时引擎已切到新主题，无需 is_dark 分支；重绘避免走
+        set_file_type 重建路径误摘共享高亮（R1 收敛）。
+        """
+        self._formats = get_editor_formats(self._theme_engine)
+        self.rehighlight()
 
     def highlightBlock(self, text: Optional[str]):
         """高亮单行文本"""

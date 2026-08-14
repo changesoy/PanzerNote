@@ -371,6 +371,16 @@ QTabBar::tab:selected {{
 }}
 """)
 
+        # 3.5.12：标签 tooltip 路径区分，随主题配色
+        parts.append(f"""
+QToolTip {{
+    background-color: {c.surface};
+    color: {c.text_primary};
+    border: 1px solid {c.border};
+    padding: 4px 8px;
+}}
+""")
+
         parts.append(f"""
 QTreeView {{
     background-color: {c.sidebar_bg};

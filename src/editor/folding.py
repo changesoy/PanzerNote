@@ -6,7 +6,7 @@ from __future__ import annotations
 from typing import List, Optional, Set, Dict, Tuple
 
 from PyQt6.QtCore import pyqtSignal, QObject
-from PyQt6.QtWidgets import QPlainTextEdit
+from PyQt6.QtGui import QTextDocument
 
 from src.editor.outline_parser import parse_headings, Heading
 
@@ -25,9 +25,14 @@ class FoldingManager(QObject):
     fold_state_changed = pyqtSignal()
     _FOLD_MARKER_WIDTH = 16  # 折叠标记列的宽度（px）
 
-    def __init__(self, editor: QPlainTextEdit):
-        super().__init__(editor)
-        self._editor = editor
+    def __init__(self, document: QTextDocument, parent: Optional[QObject] = None):
+        """document：折叠作用的目标 QTextDocument（共享后为 Document 级单实例）。
+
+        折叠可见性（QTextBlock.setVisible）落在 document 的 block 上；各 View 的
+        重绘与预览同步由 fold_state_changed 信号驱动，本管理器不直接触碰 Editor。
+        """
+        super().__init__(parent)
+        self._document = document
         self._collapsed_blocks: Set[int] = set()  # 被折叠的标题行 blockNumber
         self._headings: List[Heading] = []  # (level, line_num, title)
         self._fold_ranges: Dict[int, Tuple[int, int]] = {}  # heading_line → (first_child, last_child)
@@ -55,7 +60,7 @@ class FoldingManager(QObject):
                     break
             if child_end is None:
                 # 没有后续同级或更高级标题 → 到文档末尾
-                doc = self._editor.document()
+                doc = self._document
                 if doc is not None:
                     child_end = doc.blockCount()
                 else:
@@ -221,7 +226,7 @@ class FoldingManager(QObject):
         if heading_line not in self._fold_ranges:
             return
 
-        doc = self._editor.document()
+        doc = self._document
         if doc is None:
             return
 
@@ -243,8 +248,6 @@ class FoldingManager(QObject):
                 if block.isValid():
                     block.setVisible(False)
 
-        self._editor.viewport().update()  # type: ignore[union-attr]
-        self._editor.line_number_area.update()  # type: ignore[attr-defined,union-attr]
         self.fold_state_changed.emit()
 
     def toggle_fold_all(self) -> None:
@@ -256,7 +259,7 @@ class FoldingManager(QObject):
 
     def _collapse_all(self) -> None:
         """折叠所有可折叠区域。"""
-        doc = self._editor.document()
+        doc = self._document
         if doc is None:
             return
 
@@ -269,13 +272,11 @@ class FoldingManager(QObject):
                 if block.isValid():
                     block.setVisible(False)
 
-        self._editor.viewport().update()  # type: ignore[union-attr]
-        self._editor.line_number_area.update()  # type: ignore[attr-defined,union-attr]
         self.fold_state_changed.emit()
 
     def _expand_all(self) -> None:
         """展开所有折叠区域。"""
-        doc = self._editor.document()
+        doc = self._document
         if doc is None:
             return
 
@@ -289,8 +290,6 @@ class FoldingManager(QObject):
                 if block.isValid():
                     block.setVisible(True)
 
-        self._editor.viewport().update()  # type: ignore[union-attr]
-        self._editor.line_number_area.update()  # type: ignore[attr-defined,union-attr]
         self.fold_state_changed.emit()
 
     def _restore_nested_folds(self, parent_heading_line: int) -> None:
@@ -300,7 +299,7 @@ class FoldingManager(QObject):
         """
         if parent_heading_line not in self._fold_ranges:
             return
-        doc = self._editor.document()
+        doc = self._document
         if doc is None:
             return
 
@@ -335,7 +334,7 @@ class FoldingManager(QObject):
         if not to_expand:
             return
 
-        doc = self._editor.document()
+        doc = self._document
         if doc is None:
             return
 
@@ -350,12 +349,11 @@ class FoldingManager(QObject):
             self._restore_nested_folds(heading_line)
 
         if to_expand:
-            self._editor.viewport().update()  # type: ignore[union-attr]
-            self._editor.line_number_area.update()  # type: ignore[attr-defined,union-attr]
+            self.fold_state_changed.emit()
 
     def is_line_visible(self, line: int) -> bool:
         """第 line 行（1-based）是否可见。"""
-        doc = self._editor.document()
+        doc = self._document
         if doc is None:
             return True
         block = doc.findBlockByNumber(line - 1)
@@ -372,7 +370,7 @@ class FoldingManager(QObject):
 
         调用方需在 rebuild_from_text 之后调用。
         """
-        doc = self._editor.document()
+        doc = self._document
         if doc is None:
             return
 
@@ -388,13 +386,12 @@ class FoldingManager(QObject):
                     block.setVisible(False)
 
         if self._collapsed_blocks:
-            self._editor.viewport().update()  # type: ignore[union-attr]
-            self._editor.line_number_area.update()  # type: ignore[attr-defined,union-attr]
+            self.fold_state_changed.emit()
 
     @property
     def visible_block_count(self) -> int:
         """返回可见 block 数（供 minimap 使用）。"""
-        doc = self._editor.document()
+        doc = self._document
         if doc is None:
             return 0
         count = 0

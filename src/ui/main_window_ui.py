@@ -76,11 +76,14 @@ class MainWindowUIBuilder:
         theme_engine: ThemeEngine,
         shortcut_manager: ShortcutManager,
         webengine_runtime: WebEngineRuntime,
+        document_registry=None,
     ) -> None:
         self._config = config
         self._theme_engine = theme_engine
         self._shortcut_manager = shortcut_manager
         self._webengine_runtime = webengine_runtime
+        # 3.5.8（批次 4a）：主面板与分屏共享同一 DocumentRegistry
+        self._document_registry = document_registry
 
     def build(self, main_window: QMainWindow) -> BuiltUI:
         """构建全部 UI 组件与布局（不连接信号）。
@@ -173,6 +176,7 @@ class MainWindowUIBuilder:
             self._config,
             theme_engine=self._theme_engine,
             webengine_runtime=self._webengine_runtime,
+            document_registry=self._document_registry,
         )
         editor_tabs.set_find_bar(find_replace_bar)
         editor_splitter.addWidget(editor_tabs)

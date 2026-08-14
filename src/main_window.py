@@ -11,6 +11,8 @@ v1.5.4 改动：
 
 import os
 import html as html_module
+from functools import partial
+import shiboken6  # type: ignore[import-not-found]  # 显式依赖（requirements.txt），mypy 无 stub
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QSplitter, QMenuBar, QMenu, QStatusBar,
@@ -23,6 +25,7 @@ from PyQt6.QtGui import QIcon, QCloseEvent, QAction
 from typing import Optional, cast
 
 from . import __version__
+from .core.document_registry import DocumentRegistry
 from .core.app_context import AppContext
 from .core.session_restore_service import SessionRestoreService
 from .core.timer_manager import TimerManager
@@ -53,6 +56,7 @@ from .utils.window_theme import (
 from .ui.main_window_ui import MainWindowUIBuilder
 from .ui.selection_clear_filter import SelectionClearFilter
 from .ui.view_coordinator import ViewCoordinator
+from .ui.unsaved_files_dialog import UnsavedChoice, UnsavedFilesDialog
 
 
 class MainWindow(QMainWindow):
@@ -79,6 +83,7 @@ class MainWindow(QMainWindow):
         )
         self._closing = False
         self._closing_pending_save = False
+        self._closing_awaiting: list = []
         self.setAcceptDrops(True)
 
         self.game_engine = GameEngine(self.config)
@@ -113,16 +118,25 @@ class MainWindow(QMainWindow):
         self._save_notify_timer.setSingleShot(True)
         self._save_notify_timer.timeout.connect(self._do_save_notify)
 
+        # 3.5.8（批次 4a）：Document 生命周期全局唯一——主面板与全部分屏共享同一 registry
+        self._document_registry = DocumentRegistry()
+
         self._ui_builder = MainWindowUIBuilder(
             self.config,
             self.theme_engine,
             self.shortcut_manager,
             self.webengine_runtime,
+            self._document_registry,
         )
 
         self._init_ui()
+        # 3.5.3：最近聚焦的编辑器面板（文件树/对话框夺焦后打开文件仍落在用户正在操作的面板）
+        self._last_focused_editor_tabs: Optional[EditorTabWidget] = self.editor_tabs
+        app = QApplication.instance()
+        if isinstance(app, QApplication):
+            app.focusChanged.connect(self._on_focus_changed)
         self._file_action_controller = FileActionController(
-            self.editor_tabs,
+            lambda: self._focused_editor_tabs() or self.editor_tabs,
             self.app_context.workspace_store,
             self.app_context.path_resolver,
             self._file_open_service,
@@ -207,6 +221,7 @@ class MainWindow(QMainWindow):
             self.shortcut_panel,
             self._connect_editor_tabs_signals,
             lambda _mode: self._sync_wrap_menu(),
+            self._document_registry,
         )
         self._connect_ui_signals()
 
@@ -218,6 +233,9 @@ class MainWindow(QMainWindow):
         self.game_sidebar.view_changed.connect(self._on_view_changed)
         self.file_tree.file_open_requested.connect(self._open_file)
         self.file_tree.file_move_requested.connect(self._on_file_move_from_tree)
+        self.file_tree.file_copy_requested.connect(self._on_file_copy_from_tree)
+        self.file_tree.file_deleted.connect(self._on_file_deleted)
+        self.file_tree.untitled_save_requested.connect(self._on_untitled_save_from_tree)
         self.outline_panel.heading_clicked.connect(self._on_outline_heading_clicked)
         self.find_in_files_panel.result_clicked.connect(self._on_find_in_files_result)
         self.shortcut_panel.set_edit_callback(self._on_shortcut_edited)
@@ -227,7 +245,7 @@ class MainWindow(QMainWindow):
         """主面板与分屏复用，保证信号配置永远一致。"""
         tabs.current_changed.connect(self._on_tab_changed)
         tabs.content_modified.connect(self._on_content_modified)
-        tabs.tab_count_changed.connect(self._on_tab_count_changed)
+        tabs.tab_count_changed.connect(partial(self._on_tab_count_changed, tabs))
         tabs.chars_typed.connect(self._on_chars_typed)
         tabs.cursor_position_changed.connect(self._update_stats)
         tabs.word_count_updated.connect(self._update_stats)
@@ -292,6 +310,16 @@ class MainWindow(QMainWindow):
             if active_index < self.editor_tabs.count():
                 self.editor_tabs.setCurrentIndex(active_index)
 
+        self._restore_split_state()
+
+        # 3.5.9：启动空会话兜底（主面板总有一个可编辑位置）
+        if self.editor_tabs.count() == 0:
+            self.editor_tabs.new_file()
+        # 3.5.9：旧配置残留的空分屏（3.5.9 之前保存的空面板）→ 自动关闭
+        for tabs in list(self.view_coordinator.split_tabs):
+            if tabs.count() == 0:
+                self.view_coordinator.close_split(self)
+
         current_view = self.config.get_current_view()
         if current_view != "editor":
             self._switch_view(current_view)
@@ -312,6 +340,50 @@ class MainWindow(QMainWindow):
             return
         QTimer.singleShot(0, self._open_next_pending_file)
 
+    def _restore_split_state(self):
+        """恢复分屏状态（方向 / 分割比例 / 各分屏文件与激活标签）。
+
+        旧配置无分屏字段（split_active 默认 False）时直接跳过，行为与
+        未分屏时一致，保证向后兼容。
+        """
+        if not self.config.get_split_active():
+            return
+        orientation = (
+            Qt.Orientation.Vertical
+            if self.config.get_split_orientation() == "Vertical"
+            else Qt.Orientation.Horizontal
+        )
+        split_tabs_config = self.config.get_split_tabs()
+        if not split_tabs_config:
+            return
+        self.view_coordinator.restore_split(orientation, self.config.get_split_sizes())
+        split_widgets = self.view_coordinator.split_tabs
+        if not split_widgets:
+            return
+        for tabs, tab_config in zip(split_widgets, split_tabs_config):
+            open_files = tab_config.get("open_files", []) if isinstance(tab_config, dict) else []
+            if not isinstance(open_files, list):
+                open_files = []
+            for entry in open_files:
+                if not isinstance(entry, dict):
+                    continue
+                if entry.get("is_new"):
+                    # 3.5.10：分屏内未命名文件恢复（沿用编号，dirty 内容一并还原）
+                    tabs.restore_untitled_file(
+                        entry.get("untitled_number") or 1,
+                        entry.get("display_name", "未命名"),
+                        entry.get("content"),
+                    )
+                    continue
+                filepath = entry.get("path")
+                if filepath and os.path.exists(filepath):
+                    index = tabs.open_file(filepath, activate=False)
+                    if index >= 0:
+                        self._session_restore_service.restore_cursor(tabs, entry, index)
+            active_index = tab_config.get("active_tab_index", 0) if isinstance(tab_config, dict) else 0
+            if isinstance(active_index, int) and 0 <= active_index < tabs.count():
+                tabs.setCurrentIndex(active_index)
+
     def _connect_signals(self):
         """连接信号"""
         self.event_bus.connect_signals(self)
@@ -330,6 +402,26 @@ class MainWindow(QMainWindow):
 
         self.config.set_active_tab_index(self.editor_tabs.currentIndex())
         self.config.set_current_view(self.view_coordinator.current_view)
+
+        # 分屏状态持久化（3.5.2）
+        split_tabs = self.view_coordinator.split_tabs
+        self.config.set_split_active(bool(split_tabs))
+        if split_tabs:
+            self.config.set_split_orientation(
+                "Vertical"
+                if self.editor_splitter.orientation() == Qt.Orientation.Vertical
+                else "Horizontal"
+            )
+            self.config.set_split_sizes(self.editor_splitter.sizes())
+            self.config.set_split_tabs(
+                [
+                    {
+                        "open_files": t.get_open_files_info(),
+                        "active_tab_index": t.currentIndex(),
+                    }
+                    for t in split_tabs
+                ]
+            )
 
         sizes = self.splitter.sizes()
         if len(sizes) >= 2:
@@ -359,8 +451,9 @@ class MainWindow(QMainWindow):
             )
 
     def _save_to_temp(self):
-        """保存到暂存文件"""
-        self.editor_tabs.save_all_to_temp()
+        """保存到暂存文件（主面板 + 全部分屏，3.5.2）"""
+        for tabs in [self.editor_tabs, *self.view_coordinator.split_tabs]:
+            tabs.save_all_to_temp()
 
     def _check_session_recovery(self):
         """检查是否有可恢复的异常退出会话
@@ -413,7 +506,10 @@ class MainWindow(QMainWindow):
         """恢复指定会话的文件（逻辑委托 SessionRestoreService）"""
         session_mgr = self.editor_tabs.session_manager
         self._session_restore_service.restore_after_crash(
-            self.editor_tabs, session, session_mgr
+            self.editor_tabs,
+            session,
+            session_mgr,
+            split_tabs=list(self.view_coordinator.split_tabs),
         )
 
     # === 挂机机制 ===
@@ -502,8 +598,25 @@ class MainWindow(QMainWindow):
         '.ini', '.log', '.sql', '.sh', '.go', '.rs', '',
     })
 
+    def _drop_target_panel(self, pos: QPoint) -> Optional[EditorTabWidget]:
+        """按释放位置确定目标面板（主面板/分屏，3.5.7）。
+
+        拖放期间焦点通常停留在文件树（拖拽源），焦点追踪只能回退到"最近
+        聚焦面板"，与释放位置可能不一致；改为按释放点落在哪个面板矩形内
+        决定打开目标。点落在任何面板之外（分割条、边距等）返回 None，
+        由调用方回退到焦点面板。
+        """
+        for tabs in [self.editor_tabs, *self.view_coordinator.split_tabs]:
+            if not tabs.isVisible():
+                continue
+            origin = tabs.mapTo(self, QPoint(0, 0))
+            if QRect(origin, tabs.size()).contains(pos):
+                return tabs
+        return None
+
     def dropEvent(self, event):
         if event.mimeData().hasUrls():
+            target = self._drop_target_panel(event.position().toPoint())
             for url in event.mimeData().urls():
                 if url.isLocalFile():
                     filepath = url.toLocalFile()
@@ -521,18 +634,21 @@ class MainWindow(QMainWindow):
                     except FileOpenSecurityError as e:
                         QMessageBox.warning(self, "无法打开文件", str(e))
                         continue
-                    self._open_file_bypass_service(validated)
+                    self._open_file_bypass_service(validated, target_tabs=target)
             event.acceptProposedAction()
         else:
             event.ignore()
 
     def closeEvent(self, event: Optional[QCloseEvent]):
-        """关闭窗口事件（两阶段关闭）
+        """关闭窗口事件（两阶段关闭，3.5.7 多面板版）
 
-        阶段1：检查是否有未保存/保存中/保存失败的文件
-              如有，提示用户选择保存/不保存/取消
-              用户选择保存时，event.ignore()，启动异步保存
-        阶段2：等待 SaveTaskManager.all_tasks_finished 信号
+        阶段1：统计主面板 + 全部分屏的未保存文件（1 个单文件弹窗 / 多个汇总弹窗，
+              含「取消」按钮）：
+              - 保存并关闭 → event.ignore()，遍历全面板 save_all_for_close()
+                （任一另存为取消 / 保存提交失败 → 提示并中止，窗口保留）
+              - 不保存并关闭 → _finalize_close()
+              - 取消 → event.ignore()
+        阶段2：等待各面板 SaveTaskManager.all_tasks_finished 全部完成
               全部成功 → _finalize_close()
               任一失败 → 取消关闭，恢复 UI
         """
@@ -544,9 +660,9 @@ class MainWindow(QMainWindow):
 
         self._save_to_temp()
 
-        save_mgr = self.editor_tabs.save_manager
+        panels = [self.editor_tabs, *self.view_coordinator.split_tabs]
 
-        if save_mgr.any_saving():
+        if any(p.save_manager.any_saving() for p in panels):
             QMessageBox.information(
                 self, "请稍候",
                 "正在保存文件，请等待保存完成后再关闭。"
@@ -554,74 +670,103 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
 
-        unsaved_files = self.editor_tabs.get_unsaved_files()
+        unsaved_infos = []
+        seen_docs = set()
+        for p in panels:
+            for info in p.get_unsaved_tab_infos():
+                # 3.5.8：共享 Document 在主面板与分屏各有一个 View，按 document_id
+                # 去重——退出确认框同一文件只列一次（保存/不保存对 Document 生效一次即可）
+                doc_id = info.get("document_id")
+                if doc_id is not None:
+                    if doc_id in seen_docs:
+                        continue
+                    seen_docs.add(doc_id)
+                unsaved_infos.append(info)
 
-        if unsaved_files:
-            file_list = "\n".join([f"• {f}" for f in unsaved_files[:5]])
-            if len(unsaved_files) > 5:
-                file_list += f"\n...等{len(unsaved_files)}个文件"
-
-            msg_box = QMessageBox(self)
-            msg_box.setWindowTitle("确认退出")
-            msg_box.setText(f"有{len(unsaved_files)}个文件未保存：\n\n{file_list}\n\n是否保存并退出？")
-            msg_box.setIcon(QMessageBox.Icon.Question)
-
-            save_btn = msg_box.addButton("保存", QMessageBox.ButtonRole.AcceptRole)
-            discard_btn = msg_box.addButton("不保存", QMessageBox.ButtonRole.DestructiveRole)
-            cancel_btn = msg_box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
-
-            msg_box.exec()
-
-            clicked = msg_box.clickedButton()
-            if clicked == save_btn:
-                event.ignore()
-                self._closing_pending_save = True
-                self.editor_tabs.save_all()
-                if save_mgr.has_unsaved_work() and not save_mgr.has_pending_tasks():
-                    self._closing_pending_save = False
-                    return
-                if save_mgr.has_pending_tasks():
-                    save_mgr.all_tasks_finished.connect(self._on_close_save_finished)
-                else:
-                    self._finalize_close()
-            elif clicked == discard_btn:
-                self._finalize_close()
-                event.accept()
-            else:
-                event.ignore()
-        else:
+        if not unsaved_infos:
             self._finalize_close()
             event.accept()
+            return
+
+        choice = UnsavedFilesDialog.ask(
+            self,
+            self.theme_engine,
+            [info["title"] for info in unsaved_infos],
+            show_cancel=True,
+            window_title="确认退出",
+        )
+        if choice == UnsavedChoice.CANCEL:
+            event.ignore()
+            return
+        if choice == UnsavedChoice.DISCARD:
+            self._finalize_close()
+            event.accept()
+            return
+
+        # 保存并关闭
+        event.ignore()
+        self._closing_pending_save = True
+        self._closing_awaiting = []
+        for p in panels:
+            if not p.save_all_for_close():
+                self._closing_pending_save = False
+                self._closing_awaiting = []
+                QMessageBox.warning(
+                    self, "保存失败",
+                    "部分文件保存失败或另存为已取消，无法关闭窗口。\n"
+                    "请检查磁盘空间或文件权限后重试。",
+                )
+                return
+            if p.save_manager.has_pending_tasks():
+                self._closing_awaiting.append(p)
+        if not self._closing_awaiting:
+            # 兜底：无待保存任务（理论上有未保存则必有提交）
+            self._closing_pending_save = False
+            self._finalize_close()
+            return
+        for p in self._closing_awaiting:
+            p.save_manager.all_tasks_finished.connect(self._on_close_save_finished)
 
     def _finalize_close(self):
         """最终关闭逻辑：保存窗口状态、清理临时文件、关闭窗口"""
         self._closing = True
         self._save_state()
-        self.editor_tabs.clear_temp_files()
+        for tabs in [self.editor_tabs, *self.view_coordinator.split_tabs]:
+            tabs.clear_temp_files()
         self.close()
 
     def _on_close_save_finished(self):
-        """异步保存全部完成后的回调
+        """异步保存全部完成后的回调（3.5.7：多面板聚合）
 
-        创建者：MainWindow.closeEvent（用户选择保存并退出时）
-        持有者：SaveTaskManager.all_tasks_finished 信号连接
-        完成通知：SaveTaskManager.all_tasks_finished
+        创建者：MainWindow.closeEvent（用户选择保存并关闭时，连接到各面板
+              SaveTaskManager.all_tasks_finished）
+        持有者：各面板 SaveTaskManager.all_tasks_finished 信号连接
+        完成通知：全部面板的 SaveTaskManager.all_tasks_finished
         失败通知：SaveTaskManager.save_failed（每个失败任务单独触发）
         关闭时行为：断开信号连接，重置关闭标志
         """
-        save_mgr = self.editor_tabs.save_manager
-        try:
-            save_mgr.all_tasks_finished.disconnect(self._on_close_save_finished)
-        except (TypeError, RuntimeError):
-            pass
+        # 任一面板仍有未完成任务 → 继续等待（all_tasks_finished 各自触发）
+        if any(p.save_manager.has_pending_tasks() for p in self._closing_awaiting):
+            return
+
+        for p in self._closing_awaiting:
+            try:
+                p.save_manager.all_tasks_finished.disconnect(self._on_close_save_finished)
+            except (TypeError, RuntimeError):
+                pass
+        self._closing_awaiting = []
 
         if not self._closing_pending_save:
             return
 
-        failed_tabs = save_mgr.get_failed_tab_ids()
-        if failed_tabs:
+        panels = [self.editor_tabs, *self.view_coordinator.split_tabs]
+        failed_files = []
+        for p in panels:
+            failed_tabs = p.save_manager.get_failed_tab_ids()
+            if failed_tabs:
+                failed_files.extend(p.get_failed_filenames(failed_tabs))
+        if failed_files:
             self._closing_pending_save = False
-            failed_files = self.editor_tabs.get_failed_filenames(failed_tabs)
             file_list = "\n".join([f"• {f}" for f in failed_files[:5]])
             if len(failed_files) > 5:
                 file_list += f"\n...等{len(failed_files)}个文件"
@@ -629,10 +774,6 @@ class MainWindow(QMainWindow):
                 self, "保存失败",
                 f"以下文件保存失败，无法关闭：\n\n{file_list}"
             )
-            return
-
-        if save_mgr.has_unsaved_work():
-            self._closing_pending_save = False
             return
 
         self._closing_pending_save = False
@@ -651,23 +792,30 @@ class MainWindow(QMainWindow):
     # === 文件操作 ===
 
     def _new_file(self):
-        """新建文件"""
-        self.editor_tabs.new_file()
+        """新建文件（焦点在分屏时新建到分屏，与 Ctrl+S 焦点感知一致）"""
+        (self._focused_editor_tabs() or self.editor_tabs).new_file()
 
     def _new_folder(self):
         """新建文件夹"""
         self.file_tree.create_new_folder()
 
     def _open_file_dialog(self):
-        """打开文件对话框"""
+        """打开文件对话框
+
+        3.5.3：文件对话框会夺取焦点，目标面板须在弹窗前捕获（焦点感知），
+        否则对话框关闭后 provider 求值会落回主面板。
+        """
+        target_tabs = self._focused_editor_tabs() or self.editor_tabs
         filepath = self._file_action_controller.show_open_dialog(self)
         if filepath:
-            self._open_file(filepath)
+            self._open_file(filepath, target_tabs=target_tabs)
 
-    def _open_file(self, filepath: str):
+    def _open_file(self, filepath: str, target_tabs: Optional[EditorTabWidget] = None):
         """打开文件（编排委托 FileActionController）"""
         try:
-            _, is_external = self._file_action_controller.open_file(filepath)
+            _, is_external = self._file_action_controller.open_file(
+                filepath, target_tabs=target_tabs
+            )
         except FileOpenSecurityError as e:
             QMessageBox.warning(self, "无法打开文件", str(e))
             return
@@ -675,25 +823,52 @@ class MainWindow(QMainWindow):
             self.file_tree.refresh_external_files()
         self._update_recent_menu()
 
-    def _open_file_bypass_service(self, filepath: str):
-        """由拖放等已通过 FileOpenService 校验后调用，不再重复校验"""
-        _, is_external = self._file_action_controller.open_file_bypass_service(filepath)
+    def _open_file_bypass_service(
+        self, filepath: str, target_tabs: Optional[EditorTabWidget] = None
+    ):
+        """由拖放等已通过 FileOpenService 校验后调用，不再重复校验。
+
+        target_tabs：拖放按释放位置确定的目标面板；未传时落最近聚焦面板。
+        """
+        _, is_external = self._file_action_controller.open_file_bypass_service(
+            filepath, target_tabs=target_tabs
+        )
         if is_external:
             self.file_tree.refresh_external_files()
         self._update_recent_menu()
 
-    def _focused_editor_tabs(self) -> Optional[EditorTabWidget]:
-        """返回当前焦点所在的 EditorTabWidget（主面板或分屏），无则 None。
+    def _on_focus_changed(self, old, new):
+        """3.5.3：焦点变化时记录最近聚焦的编辑器面板（主面板或分屏）。
 
-        分屏聚焦时按 Ctrl+S 应保存分屏中正在编辑的文件，而非固定主面板。
+        点击编辑器内部（QTextEdit 等子控件）时 FocusIn 发往子控件而非
+        EditorTabWidget 本身，事件过滤器收不到；故用全局 focusChanged 信号。
+        焦点转移到文件树等非编辑器控件时保持最近记录不变。
+        """
+        if new is None:
+            return
+        for tabs in [self.editor_tabs, *self.view_coordinator.split_tabs]:
+            if tabs is new or tabs.isAncestorOf(new):
+                self._last_focused_editor_tabs = tabs
+                return
+
+    def _focused_editor_tabs(self) -> Optional[EditorTabWidget]:
+        """返回当前焦点所在的 EditorTabWidget（主面板或分屏），无则最近聚焦的面板。
+
+        分屏聚焦时按 Ctrl+S 应保存分屏中正在编辑的文件，而非固定主面板；
+        点击文件树等夺焦控件后打开文件，同样落在最近聚焦的面板。
         """
         focus = QApplication.focusWidget()
-        if focus is None:
-            return None
-        for tabs in [self.editor_tabs, *self.view_coordinator.split_tabs]:
-            if tabs is focus or tabs.isAncestorOf(focus):
-                return tabs
-        return None
+        if focus is not None:
+            for tabs in [self.editor_tabs, *self.view_coordinator.split_tabs]:
+                if tabs is focus or tabs.isAncestorOf(focus):
+                    return tabs
+        last = self._last_focused_editor_tabs
+        if last is not None and not shiboken6.isValid(last):
+            # 3.5.8（批次 5 修复）：分屏关闭销毁后旧引用悬垂
+            # （C++ deleted）——清掉并回退主面板，避免 open_file 崩溃
+            self._last_focused_editor_tabs = None
+            return self.editor_tabs
+        return last
 
     def _save_current(self):
         """保存当前文件（焦点在分屏时保存分屏）"""
@@ -879,6 +1054,10 @@ class MainWindow(QMainWindow):
         """关闭分屏（委托 ViewCoordinator）"""
         self.view_coordinator.close_split(self)
 
+    def _reset_split_layout(self):
+        """重置分屏布局（委托 ViewCoordinator）"""
+        self.view_coordinator.reset_split_layout()
+
     def _toggle_file_tree(self):
         """切换文件树显示/隐藏（委托 ViewCoordinator）"""
         self.view_coordinator.toggle_file_tree()
@@ -1003,10 +1182,19 @@ class MainWindow(QMainWindow):
         self.resource_bar.refresh()
         self.secretary.show_message("文件已保存！")
 
-    def _on_tab_count_changed(self, count: int):
-        """标签页数量变化"""
+    def _on_tab_count_changed(self, tabs: EditorTabWidget, count: int):
+        """标签页数量变化
+
+        3.5.9：标签全关时的空会话兜底 / 自动关闭分屏。
+        - 主面板标签全关 → 自动新建未命名1（总有一个可编辑位置）。
+        - 分屏标签全关 → 自动关闭分屏（分屏是临时任务视图，任务完成即清理）；
+          分屏不新建未命名，否则与自动关闭冲突。
+        """
         if count == 0:
-            self.secretary.show_event_message("欢迎")
+            if tabs is self.editor_tabs:
+                tabs.new_file()
+            else:
+                self.view_coordinator.close_split(self)
 
     def _on_file_move_from_tree(self, src_filepath: str, dest_folder: str):
         """文件树请求移动文件（标签拖拽到文件夹）"""
@@ -1016,6 +1204,24 @@ class MainWindow(QMainWindow):
             self.secretary.show_message(
                 f"已将 {os.path.basename(src_filepath)} 移动到 {os.path.basename(dest_folder)}/"
             )
+
+    def _on_file_copy_from_tree(self, src_filepath: str, dest_folder: str):
+        """文件树请求复制文件（标签拖拽到文件夹）"""
+        import os
+        success = self.editor_tabs.copy_file_to_folder(src_filepath, dest_folder)
+        if success:
+            self.secretary.show_message(
+                f"已将 {os.path.basename(src_filepath)} 复制到 {os.path.basename(dest_folder)}/"
+            )
+
+    def _on_file_deleted(self, path: str, is_dir: bool):
+        """文件树删除文件/文件夹后，同步关闭所有（含分屏）已打开的对应标签页"""
+        for tabs in [self.editor_tabs, *self.view_coordinator.split_tabs]:
+            tabs.close_tabs_of_deleted_path(path, is_dir)
+
+    def _on_untitled_save_from_tree(self, source_tabs, tab_id: int, dest_folder: str):
+        """3.5.11：未命名标签拖到文件树 → 落盘保存（一行委托）"""
+        source_tabs.save_untitled_to_folder(tab_id, dest_folder)
 
     # === 设置 ===
 
@@ -1082,7 +1288,10 @@ class MainWindow(QMainWindow):
 
     def _auto_save(self):
         """自动保存"""
-        if self.editor_tabs.has_modified_files():
+        if any(
+            tabs.has_modified_files()
+            for tabs in [self.editor_tabs, *self.view_coordinator.split_tabs]
+        ):
             self._save_to_temp()
 
     def _update_stats(self):

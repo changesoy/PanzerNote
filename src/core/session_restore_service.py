@@ -60,6 +60,10 @@ class SessionRestoreService:
 
         for idx, entry in enumerate(open_files):
             entry_with_index = {"index": idx, **entry}
+            if entry.get("is_new"):
+                # 3.5.10：未命名文件同步恢复（无 IO 开销），保持原编号与内容
+                pre_show_entries.append(entry_with_index)
+                continue
             filepath = entry.get("path")
             if filepath and os.path.exists(filepath):
                 ext = os.path.splitext(filepath)[1].lower()
@@ -88,6 +92,14 @@ class SessionRestoreService:
             pre_show_entries, deferred_entries = self.build_restore_plan(open_files)
 
             for entry in pre_show_entries:
+                if entry.get("is_new"):
+                    # 3.5.10：未命名文件恢复（沿用编号，dirty 内容一并还原）
+                    editor_tabs.restore_untitled_file(
+                        entry.get("untitled_number") or 1,
+                        entry.get("display_name", "未命名"),
+                        entry.get("content"),
+                    )
+                    continue
                 filepath = entry.get("path")
                 if filepath and os.path.exists(filepath):
                     index = editor_tabs.open_file(
@@ -97,7 +109,7 @@ class SessionRestoreService:
                         render_preview=False,
                     )
                     if index >= 0:
-                        self._restore_cursor(editor_tabs, entry, index)
+                        self.restore_cursor(editor_tabs, entry, index)
 
             self._pending_files = deferred_entries
 
@@ -124,12 +136,12 @@ class SessionRestoreService:
                 render_preview=True,
             )
             if index >= 0:
-                self._restore_cursor(editor_tabs, file_info, index)
+                self.restore_cursor(editor_tabs, file_info, index)
 
         return bool(self._pending_files)
 
-    def _restore_cursor(self, editor_tabs, file_info: dict, tab_index: int) -> None:
-        """恢复指定索引标签的光标位置"""
+    def restore_cursor(self, editor_tabs, file_info: dict, tab_index: int) -> None:
+        """恢复指定索引标签的光标/滚动位置（分屏会话恢复亦复用此方法）"""
         cursor_pos = file_info.get("cursor_position")
         scroll_pos = file_info.get("scroll_position")
         if cursor_pos is None and scroll_pos is None:
@@ -207,21 +219,35 @@ class SessionRestoreService:
         editor_tabs,
         session: dict,
         session_manager: TempSessionManager,
+        split_tabs=None,
     ) -> int:
         """恢复崩溃会话的文件内容，返回成功恢复的文件数
 
         内部只使用 editor_tabs 的公开接口（open_file / new_file /
         set_tab_content / mark_tab_dirty），不穿透私有成员。
+
+        split_tabs（3.5.8 R6）：分屏面板列表。autosave 记录的 panel 归属
+        （main / split_N）决定恢复到哪个面板——强制关闭（任务管理器）时
+        workspace 未保存分屏布局，若全塞回主面板则分屏文件"漂移"到左侧。
         """
         session_dir = session.get("session_dir", "")
         files = session.get("files", [])
         restored = 0
+        panel_index = {f"split_{i}": t for i, t in enumerate(split_tabs or [])}
+        panel_index["main"] = editor_tabs
 
         for f in files:
             original_path = f.get("original_path", "")
             autosave_name = f.get("autosave_path", "")
             encoding = f.get("encoding", "UTF-8")
             is_new = f.get("is_new", False)
+            # 3.5.8（R6）：按面板归属路由；旧会话无 panel 字段 → 主面板兜底。
+            # 注意不能用 `get(panel) or main` 短路——未显示的面板 bool() 为 False，
+            # 会把分屏文件错误兜底到主面板（"漂移"到左侧）。
+            panel = f.get("panel", "main")
+            target_tabs = panel_index.get(panel)
+            if target_tabs is None:
+                target_tabs = panel_index["main"]
 
             content = session_manager.read_autosave_content(session_dir, autosave_name, encoding)
             if content is None:
@@ -237,22 +263,22 @@ class SessionRestoreService:
                         "恢复会话文件被安全策略拒绝: %s", original_path
                     )
                     continue
-                index = editor_tabs.open_file(validated)
+                index = target_tabs.open_file(validated)
                 if index >= 0:
-                    widget = editor_tabs.widget(index)
+                    widget = target_tabs.widget(index)
                     tab_id = getattr(widget, 'tab_id', None) if widget is not None else None
                     if tab_id is not None:
-                        editor_tabs.set_tab_content(tab_id, content)
-                        editor_tabs.mark_tab_dirty(tab_id)
+                        target_tabs.set_tab_content(tab_id, content)
+                        target_tabs.mark_tab_dirty(tab_id)
                         restored += 1
             else:
-                index = editor_tabs.new_file()
+                index = target_tabs.new_file()
                 if index >= 0:
-                    widget = editor_tabs.widget(index)
+                    widget = target_tabs.widget(index)
                     tab_id = getattr(widget, 'tab_id', None) if widget is not None else None
                     if tab_id is not None:
-                        editor_tabs.set_tab_content(tab_id, content)
-                        editor_tabs.mark_tab_dirty(tab_id)
+                        target_tabs.set_tab_content(tab_id, content)
+                        target_tabs.mark_tab_dirty(tab_id)
                         restored += 1
 
         session_manager.remove_recovered_session(session_dir)

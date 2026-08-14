@@ -24,6 +24,9 @@ from PyQt6.QtGui import QFont, QTextCursor, QColor, QTextCharFormat, QDrag, QAct
 
 from ..core.config import Config
 from ..core.document_model import TabState, TabStateRegistry
+from ..core.document_registry import DocumentRegistry
+from ..core.document_view_binding import DocumentViewBinding
+from ..core.shared_document import ViewState
 from ..utils.logger import get_logger
 from ..utils.error_handler import ErrorHandler, ErrorCategory
 from ..utils.feature_flags import is_enabled
@@ -120,6 +123,8 @@ class SaveAsDialog(QDialog):
 
 # 自定义 MIME 类型
 MIME_TAB_FILEPATH = "application/x-panzernote-tab-filepath"
+# 3.5.11：未命名标签（无 filepath）拖拽时携带 tab_id，供迁移/落盘定位源标签
+MIME_TAB_ID = "application/x-panzernote-tab-id"
 
 
 class DraggableTabBar(QTabBar):
@@ -159,7 +164,10 @@ class DraggableTabBar(QTabBar):
 
         # 只有鼠标离开标签栏区域才发起外部拖拽
         if self.rect().contains(event.pos()):
-            super().mouseMoveEvent(event)
+            # 3.5.8（R6）：不调用 super() 的原生 movable 逻辑——原生行为是
+            # 拖动中途扫过其它标签就实时 moveTab 换位，用户拖拽会被"替换"。
+            # 改为只在鼠标释放时按落点一次性落位（见 mouseReleaseEvent）。
+            event.accept()
             return
 
         # 距离阈值
@@ -168,26 +176,51 @@ class DraggableTabBar(QTabBar):
             super().mouseMoveEvent(event)
             return
 
-        # 获取该标签对应的文件路径
-        tab_widget = self.parent()  # QTabWidget
+        # 获取该标签对应的 tab_id 与文件路径（3.5.11：未命名标签无路径也可拖拽）
+        tab_widget = cast(QTabWidget, self.parent())
         if not tab_widget or not hasattr(tab_widget, '_get_filepath_for_index'):
             super().mouseMoveEvent(event)
             return
 
-        filepath = tab_widget._get_filepath_for_index(self._drag_tab_index)
-        if not filepath:
+        widget = tab_widget.widget(self._drag_tab_index)
+        tab_id = getattr(widget, 'tab_id', None) if widget else None
+        if tab_id is None:
             super().mouseMoveEvent(event)
             return
 
+        filepath = tab_widget._get_filepath_for_index(self._drag_tab_index) or ""
+
         # 发起 QDrag
+        # 注意：MIME_TAB_FILEPATH 仅对已保存文件设置——空数据格式在平台拖拽协议中
+        # 可能被丢弃，导致目标 hasFormat 判断失败；未命名标签靠 MIME_TAB_ID 识别。
         drag = QDrag(self)
         mime = QMimeData()
-        mime.setData(MIME_TAB_FILEPATH, filepath.encode('utf-8'))
-        mime.setText(os.path.basename(filepath))
+        mime.setData(MIME_TAB_ID, str(tab_id).encode('utf-8'))
+        if filepath:
+            mime.setData(MIME_TAB_FILEPATH, filepath.encode('utf-8'))
+            mime.setText(os.path.basename(filepath))
         drag.setMimeData(mime)
 
         result = drag.exec(Qt.DropAction.MoveAction | Qt.DropAction.CopyAction)
         self._drag_tab_index = -1
+
+    def mouseReleaseEvent(self, event):
+        # 3.5.8（R6）：标签栏内拖动结束时按落点一次性落位（替代原生实时换位）。
+        # moveTab 会 emit tabMoved，QTabWidget 据此同步 widget 顺序。
+        # 注意：落位后必须直接 return，不能调用 super().mouseReleaseEvent()——
+        # QTabBar 原生释放逻辑会再做一次内部换位，与 moveTab 叠加导致落位偏差。
+        if (
+            event.button() == Qt.MouseButton.LeftButton
+            and self._drag_tab_index >= 0
+            and self.rect().contains(event.pos())
+        ):
+            target = self.tabAt(event.pos())
+            if target >= 0 and target != self._drag_tab_index:
+                self.moveTab(self._drag_tab_index, target)
+            self._drag_tab_index = -1
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
 
 # ════════════════════════════════════════════════════════
@@ -268,6 +301,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         config: Config,
         theme_engine,
         webengine_runtime: WebEngineRuntime | None = None,
+        document_registry=None,
+        session_manager=None,
+        panel_name: str = "main",
         parent=None,
     ):
         super().__init__(parent)
@@ -276,6 +312,12 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self.config = config
         self._theme_engine = theme_engine
         self._webengine_runtime = webengine_runtime
+        # 3.5.8（R6）：面板标识——崩溃恢复时 autosave 按此字段路由回原面板
+        # （主面板 "main"，分屏 "split_0" / "split_1" ...）
+        self._panel_name = panel_name
+        # 3.5.8（批次 4a）：跨面板共享 DocumentRegistry——主面板与分屏注入同一实例，
+        # 多 View 打开同一文件时共享同一 Document（规格 2.1）。未传入时自建（独立使用）。
+        self._document_registry = document_registry or DocumentRegistry()
 
         self._registry = TabStateRegistry()
         self._next_tab_id = 0
@@ -290,14 +332,23 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self._pending_save_info: Dict[int, Dict] = {}
         self._pending_save_as_info: Dict[int, Dict] = {}
 
-        self._session_manager = TempSessionManager(config.get_temp_path(), config.get_file_guard())
+        # 3.5.8（批次 4e）：分屏注入主面板的 TempSessionManager——所有面板写同一
+        # session，同一 Document 的 autosave 只写一份（规格 3.2）；未传入时自建。
+        self._session_manager = (
+            session_manager
+            or TempSessionManager(config.get_temp_path(), config.get_file_guard())
+        )
 
         self._tab_bar = DraggableTabBar(self)
         self.setTabBar(self._tab_bar)
 
         self.setTabsClosable(True)
-        self.setMovable(True)
+        # 3.5.8（R6）：禁用原生 movable——原生拖拽扫过其它标签会实时 moveTab
+        # "替换"拖拽对象。内部 reorder 由 DraggableTabBar 自行接管（释放时落位）。
+        self.setMovable(False)
         self.setDocumentMode(True)
+        # 3.5.4：接受跨分屏标签迁移拖拽（MIME_TAB_FILEPATH）
+        self.setAcceptDrops(True)
 
         self.tabCloseRequested.connect(self._on_tab_close_requested)
         self.currentChanged.connect(self._on_current_changed)
@@ -317,6 +368,20 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         super().tabInserted(index)
         btn = _TabCloseButton(self._theme_engine, self)
         self.tabBar().setTabButton(index, QTabBar.ButtonPosition.RightSide, btn)  # type: ignore[union-attr]
+        # 3.5.12：迁移过来的标签 tab_id 已存在，先刷新 tooltip（未注册时显示「未保存」）
+        self._update_tab_tooltip(index)
+
+    def _update_tab_tooltip(self, index: int) -> None:
+        """3.5.12：标签 tooltip 区分已保存（完整路径）与未保存（「未保存」）。"""
+        widget = self.widget(index)
+        tab_id = getattr(widget, 'tab_id', None)
+        if tab_id is None:
+            return
+        state = self._registry.get(tab_id)
+        if state is not None and state.filepath and not state.is_new:
+            self.setTabToolTip(index, state.filepath)
+        else:
+            self.setTabToolTip(index, "未保存")
 
     def set_find_bar(self, find_bar: FindReplaceBar):
         """设置外部传入的查找替换栏"""
@@ -334,6 +399,11 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     def registry(self) -> TabStateRegistry:
         """类型化的文档状态注册表（替代 _tab_info dict）"""
         return self._registry
+
+    @property
+    def document_registry(self):
+        """跨面板共享的 DocumentRegistry（3.5.8：Document 生命周期全局唯一）"""
+        return self._document_registry
 
     def _get_filepath_for_index(self, index: int) -> Optional[str]:
         """获取指定标签页的文件路径（供 DraggableTabBar 使用）"""
@@ -384,34 +454,184 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self._next_tab_id += 1
         return tab_id
 
+    # === 3.5.4 跨分屏标签迁移（拖拽） ===
+
+    def dragEnterEvent(self, event):
+        """接受标签迁移拖拽（MIME_TAB_FILEPATH / MIME_TAB_ID）；其余放行给窗口级拖放。"""
+        if (event.mimeData().hasFormat(MIME_TAB_FILEPATH)
+                or event.mimeData().hasFormat(MIME_TAB_ID)):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        """跨分屏标签迁移：源标签栏位于另一个 EditorTabWidget 时执行迁移。"""
+        source = event.source()
+        if not (event.mimeData().hasFormat(MIME_TAB_FILEPATH)
+                or event.mimeData().hasFormat(MIME_TAB_ID)):
+            event.ignore()
+            return
+        if not isinstance(source, DraggableTabBar):
+            event.ignore()
+            return
+        source_tabs = source.parent()
+        if not isinstance(source_tabs, EditorTabWidget) or source_tabs is self:
+            event.ignore()
+            return
+        index = source._drag_tab_index
+        if index < 0 or index >= source_tabs.count():
+            event.ignore()
+            return
+        if self._migrate_tab_from(source_tabs, index):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def _migrate_tab_from(self, source_tabs: "EditorTabWidget", index: int) -> bool:
+        """把源面板 index 位置的标签迁移到本面板（脏标记不丢）。
+
+        顺序关键：取信息 → 源移除/注销 → 目标添加/注册 → 提升 _next_tab_id。
+        源移除后 emit tab_count_changed（空分屏自动关闭 / 主面板空会话兜底联动）。
+        """
+        if source_tabs is self:
+            return False
+        widget = source_tabs.widget(index)
+        if widget is None:
+            return False
+        tab_id = getattr(widget, 'tab_id', None)
+        if tab_id is None:
+            return False
+        state = source_tabs._registry.get(tab_id)
+        if state is None:
+            return False
+        if source_tabs._save_manager.is_saving(tab_id):
+            return False  # 保存中拒绝迁移，避免跨面板保存状态机竞态
+        title = source_tabs.tabText(index)
+
+        # 3.5.8（批次 4e，规格 2.5）：目标面板已有同一 Document 的 View →
+        # 合并：源直接关闭（不迁移 widget），保留目标已有 View 的 ViewState。
+        # 不销毁 Document（目标仍持有）；未命名编号不动（编号属 Document）。
+        shared_doc = getattr(widget, "shared_doc", None)
+        if shared_doc is not None:
+            target_has_same_doc = any(
+                getattr(self.widget(i), "shared_doc", None) is shared_doc
+                for i in range(self.count())
+            )
+            if target_has_same_doc:
+                source_tabs.removeTab(index)
+                source_tabs._registry.unregister(tab_id)
+                source_tabs._save_manager.unregister_tab(tab_id)
+                source_tabs._document_registry.detach_view(
+                    shared_doc.document_id, widget
+                )
+                source_tabs._detach_shared_from_widget(widget)
+                source_tabs._disconnect_doc_binding(widget)
+                source_tabs.tab_count_changed.emit(source_tabs.count())
+                for i in range(self.count()):
+                    if getattr(self.widget(i), "shared_doc", None) is shared_doc:
+                        self.setCurrentIndex(i)
+                        break
+                return True
+
+        # 3.5.7：迁移前断开源面板的信号绑定，否则编辑器 textChanged 仍指向源面板
+        # （源面板已注销该 tab → 槽内 state 为 None 直接返回），脏标记/标题更新失效。
+        editor = source_tabs._get_editor_from_widget(widget)
+        if editor is not None:
+            source_tabs._disconnect_editor_signals(editor)
+
+        # 源：移除标签 + 注销状态（removeTab 为原生方法，不触发关闭确认）
+        source_tabs.removeTab(index)
+        source_tabs._registry.unregister(tab_id)
+        source_tabs._save_manager.unregister_tab(tab_id)
+        # 3.5.8（批次 5，规格 2.6）：共享 Document 信号绑定随 View 迁移——
+        # 源面板断开本 View 绑定（目标面板 addTab 后 _connect_doc_binding 重建）。
+        shared_doc = getattr(widget, "shared_doc", None)
+        if shared_doc is not None:
+            source_tabs._disconnect_doc_binding(widget)
+        source_tabs.tab_count_changed.emit(source_tabs.count())
+
+        # 目标：添加标签 + 注册状态（tabInserted 自动重建关闭按钮）
+        self.addTab(widget, title)
+        self._registry.register(tab_id, state)
+        self._save_manager.register_tab(tab_id)
+        if editor is not None:
+            self._connect_editor_signals(editor)
+        self._connect_doc_binding(widget)  # 重建 Document 信号绑定（按 View 粒度）
+        # 3.5.11：未命名标签迁移，编号随标签转移（源释放、目标占用）
+        if state.is_new and state.untitled_number is not None:
+            source_tabs._used_untitled_numbers.discard(state.untitled_number)
+            self._used_untitled_numbers.add(state.untitled_number)
+        # 关键：每个面板 _next_tab_id 独立计数，提升避免未来生成重复 tab_id
+        self._next_tab_id = max(self._next_tab_id, tab_id + 1)
+        self._update_tab_tooltip(self.indexOf(widget))
+        self.tab_count_changed.emit(self.count())
+        return True
+
     def new_file(self) -> int:
         """新建文件"""
         num = self._get_next_untitled_number()
+        return self._create_untitled_tab(num, f"未命名{num}.txt")
+
+    def restore_untitled_file(
+        self,
+        untitled_number: int,
+        display_name: str,
+        content: Optional[str] = None,
+    ) -> int:
+        """3.5.10：按持久化配置恢复未命名标签（沿用原编号并标记已用）。
+
+        content 非 None 时写入内容并标记 dirty（编辑过的未命名现场还原）。
+        """
+        index = self._create_untitled_tab(untitled_number, display_name or f"未命名{untitled_number}.txt")
+        if content is not None:
+            tab_id = getattr(self.widget(index), 'tab_id', None)
+            if tab_id is not None:
+                self.set_tab_content(tab_id, content)
+                self.mark_tab_dirty(tab_id)
+        return int(index)
+
+    def _create_untitled_tab(self, num: int, title: str) -> int:
+        """创建未命名标签页（new_file / restore_untitled_file 共用）
+
+        3.5.8（R4 未命名共享入口）：未命名 tab 也创建共享 Document 并 attach——
+        生命周期与具名文件统一（close 决策树 / Save As / 迁移 / 编号释放全部
+        作用 Document），为「未命名文件跨面板共享」铺路。
+        """
         self._used_untitled_numbers.add(num)
-        title = f"未命名{num}.txt"
+
+        # R4：未命名 Document（is_new=True，无路径）；编号沿用面板编号池
+        shared_doc = self._document_registry.create_untitled(
+            untitled_number=num,
+            display_name=title,
+        )
 
         editor = Editor(self.config, theme_engine=self._theme_engine)
+        editor.attach_shared_document(shared_doc)
         self._connect_editor_signals(editor)
+        self._connect_doc_binding(editor)
         editor.set_file_type(".txt")
 
         index = self.addTab(editor, title)
 
         tab_id = self._generate_tab_id()
         editor.tab_id = tab_id
+        setattr(editor, "view_state", ViewState.new())  # 3.5.8（批次 5，ViewState 接线）
         self._registry.register(tab_id, TabState(
             tab_id=tab_id,
             filepath=None,
             display_name=title,
             is_new=True,
             untitled_number=num,
-            encoding="UTF-8",
-            eol=self.config.get_editor_setting("line_ending", "LF"),
+            encoding=shared_doc.encoding,
+            eol=shared_doc.eol,
             is_markdown=False,
         ))
         self._save_manager.register_tab(tab_id)
+        self._document_registry.attach_view(shared_doc.document_id, editor)
 
         self.setCurrentIndex(index)
         self.tab_count_changed.emit(self.count())
+        self._update_tab_tooltip(index)
         return int(index)
 
     def _is_markdown_file(self, filepath: str) -> bool:
@@ -438,6 +658,17 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                     if activate:
                         self.setCurrentIndex(i)
                     return i
+
+        # 3.5.8（批次 4b，规格 2.1 自动共享）：另一面板已打开同一文件 →
+        # 不重新读盘，直接新建 View attach 到共享 Document（内容/编码/eol 属 Document）。
+        shared_doc = self._document_registry.get_by_path(filepath)
+        if shared_doc is not None:
+            return self._create_shared_view(
+                shared_doc,
+                activate=activate,
+                insert_index=insert_index,
+                render_preview=render_preview,
+            )
 
         # 读取文件内容，检测编码
         file_guard = self.config.get_file_guard()
@@ -491,22 +722,37 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
         is_md = self._is_markdown_file(filepath)
 
+        # 3.5.8（批次 4b）：Document 全局唯一——读盘成功后注册共享 Document，
+        # 所有 View attach 到同一 QTextDocument（内容/编码/eol 属 Document）。
+        # 若 registry 已命中（另一面板已打开），会走上方共享分支，不会到这里。
+        shared_doc = self._document_registry.create_from_path(
+            filepath,
+            content,
+            encoding=detected_encoding,
+            eol=eol_label,
+            is_markdown=is_md,
+        )
+
         if is_md:
             widget = MarkdownPreviewWidget(
                 self.config,
                 theme_engine=self._theme_engine,
                 webengine_runtime=self._webengine_runtime,
             )
-            widget.editor.load_content(content)
+            widget.editor.attach_shared_document(shared_doc)
+            widget.editor.load_content(content)  # 幂等重建补全词集/折叠（内容相同）
             self._connect_editor_signals(widget.editor)
+            self._connect_doc_binding(widget)
             widget.editor.set_file_type(filepath)
             widget.set_base_path(os.path.dirname(os.path.abspath(filepath)))
             if render_preview:
                 widget.refresh_preview_now()
         else:
             widget = Editor(self.config, theme_engine=self._theme_engine)
-            widget.load_content(content)
+            widget.attach_shared_document(shared_doc)
+            widget.load_content(content)  # 幂等重建补全词集/折叠（内容相同）
             self._connect_editor_signals(widget)
+            self._connect_doc_binding(widget)
             widget.set_file_type(filepath)
 
         filename = os.path.basename(filepath)
@@ -517,6 +763,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
         tab_id = self._generate_tab_id()
         widget.tab_id = tab_id
+        setattr(widget, "view_state", ViewState.new())  # 3.5.8（批次 5，ViewState 接线）
 
         # 如果是MarkdownPreviewWidget，也设置editor的tab_id
         if is_md and isinstance(widget, MarkdownPreviewWidget):
@@ -534,10 +781,12 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             is_markdown=is_md,
         ))
         self._save_manager.register_tab(tab_id)
+        self._document_registry.attach_view(shared_doc.document_id, widget)
 
         if activate:
             self.setCurrentIndex(index)
         self.tab_count_changed.emit(self.count())
+        self._update_tab_tooltip(index)
 
         # 恢复书签
         saved_bookmarks = self.config.get_bookmarks(filepath)
@@ -578,6 +827,77 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                             vbar.rangeChanged.connect(_apply_scroll)
             self.config.clear_closed_tab_memory(filepath)
 
+        return int(index)
+
+    def _create_shared_view(
+        self,
+        shared_doc,
+        *,
+        activate: bool = True,
+        insert_index: int | None = None,
+        render_preview: bool = True,
+    ) -> int:
+        """为已有共享 Document 创建新 View（规格 2.1 自动共享）。
+
+        跨面板打开同一文件时由 open_file 调用：不重新读盘——内容、编码、eol
+        均属 Document（SharedDocument 已持有）；View 只 attach 共享 QTextDocument，
+        编辑/undo 与其它 View 天然同步。
+        """
+        is_md = shared_doc.is_markdown
+        widget: "Editor | MarkdownPreviewWidget"
+        if is_md:
+            widget = MarkdownPreviewWidget(
+                self.config,
+                theme_engine=self._theme_engine,
+                webengine_runtime=self._webengine_runtime,
+            )
+            editor = widget.editor
+        else:
+            widget = Editor(self.config, theme_engine=self._theme_engine)
+            editor = widget
+
+        editor.attach_shared_document(shared_doc)
+        self._connect_editor_signals(editor)
+        self._connect_doc_binding(widget)
+        if shared_doc.filepath:
+            editor.set_file_type(shared_doc.filepath)
+        if is_md:
+            md_widget = cast(MarkdownPreviewWidget, widget)
+            md_widget.set_base_path(
+                os.path.dirname(os.path.abspath(shared_doc.filepath or "."))
+            )
+            if render_preview:
+                md_widget.refresh_preview_now()
+
+        filename = shared_doc.display_name
+        if insert_index is not None:
+            index = self.insertTab(insert_index, widget, filename)
+        else:
+            index = self.addTab(widget, filename)
+
+        tab_id = self._generate_tab_id()
+        widget.tab_id = tab_id
+        editor.tab_id = tab_id
+        setattr(widget, "view_state", ViewState.new())  # 3.5.8（批次 5，ViewState 接线）
+
+        self._registry.register(tab_id, TabState(
+            tab_id=tab_id,
+            filepath=shared_doc.filepath,
+            is_new=shared_doc.filepath is None,
+            encoding=shared_doc.encoding,
+            eol=shared_doc.eol,
+            last_saved_content=shared_doc.to_plain_text(),
+            last_saved_chars=len(shared_doc.to_plain_text()),
+            last_text_length=len(shared_doc.to_plain_text()),
+            is_markdown=is_md,
+        ))
+        self._save_manager.register_tab(tab_id)
+        self._document_registry.attach_view(shared_doc.document_id, widget)
+
+        if activate:
+            self.setCurrentIndex(index)
+        self.tab_count_changed.emit(self.count())
+        self._update_tab_tooltip(index)
         return int(index)
 
     def save_current(self) -> Tuple[bool, int]:
@@ -635,6 +955,19 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if filepath.lower().endswith((".html", ".htm")):
             return self._save_as_html(widget, filepath)
 
+        # 3.5.8（批次 4d，规格 2.2）：另存为的目标路径已被其它已打开 Document
+        # 占用（含副本写向其它面板已打开文件的路径）→ 拒绝，避免两个 Document
+        # 指向同一路径。reserve 占位 pending，成功/失败回调负责 commit / cancel。
+        shared_doc = getattr(widget, "shared_doc", None)
+        if shared_doc is not None:
+            if not self._document_registry.reserve_path(shared_doc.document_id, filepath):
+                QMessageBox.warning(
+                    self,
+                    "另存为",
+                    f"该文件已在其他面板打开，不能另存为到同一路径：\n{filepath}",
+                )
+                return False, 0
+
         success, chars = self._save_file(
             widget, filepath, encoding, is_copy=not state.is_new
         )
@@ -650,6 +983,49 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                     "is_copy": not state.is_new,
                 }
 
+        return success, chars
+
+    def save_untitled_to_folder(self, tab_id: int, dest_folder: str) -> Tuple[bool, int]:
+        """3.5.11：把未命名标签直接落盘保存到目标文件夹（拖到文件树触发）。
+
+        复用通用保存链路：_save_file + _pending_save_as_info → CLEAN 回调自动完成
+        mark_new_saved / 编号释放 / 标题更新（与 save_current_as 一致）。
+        同名冲突弹框确认（默认不覆盖）；空内容也直接落盘（行为统一）。
+        """
+        state = self._registry.get(tab_id)
+        if state is None or not state.is_new or state.filepath:
+            return False, 0
+        widget = None
+        for i in range(self.count()):
+            w = self.widget(i)
+            if getattr(w, 'tab_id', None) == tab_id:
+                widget = w
+                break
+        if widget is None:
+            return False, 0
+
+        filename = state.display_name or f"未命名{state.untitled_number or 1}.txt"
+        filepath = os.path.join(dest_folder, filename)
+
+        if os.path.exists(filepath):
+            reply = QMessageBox.question(
+                self,
+                "文件已存在",
+                f"目标文件夹已存在同名文件：\n{filepath}\n\n是否覆盖？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return False, 0
+
+        success, chars = self._save_file(widget, filepath, state.encoding)
+        if success:
+            self._pending_save_as_info[tab_id] = {
+                "filepath": filepath,
+                "encoding": state.encoding,
+                "untitled_number": state.untitled_number if state.is_new else None,
+                "is_copy": False,
+            }
         return success, chars
 
     def _save_as_pdf(self, widget, filepath: str) -> Tuple[bool, int]:
@@ -768,8 +1144,42 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if tab_id is None:
             return False, 0
 
+        # 3.5.8（R3 接线）：共享 Document 的保存任务按 document_key 合并——
+        # 同一 Document 多个 View 同时保存时只允许一个实际写盘任务，避免
+        # 并发写同一文件；未共享时 document_key=None，保持原 tab 级行为。
+        shared_doc = getattr(widget, "shared_doc", None)
+        document_key = shared_doc.document_id if shared_doc is not None else None
+
+        # 3.5.8（跨面板并发写盘防护）：document_key 合并仅在本面板的
+        # SaveTaskManager 内有效（各面板 Manager 相互独立），无法阻止主面板与
+        # 分屏并发保存同一共享文件。safe_write 已原子化（临时文件 + os.replace，
+        # 文件不会字节交错损坏），但并发时旧快照可能最后落盘覆盖新内容；且
+        # Document 级 dirty/保存状态需要单一权威。这里以 Document 级保存状态机
+        # （SAVING/IDLE/FAILED）作为跨面板唯一门闩——同一 Document 全局同时
+        # 最多一个实际写盘任务，最新内容必然最后落盘。
+        # 仅限「写回当前绑定路径」的正常保存；副本另存为 / 未命名首次保存
+        # （目标路径尚未绑定）不参与，避免误拦跨路径保存。
+        gated = (shared_doc is not None and not is_copy
+                 and shared_doc.filepath is not None and filepath == shared_doc.filepath)
+
         if self._save_manager.is_saving(tab_id):
+            # 3.5.8 单槽合并：保存中再次保存请求 → 仅置 pending，不并发写盘
+            self._save_manager.request_resave(tab_id, document_key=document_key)
+            if gated:
+                # 同面板保存中再次请求 → 置 Document 级 pending，由
+                # _on_shared_save_finished 统一兜底补保存
+                assert shared_doc is not None  # gated 蕴含 shared_doc 非空
+                shared_doc.pending_save = True
             return False, 0
+
+        snapshot = None
+        if gated:
+            assert shared_doc is not None  # gated 蕴含 shared_doc 非空
+            snapshot = shared_doc.request_save()
+            if snapshot is None:
+                # 另一面板正在保存同一 Document：内容共享，本次请求已并入（已置
+                # pending_save，保存完成后若内容已变会自动补保存）→ 视为已受理。
+                return True, 0
 
         state = self._registry.get(tab_id)
         if state is None:
@@ -794,15 +1204,72 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
         from PyQt6.QtCore import QThreadPool
         from .save_task import SaveTask
-        from .eol_utils import normalize_eol
 
         task = SaveTask(self.config.get_file_guard(), filepath, content, encoding.lower())
-        self._save_manager.submit_task(tab_id, task)
+        # 3.5.8：提交时附带内容快照 + 当前内容提供者，保存成功按「当前 == 快照」判定
+        # dirty（保存期间继续编辑不误清）；on_resave 用于单槽合并补保存。
+        self._save_manager.submit_task(
+            tab_id, task,
+            snapshot=content,
+            provider=lambda: self._current_normalized_content(widget, target_eol),
+            on_resave=lambda: self._on_resave_requested(tab_id),
+            document_key=document_key,
+        )
+        if gated:
+            # Document 级保存门闩释放：直接连接任务完成信号（在面板 Manager
+            # 回调之后触发，连接顺序保证）——即使标签已注销、面板级回调提前
+            # 返回，门闩也会释放，避免 Document 卡死 SAVING 使后续保存被永久合并。
+            task.signals.finished.connect(
+                lambda success, fp, exc, sd=shared_doc, snap=snapshot, tid=tab_id:
+                    self._on_shared_save_finished(sd, snap, tid, success)
+            )
         pool = QThreadPool.globalInstance()
         if pool is not None:
             pool.start(task)
 
         return True, 0
+
+    def _current_normalized_content(self, widget, target_eol: str) -> str:
+        """当前编辑器内容（按目标 EOL 规范化），用于保存成功时的 snapshot 判定。"""
+        if isinstance(widget, MarkdownPreviewWidget):
+            raw = widget.editor.toPlainText()
+        elif isinstance(widget, Editor):
+            raw = widget.toPlainText()
+        else:
+            return ""
+        from .eol_utils import normalize_eol
+        return normalize_eol(raw, target_eol)
+
+    def _on_resave_requested(self, tab_id: int) -> None:
+        """单槽合并补保存：保存成功但内容已变且保存期间有 pending 请求。
+
+        以最新内容重新提交一次保存；未命名首次保存（filepath 尚为空）期间
+        编辑的场景跳过——此时对话框流程尚未完成，下次 Ctrl+S 正常覆盖。
+        """
+        for i in range(self.count()):
+            widget = self.widget(i)
+            if getattr(widget, 'tab_id', None) != tab_id:
+                continue
+            state = self._registry.get(tab_id)
+            if state and state.filepath:
+                self._save_file(widget, state.filepath, state.encoding)
+            return
+
+    def _on_shared_save_finished(self, shared_doc, snapshot, tab_id: int,
+                                 success: bool) -> None:
+        """共享 Document 保存完成回调（3.5.8 跨面板保存门闩释放）。
+
+        直接连接 SaveTask.signals.finished（在面板 SaveTaskManager 回调之后
+        触发，连接顺序保证，此时面板状态已恢复 idle）：
+        - 成功：on_save_succeeded 按「当前内容 == 快照」判定 Document dirty；
+          返回 True（保存期间编辑 + pending 请求）→ 以最新内容补保存一次。
+        - 失败：on_save_failed → FAILED、保持 dirty，由用户重新触发。
+        """
+        if success:
+            if shared_doc.on_save_succeeded(snapshot):
+                self._on_resave_requested(tab_id)
+        else:
+            shared_doc.on_save_failed()
 
     def save_all(self) -> int:
         total_chars = 0
@@ -811,15 +1278,21 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         for i in range(self.count()):
             widget = self.widget(i)
             tab_id = getattr(widget, 'tab_id', None)
-            if tab_id is not None:
-                state = self._registry.get(tab_id)
-                if state and state.is_modified:
-                    if state.filepath and not state.is_new:
-                        success, chars = self._save_file(widget, state.filepath, state.encoding)
-                        if success:
-                            total_chars += chars
-                    else:
-                        unnamed_indices.append(i)
+            if tab_id is None:
+                continue
+            state = self._registry.get(tab_id)
+            is_modified = bool(state and state.is_modified)
+            # 3.5.8（R2）：共享 Document 以 Document 侧 dirty 为准（同 _close_tab）
+            shared_doc = getattr(widget, "shared_doc", None)
+            if shared_doc is not None and shared_doc.dirty:
+                is_modified = True
+            if is_modified and state is not None:
+                if state.filepath and not state.is_new:
+                    success, chars = self._save_file(widget, state.filepath, state.encoding)
+                    if success:
+                        total_chars += chars
+                else:
+                    unnamed_indices.append(i)
 
         for i in unnamed_indices:
             self.setCurrentIndex(i)
@@ -828,6 +1301,48 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 total_chars += chars
 
         return total_chars
+
+    def save_all_for_close(self) -> bool:
+        """保存本面板所有 dirty 标签以关闭（3.5.7）。
+
+        与 save_all 的区别：任一未命名「另存为」被取消或保存提交失败 → 返回
+        False（调用方应中止关闭）；已保存文件走异步 `_save_file`，其最终成败由
+        SaveTaskManager 的 `all_tasks_finished` / `get_failed_tab_ids` 兜底。
+        与 get_unsaved_tab_infos 语义一致：空未命名不弹另存为。
+        """
+        unnamed_indices = []
+        for i in range(self.count()):
+            widget = self.widget(i)
+            tab_id = getattr(widget, 'tab_id', None)
+            if tab_id is None:
+                continue
+            state = self._registry.get(tab_id)
+            is_modified = bool(state and state.is_modified)
+            # 3.5.8（R2）：共享 Document 以 Document 侧 dirty 为准（同 _close_tab）
+            shared_doc = getattr(widget, "shared_doc", None)
+            if shared_doc is not None and shared_doc.dirty:
+                is_modified = True
+            if not is_modified or state is None:
+                continue
+            if state.filepath and not state.is_new:
+                success, _ = self._save_file(widget, state.filepath, state.encoding)
+                if not success:
+                    return False
+            else:
+                editor = self._get_editor_from_widget(widget)
+                content = editor.toPlainText() if editor else ""
+                if state.is_new and len(content.strip()) == 0:
+                    # 空未命名跳过（与 get_unsaved_tab_infos 一致，关闭确认框未列出）
+                    continue
+                unnamed_indices.append(i)
+
+        for i in unnamed_indices:
+            self.setCurrentIndex(i)
+            success, _ = self.save_current_as()
+            if not success:
+                return False
+
+        return True
 
     def save_all_to_temp(self):
         """保存所有 dirty 文件到暂存目录（通过 TempSessionManager 管理）
@@ -839,6 +1354,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         关闭时行为：由 mark_cleanly_closed / cleanup_session 管理
         """
         tab_infos = []
+        seen_doc_keys = set()
         for i in range(self.count()):
             widget = self.widget(i)
             tab_id = getattr(widget, 'tab_id', None)
@@ -856,13 +1372,26 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             else:
                 continue
 
+            # 3.5.8（批次 4e）：同一 Document 多个 View 只写一份 autosave——
+            # doc_key 稳定（document_id / filepath），用于文件名与去重（规格 3.2）
+            shared_doc = getattr(widget, "shared_doc", None)
+            if shared_doc is not None:
+                doc_key = shared_doc.document_id
+            else:
+                doc_key = state.filepath or f"untitled_{tab_id}"
+            if doc_key in seen_doc_keys:
+                continue
+            seen_doc_keys.add(doc_key)
+
             tab_infos.append({
                 "tab_id": tab_id,
                 "filepath": state.filepath,
                 "content": content,
                 "encoding": state.encoding,
                 "is_new": state.is_new,
-                "is_modified": True
+                "is_modified": True,
+                "doc_key": doc_key,
+                "panel": self._panel_name,
             })
 
         if tab_infos:
@@ -899,6 +1428,16 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     def close_all_tabs(self):
         while self.count() > 0:
             if not self._close_tab(0):
+                break
+
+    def force_close_all_tabs(self):
+        """无确认强制关闭全部标签（3.5.7：分屏「不保存并关闭」路径）。
+
+        已由调用方弹过汇总确认，此处跳过逐标签确认框（避免二次弹窗）；
+        清理逻辑与 _close_tab 一致（释放未命名编号、注销注册表）。
+        """
+        while self.count() > 0:
+            if not self._close_tab(0, force=True):
                 break
 
     def reopen_closed_tab(self) -> bool:
@@ -1014,6 +1553,13 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             cursor = widget.editor.textCursor().position()
             vbar = widget.editor.verticalScrollBar()
             scroll = vbar.value() if vbar is not None else 0
+        # 3.5.8（批次 5，ViewState 接线）：View 级位置快照 → view_state
+        # （workspace schema 不动，TabState.cursor_position/scroll_position 照旧由
+        # get_open_files_info 维护；view_state 供关闭/迁移时保留 View 侧状态）。
+        view_state = getattr(widget, "view_state", None)
+        if view_state is not None:
+            view_state.cursor_position = cursor
+            view_state.scroll_position = scroll
         self._closed_tabs_stack.append({
             "filepath": filepath,
             "cursor_position": cursor
@@ -1023,7 +1569,108 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if cursor is not None:
             self.config.set_closed_tab_memory(filepath, cursor, scroll)
 
-    def _close_tab(self, index: int) -> bool:
+    @staticmethod
+    def _detach_shared_from_widget(widget) -> None:
+        """解除 widget 与共享 Document 的 attach（Editor 或 Markdown 预览组件）。
+
+        3.5.8（批次 4c）：非最后 View 关闭前调用，避免 View 残留对共享
+        qdocument 的引用；SharedDocument 仍由其它 View 持有。
+        """
+        editor = getattr(widget, "editor", None)
+        if editor is not None:
+            editor.detach_shared_document()
+        elif isinstance(widget, Editor):
+            widget.detach_shared_document()
+
+    def _connect_doc_binding(self, widget) -> None:
+        """为 View 建立 Document-level 信号绑定（3.5.8 批次 5，规格 2.6）。
+
+        每个 View 一个 DocumentViewBinding（生命周期与 View 一致）：
+        dirtyChanged → 标题与脏标记；nameChanged → 标题跟随；
+        pathChanged → Markdown 预览 base_path 跟随（规格 2.8）。
+        替代 R2 面板级「面板 × Document」连接：按 View 粒度管理，关闭/迁移即断，
+        无 UniqueConnection 残留边界问题。迁移到本面板时先清旧绑定再重建。
+        """
+        shared_doc = getattr(widget, "shared_doc", None)
+        if shared_doc is None:
+            return
+        self._disconnect_doc_binding(widget)  # 幂等：避免重复 binding
+        binding = DocumentViewBinding(shared_doc, parent=widget)
+        binding.bind("dirtyChanged", lambda dirty: self._on_view_dirty(widget, dirty))
+        binding.bind("nameChanged", lambda name: self._on_view_renamed(widget, name))
+        binding.bind("pathChanged", lambda path: self._on_view_path_changed(widget, path))
+        binding.attach()
+        widget._doc_binding = binding
+
+    def _disconnect_doc_binding(self, widget) -> None:
+        """解除 View 的 Document 信号绑定（关闭/迁移前调用，幂等）。"""
+        binding = getattr(widget, "_doc_binding", None)
+        if binding is not None:
+            binding.detach()
+            widget._doc_binding = None
+
+    def _on_view_dirty(self, widget, dirty: bool) -> None:
+        """Document dirty 变化 → 本 View 标题与脏标记同步（dirty 单一源在 Document）。
+
+        3.5.8（批次 5，规格 2.6）：替代 R2 面板级 _on_shared_doc_dirty——按 View
+        粒度更新自己的标题，无需遍历面板内所有 View（面板内同 Document 至多一 View）。
+        """
+        tab_id = getattr(widget, "tab_id", None)
+        index = self.indexOf(widget)
+        if tab_id is None or index < 0:
+            return
+        state = self._registry.get(tab_id)
+        if state is None:
+            return
+        if dirty != state.is_modified:
+            state.is_modified = dirty
+            if dirty:
+                self._save_manager.mark_dirty(tab_id)
+        title = self.tabText(index)
+        stripped = self._strip_tab_suffix(title)
+        if dirty and not stripped.endswith(" *"):
+            self.setTabText(index, stripped + " *")
+        elif not dirty and stripped != title:
+            self.setTabText(index, stripped)
+
+    def _on_view_renamed(self, widget, name: str) -> None:
+        """Document 更名（Save As / 首次保存）→ 本 View 标题跟随（规格 2.2）。"""
+        index = self.indexOf(widget)
+        if index < 0:
+            return
+        title = self.tabText(index)
+        if title == name:
+            return
+        stripped = self._strip_tab_suffix(title)
+        self.setTabText(index, name + title[len(stripped):])
+
+    def _on_view_path_changed(self, widget, path: str) -> None:
+        """Document.pathChanged → 本 View 路径状态与预览基准跟随（规格 2.8）。
+
+        Save As（首次保存）或文件移动后 Document 换路径，pathChanged 广播给
+        所有 View：本面板的 TabState 同步指向新路径——否则其它面板的 View
+        仍持旧路径，保存会写回旧文件（数据错位）。
+        """
+        tab_id = getattr(widget, "tab_id", None)
+        if tab_id is not None:
+            state = self._registry.get(tab_id)
+            if state is not None and path:
+                state.filepath = path
+                state.display_name = os.path.basename(path)
+                if state.is_new:
+                    state.is_new = False
+        if not isinstance(widget, MarkdownPreviewWidget):
+            return
+        base = os.path.dirname(os.path.abspath(path)) if path else "."
+        widget.set_base_path(base)
+        widget.invalidate_preview()  # 下次激活/内容变化时以新基准重渲染
+
+    def _close_tab(self, index: int, *, force: bool = False) -> bool:
+        """关闭标签页。
+
+        force=True：跳过 dirty 确认框（调用方已确认），仅用于分屏
+        「不保存并关闭」的批量关闭。
+        """
         widget = self.widget(index)
         if not widget or not hasattr(widget, 'tab_id'):
             self.removeTab(index)
@@ -1039,6 +1686,22 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
         if self._save_manager.is_saving(tab_id):
             return False
+
+        # 3.5.8（批次 4c，规格 2.3）：共享 Document 还有其他 View →
+        # 直接关本 View：不弹确认、不销毁 Document、不动未命名编号（编号属 Document）。
+        # 只有最后一个 View 关闭才走 dirty 确认，成功后 release 销毁 Document。
+        shared_doc = getattr(widget, "shared_doc", None)
+        if shared_doc is not None:
+            doc_id = shared_doc.document_id
+            if self._document_registry.view_count(doc_id) > 1:
+                self._document_registry.detach_view(doc_id, widget)
+                self._detach_shared_from_widget(widget)
+                self._disconnect_doc_binding(widget)
+                self._save_manager.unregister_tab(tab_id)
+                self._registry.unregister(tab_id)
+                self.removeTab(index)
+                self.tab_count_changed.emit(self.count())
+                return True
 
         if isinstance(widget, MarkdownPreviewWidget):
             content = widget.editor.toPlainText()
@@ -1057,9 +1720,21 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             self._registry.unregister(tab_id)
             self.removeTab(index)
             self.tab_count_changed.emit(self.count())
+            if shared_doc is not None:
+                # 批次 5 修复：最后 View 关闭前断开 Document 依赖——否则共享高亮
+                # 随 Document 销毁后 widget 仍悬垂引用（切主题报 C++ deleted）
+                self._detach_shared_from_widget(widget)
+                self._document_registry.release(shared_doc.document_id)
             return True
 
-        if state.is_modified:
+        # 3.5.8（R2）：共享 Document 以 Document 侧 dirty 为准——其它 View 编辑
+        # 也会置脏，关闭最后一个 View 时不能只看本 View 的 state.is_modified
+        # （否则未编辑的那个 View 关闭会直接丢弃其它 View 的修改）。
+        is_modified = state.is_modified
+        if shared_doc is not None and shared_doc.dirty:
+            is_modified = True
+
+        if is_modified and not force:
             msg_box = QMessageBox(self)
             msg_box.setWindowTitle("保存文件")
             if is_new:
@@ -1107,6 +1782,11 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self._registry.unregister(tab_id)
         self.removeTab(index)
         self.tab_count_changed.emit(self.count())
+        # 3.5.8（批次 4c）：最后一个 View 关闭 → 销毁 Document
+        if shared_doc is not None:
+            # 批次 5 修复：最后 View 关闭前断开 Document 依赖，防高亮悬垂
+            self._detach_shared_from_widget(widget)
+            self._document_registry.release(shared_doc.document_id)
         return True
 
     def _show_tab_context_menu(self, position):
@@ -1209,6 +1889,29 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         editor.cursorPositionChanged.connect(self._on_cursor_position_changed)
         if is_enabled("signal_driven_stats"):
             editor.word_count_recomputed.connect(self._on_word_count_recomputed)
+        # 3.5.8（批次 5，规格 2.6）：Document dirty/name/path 信号改由
+        # DocumentViewBinding 按 View 粒度接入（_connect_doc_binding）——
+        # 不再面板级 UniqueConnection，避免 open→close 循环后残留连接。
+
+    def _disconnect_editor_signals(self, editor):
+        """解除编辑器与本面板的信号绑定（跨面板迁移前调用，3.5.7）。
+
+        标签拖到另一面板时，编辑器 widget 被 reparent，但 textChanged 等信号
+        仍指向源面板的槽；源面板已注销该 tab，脏标记/标题更新全部失效。
+        """
+        try:
+            editor.textChanged.disconnect(self._on_text_changed)
+        except (TypeError, RuntimeError):
+            pass
+        try:
+            editor.cursorPositionChanged.disconnect(self._on_cursor_position_changed)
+        except (TypeError, RuntimeError):
+            pass
+        if is_enabled("signal_driven_stats"):
+            try:
+                editor.word_count_recomputed.disconnect(self._on_word_count_recomputed)
+            except (TypeError, RuntimeError):
+                pass
 
     def _on_cursor_position_changed(self):
         self.cursor_position_changed.emit()
@@ -1302,6 +2005,12 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 # 跳过全部保存副作用（不清 dirty、不改标题、不结算收益），
                 # 避免原文件未保存的修改被误标记为已保存（数据安全）。
                 self._pending_save_info.pop(tab_id, None)
+                # 3.5.8（批次 4d）：副本路径不属当前 Document → 释放 pending 预留
+                shared_doc = getattr(widget, "shared_doc", None)
+                if shared_doc is not None:
+                    self._document_registry.cancel_reservation(
+                        shared_doc.document_id, save_as_info["filepath"]
+                    )
                 # 恢复标题（去除 SAVING 阶段追加的 ⏳ 后缀）
                 self.setTabText(index, base_title)
                 if tab_id in self._pending_close_tab_ids:
@@ -1334,9 +2043,15 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 if editor:
                     editor.set_file_type(filepath_new)
                 self.setTabText(index, os.path.basename(filepath_new))
+                # 3.5.8（批次 4d）：pending → path_index，Document 正式绑定新路径
+                # （nameChanged/pathChanged 驱动所有 View 标题同步）
+                shared_doc = getattr(widget, "shared_doc", None)
+                if shared_doc is not None:
+                    self._document_registry.commit_path(shared_doc, filepath_new)
 
             if state.filepath:
                 self._session_manager.remove_autosave_for_file(state.filepath)
+            self._update_tab_tooltip(index)
             self.file_saved.emit()
             if tab_id in self._pending_close_tab_ids:
                 self._pending_close_tab_ids.discard(tab_id)
@@ -1345,6 +2060,13 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             self.setTabText(index, base_title + " ⏳")
         elif save_state == SaveState.SAVE_FAILED:
             save_as_info = self._pending_save_as_info.pop(tab_id, None)
+            # 3.5.8（批次 4d）：另存为失败 → 释放路径预留（副本与非副本一致）
+            if save_as_info:
+                shared_doc = getattr(widget, "shared_doc", None)
+                if shared_doc is not None:
+                    self._document_registry.cancel_reservation(
+                        shared_doc.document_id, save_as_info["filepath"]
+                    )
             if save_as_info and save_as_info.get("is_copy"):
                 # 副本保存失败：当前标签状态不变（原文件未受影响），恢复标题
                 self._pending_save_info.pop(tab_id, None)
@@ -1389,6 +2111,14 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self._registry.unregister(tab_id)
         self.removeTab(index)
         self.tab_count_changed.emit(self.count())
+        # 3.5.8（批次 4c）：保存后关闭的最后 View → 销毁 Document
+        shared_doc = getattr(widget, "shared_doc", None)
+        if shared_doc is not None:
+            doc_id = shared_doc.document_id
+            if self._document_registry.view_count(doc_id) <= 1:
+                # 批次 5 修复：最后 View 关闭前断开 Document 依赖，防高亮悬垂
+                self._detach_shared_from_widget(widget)
+                self._document_registry.release(doc_id)
 
     def current_editor(self) -> Optional[Editor]:
         """获取当前编辑器"""
@@ -1469,10 +2199,67 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                         unsaved.append(self._strip_tab_suffix(self.tabText(i)))
         return unsaved
 
+    def get_unsaved_tab_infos(self) -> List[Dict]:
+        """返回本面板未保存标签的结构化信息（3.5.7 关闭确认用）。
+
+        与 get_unsaved_files 语义一致（跳过空未命名），但返回
+        `{"title": str, "filepath": Optional[str], "document_id": Optional[str]}` 列表，
+        供「未保存文件确认对话框」展示。document_id 供多面板聚合时去重
+        （共享 Document 在主面板与分屏各有一个 View，退出确认应只列一次）。
+        """
+        infos: List[Dict[str, Optional[str]]] = []
+        seen_docs = set()
+        for i in range(self.count()):
+            widget = self.widget(i)
+            tab_id = getattr(widget, 'tab_id', None)
+            if tab_id is None:
+                continue
+            state = self._registry.get(tab_id)
+            shared_doc = getattr(widget, "shared_doc", None)
+            doc_id = shared_doc.document_id if shared_doc is not None else None
+            is_modified = bool(state and state.is_modified)
+            # 3.5.8（R2）：共享 Document 以 Document 侧 dirty 为准——其它 View
+            # 编辑置脏时本 View 状态可能未同步（与 has_modified_files 同规则）；
+            # 同一共享 Document 在本面板只列一次（跨面板去重由调用方按 document_id 做）
+            if doc_id is not None:
+                if doc_id in seen_docs:
+                    continue
+                seen_docs.add(doc_id)
+                if not is_modified and shared_doc is not None:
+                    is_modified = shared_doc.dirty
+            if not is_modified or state is None:
+                continue
+            editor = self._get_editor_from_widget(widget)
+            content = editor.toPlainText() if editor else ""
+            if state.is_new and len(content.strip()) == 0:
+                continue
+            if state.filepath:
+                infos.append({
+                    "title": os.path.basename(state.filepath),
+                    "filepath": state.filepath,
+                    "document_id": doc_id,
+                })
+            else:
+                infos.append({
+                    "title": self._strip_tab_suffix(self.tabText(i)),
+                    "filepath": None,
+                    "document_id": doc_id,
+                })
+        return infos
+
     def has_modified_files(self) -> bool:
         for state in self._registry.all_states():
             if state.is_modified:
                 return True
+        # 3.5.8（R2）：共享 Document 侧 dirty（其它面板的 View 编辑）也算修改
+        seen_docs = set()
+        for i in range(self.count()):
+            widget = self.widget(i)
+            shared = getattr(widget, "shared_doc", None)
+            if shared is not None and shared.document_id not in seen_docs:
+                seen_docs.add(shared.document_id)
+                if shared.dirty:
+                    return True
         return False
 
     def get_current_file_info(self) -> Optional[Dict]:
@@ -1504,7 +2291,14 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             if tab_id is None:
                 continue
             state = self._registry.get(tab_id)
-            if state is None or state.is_new or not state.filepath:
+            if state is None:
+                continue
+            if state.is_new or not state.filepath:
+                # 3.5.10：未命名文件（dirty 时）同步内容，随条目恢复编辑现场
+                if state.is_modified:
+                    editor = self._get_editor_from_widget(widget)
+                    if editor is not None:
+                        state.export_content = editor.toPlainText()
                 continue
             editor = self._get_editor_from_widget(widget)
             if editor is None:
@@ -1521,6 +2315,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         """将内容恢复到指定标签的编辑器，并重置保存状态。
 
         供崩溃恢复使用（restore_after_crash）。
+        3.5.8（批次 4e）：共享 Document → Document 级 set_content，所有 View 同步。
         """
         state = self._registry.get(tab_id)
         if state is None:
@@ -1528,11 +2323,15 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         editor = self._editor_for_tab_id(tab_id)
         if editor is None:
             return False
-        editor.setPlainText(content)
-        doc = editor.document()
-        if doc is not None:
-            doc.setModified(False)
-            doc.clearUndoRedoStacks()
+        shared_doc = editor.shared_doc
+        if shared_doc is not None:
+            shared_doc.set_content(content)
+        else:
+            editor.setPlainText(content)
+            doc = editor.document()
+            if doc is not None:
+                doc.setModified(False)
+                doc.clearUndoRedoStacks()
         state.mark_saved(content)
         return True
 
@@ -1543,6 +2342,10 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             return
         state.is_modified = True
         self._save_manager.mark_dirty(tab_id)
+        # 3.5.8（批次 4e）：共享 Document 侧 dirty 同步（dirty 单一源）
+        editor = self._editor_for_tab_id(tab_id)
+        if editor is not None and editor.shared_doc is not None:
+            editor.shared_doc.qdocument.setModified(True)
 
     def get_tab_state(self, tab_id: int) -> Optional[TabState]:
         """获取指定标签的文档状态（只读用途）。"""
@@ -1645,31 +2448,47 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 return False
 
         try:
-            # 先保存再移动
+            # 先保存再移动（3.5.8 R2：共享 Document 以 Document 侧 dirty 为准）
+            shared_doc = None
             for i in range(self.count()):
                 widget = self.widget(i)
                 tab_id = getattr(widget, 'tab_id', None)
                 if tab_id is not None:
                     state = self._registry.get(tab_id)
                     if state and state.filepath == filepath:
-                        # 保存最新内容
-                        if state.is_modified:
+                        shared_doc = getattr(widget, "shared_doc", None)
+                        if state.is_modified or (shared_doc is not None and shared_doc.dirty):
                             self._save_file(widget, filepath, state.encoding)
                         break
+
+            # 3.5.8：共享 Document 移动前检查目标路径未被其它 Document 占用
+            # （否则移动后两个 Document 指向同一路径，编辑/保存错乱）
+            if (shared_doc is not None
+                    and self._document_registry.is_path_owned_by_other(
+                        shared_doc.document_id, new_path)):
+                QMessageBox.warning(
+                    self, "无法移动",
+                    f"目标文件已在其他面板打开，不能移动：\n{new_path}",
+                )
+                return False
 
             import shutil
             shutil.move(filepath, new_path)
 
-            # 更新标签页信息
+            # 更新标签页信息（3.5.8：共享 Document 由 registry re-key + bind_path
+            # 广播 pathChanged/nameChanged，所有 View 的路径/标题随 Document 同步）
             for i in range(self.count()):
                 widget = self.widget(i)
                 tab_id = getattr(widget, 'tab_id', None)
                 if tab_id is not None:
                     state = self._registry.get(tab_id)
                     if state and state.filepath == filepath:
-                        state.filepath = new_path
-                        state.display_name = filename
-                        self.setTabText(i, filename)
+                        if shared_doc is not None:
+                            self._document_registry.move_path(shared_doc, new_path)
+                        else:
+                            state.filepath = new_path
+                            state.display_name = filename
+                            self.setTabText(i, filename)
                         break
 
             return True
@@ -1677,6 +2496,137 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             get_logger(__name__).error("移动文件失败: %s", e)
             ErrorHandler.show_from_exception(e, ErrorCategory.FILE, "移动文件失败")
             return False
+
+    def copy_file_to_folder(self, filepath: str, dest_folder: str) -> bool:
+        """将文件复制到目标文件夹（标签已打开且已修改则先保存再复制，不改动原标签）"""
+        if not os.path.isfile(filepath) or not os.path.isdir(dest_folder):
+            return False
+
+        filename = os.path.basename(filepath)
+        new_path = os.path.join(dest_folder, filename)
+
+        if os.path.exists(new_path):
+            msg = QMessageBox.question(
+                self, "文件已存在",
+                f"目标文件夹中已存在 '{filename}'，是否覆盖？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No
+            )
+            if msg != QMessageBox.StandardButton.Yes:
+                return False
+
+        try:
+            # 若标签打开且已修改，先保存再复制，保证副本包含最新内容
+            for i in range(self.count()):
+                widget = self.widget(i)
+                tab_id = getattr(widget, 'tab_id', None)
+                if tab_id is not None:
+                    state = self._registry.get(tab_id)
+                    if state and state.filepath == filepath:
+                        if state.is_modified:
+                            self._save_file(widget, filepath, state.encoding)
+                        break
+
+            import shutil
+            shutil.copy2(filepath, new_path)
+            return True
+        except Exception as e:
+            get_logger(__name__).error("复制文件失败: %s", e)
+            ErrorHandler.show_from_exception(e, ErrorCategory.FILE, "复制文件失败")
+            return False
+
+    def close_tabs_of_deleted_path(self, path: str, is_dir: bool) -> None:
+        """文件树删除文件/文件夹后，同步关闭已打开的对应标签页。
+
+        - 未修改的标签直接关闭；
+        - 已修改的标签弹确认（关闭 = 放弃未保存的修改，不重新保存）。
+        这是删除语义：此时"保存"只会把已删除的文件重新创建回来。
+        """
+        norm = os.path.normpath(path)
+        indices = []
+        for i in range(self.count()):
+            widget = self.widget(i)
+            tab_id = getattr(widget, 'tab_id', None)
+            if tab_id is None:
+                continue
+            state = self._registry.get(tab_id)
+            if not state or not state.filepath:
+                continue
+            fp = os.path.normpath(state.filepath)
+            if is_dir:
+                matched = fp.startswith(norm + os.sep)
+            else:
+                matched = fp == norm
+            if matched:
+                indices.append(i)
+
+        # 从后往前关闭，避免索引随 removeTab 偏移
+        for i in reversed(indices):
+            self._close_deleted_tab(i)
+
+    def _close_deleted_tab(self, index: int) -> None:
+        """关闭单个标签（文件已被删除，不提供"保存"选项）。"""
+        widget = self.widget(index)
+        tab_id = getattr(widget, 'tab_id', None) if widget else None
+        state = self._registry.get(tab_id) if tab_id is not None else None
+
+        if tab_id is None or state is None:
+            self.removeTab(index)
+            self.tab_count_changed.emit(self.count())
+            return
+
+        # 3.5.8（批次 4c，规格 2.3）：共享 Document 还有其他 View → 直接关本 View
+        # （删除语义下同样不弹确认，Document 仍由其它 View 持有）
+        shared_doc = getattr(widget, "shared_doc", None)
+        if shared_doc is not None:
+            doc_id = shared_doc.document_id
+            if self._document_registry.view_count(doc_id) > 1:
+                self._document_registry.detach_view(doc_id, widget)
+                self._detach_shared_from_widget(widget)
+                self._disconnect_doc_binding(widget)
+                self._save_manager.unregister_tab(tab_id)
+                self._registry.unregister(tab_id)
+                self.removeTab(index)
+                self.tab_count_changed.emit(self.count())
+                return
+
+        # 3.5.8（R2）：共享 Document 以 Document 侧 dirty 为准（同 _close_tab）
+        is_modified = state.is_modified
+        if shared_doc is not None and shared_doc.dirty:
+            is_modified = True
+        if is_modified:
+            name = self._strip_tab_suffix(self.tabText(index))
+            msg = QMessageBox(self)
+            msg.setWindowTitle("关闭标签")
+            msg.setText(f"文件 '{name}' 已在文件树中删除。")
+            msg.setInformativeText("标签页有未保存的修改，关闭将放弃这些修改。")
+            msg.setIcon(QMessageBox.Icon.Warning)
+            close_btn = msg.addButton("关闭标签", QMessageBox.ButtonRole.DestructiveRole)
+            msg.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+            msg.setDefaultButton(close_btn)
+            msg.exec()
+            if msg.clickedButton() is not close_btn:
+                return
+
+        if state.is_new:
+            title = self._strip_tab_suffix(self.tabText(index))
+            self._release_untitled_number(title)
+        else:
+            filepath = state.filepath
+            if filepath and os.path.isfile(filepath):
+                self._record_closed_tab(filepath, widget)
+
+        if state.filepath:
+            self._session_manager.remove_autosave_for_file(state.filepath)
+
+        self._save_manager.unregister_tab(tab_id)
+        self._registry.unregister(tab_id)
+        self.removeTab(index)
+        self.tab_count_changed.emit(self.count())
+        # 3.5.8（批次 4c）：最后一个 View 关闭（删除语义）→ 销毁 Document
+        if shared_doc is not None:
+            # 批次 5 修复：最后 View 关闭前断开 Document 依赖，防高亮悬垂
+            self._detach_shared_from_widget(widget)
+            self._document_registry.release(shared_doc.document_id)
 
     # === 编辑操作代理 ===
 

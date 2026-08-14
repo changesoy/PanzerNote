@@ -35,6 +35,7 @@ PanzerNote 是一款以已停服二次元游戏《战车少女》（PanzerMaiden
 | 侧栏面板宿主         | ✅ 完成   | 多面板注册/切换/宽度记忆                                                                      |
 | 文件树               | ✅ 完成   | 文件树 + 外部文件区 + 右键菜单 + 接受标签拖拽移动文件                                         |
 | 标签页拖拽           | ✅ 完成   | 标签内排序 + 拖拽到文件树移动文件                                                             |
+| 分屏多视图           | ✅ 完成   | 分屏布局/状态持久化、方向切换、跨分屏标签拖拽、共享 Document 跨面板联动编辑（同一文档多视图） |
 | 资源栏               | ✅ 完成   | 四资源显示 + 打字统计                                                                         |
 | 在线/离线挂机        | ✅ 完成   | 在线每分钟 +5/+5/+5、铝材每3分钟+5；离线 1/3 向大取整，上限 24h                               |
 | 打字奖励             | ✅ 完成   | textChanged 接入 → 递减收益算法 → 资源奖励（1:1:1:0.2）                                       |
@@ -79,6 +80,9 @@ PanzerNote/
 │   │   ├── workspace_store.py      # 工作区存储（workspace dict / 会话状态 / 书签 / 折叠 / 关闭标签记忆）
 │   │   ├── app_context.py          # 应用上下文容器（持有已拆子模块，供服务层组装）
 │   │   ├── document_model.py       # 文档状态模型（TabState + TabStateRegistry，替代无类型 _tab_info）
+│   │   ├── shared_document.py      # 共享文档模型（SharedDocument 拥有 QTextDocument + ViewState + SaveSnapshot）
+│   │   ├── document_registry.py    # 全局文档注册表（document_id/路径索引/View 关联/生命周期 release）
+│   │   ├── document_view_binding.py # View↔Document 信号接线器（attach/detach 幂等，生命周期随 View）
 │   │   ├── session_restore_service.py # 会话恢复服务（崩溃恢复检测 / 恢复计划 / 恢复执行）
 │   │   ├── config_import_service.py # 配置导入服务（类型校验 + 白名单，复用 WorkspaceStore 白名单）
 │   │   ├── savegame_manager.py     # 存档管理器（加载/保存/每日签到/只读视图防泄漏）
@@ -90,7 +94,7 @@ PanzerNote/
 │   │
 │   ├── editor/                     # ── 编辑器模块 ──
 │   │   ├── editor.py               # 核心编辑器（行号、缩略图、语法高亮、自动缩进、虚拟滚动）
-│   │   ├── editor_tabs.py          # 多标签管理（打开/保存/关闭/编码检测/拖拽/文件移动）
+│   │   ├── editor_tabs.py          # 多标签管理（打开/保存/关闭/编码检测/拖拽迁移/共享 Document View 生命周期）
 │   │   ├── editor_actions.py       # 行操作/大小写转换/JSON/XML 格式化（Mixin）
 │   │   ├── auto_pair_handler.py    # 括号/引号自动配对（Mixin，frozenset 快速过滤）
 │   │   ├── bracket_matcher.py      # 括号匹配高亮（纯函数，扫描配对位置，支持中英文括号）
@@ -137,6 +141,7 @@ PanzerNote/
 │   ├── ui/                         # ── UI 组件 ──
 │   │   ├── main_window_ui.py       # UI 组装（MainWindowUIBuilder：顶层 widget 创建与布局，BuiltUI 返回 17 组件，不连业务信号）
 │   │   ├── view_coordinator.py     # 视图协调器（ViewCoordinator：视图/分屏/面板切换，_current_view/_split_tabs 状态）
+│   │   ├── unsaved_files_dialog.py # 未保存文件确认对话框（VS Code 风格单级确认，单/多文件共用）
 │   │   ├── selection_clear_filter.py # 选中高亮清除过滤器（SelectionClearFilter：点击列表外空白清除选中）
 │   │   ├── first_run_dialog.py     # 首次运行对话框
 │   │   ├── command_palette.py      # 命令面板（Ctrl+Shift+P / F1 唤起，搜索并执行命令）
@@ -281,20 +286,20 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 
 **拆分后的模块职责**：
 
-| 模块                                   | 职责                                                                                                                                                        |
-| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --- |
-| `main_window.py`                       | 主窗口协调者（~1255 行）：两阶段关闭、会话恢复协调、信号回调、拖放/键盘事件、命令面板、插件/主题集成、统一窗口显示入口（`present()`）；动作经控制器一行委托 |
-| `ui/main_window_ui.py`                 | `MainWindowUIBuilder`：顶层 widget 创建与布局（17 个组件经 `BuiltUI` 返回），不连接业务信号                                                                 |
-| `ui/view_coordinator.py`               | `ViewCoordinator`：视图/分屏/面板切换编排；`_current_view`/`_split_tabs` 状态；依赖全构造注入，回调（信号连接/菜单同步）由 MainWindow 注入                  |
-| `ui/selection_clear_filter.py`         | `SelectionClearFilter`：应用级事件过滤器，点击列表外空白清除选中高亮                                                                                        |
-| `editor/edit_action_controller.py`     | `EditActionController`：22 个编辑动作（撤销/剪贴板/查找/行操作/大小写/书签/折叠）                                                                           |
-| `editor/export_action_controller.py`   | `ExportActionController`：PDF/HTML 导出（均经 FileGuard 安全写入，含 PDF 回调 `_on_pdf_generated`）                                                         |     |
-| `editor/settings_action_controller.py` | `SettingsActionController`：设置动作编排（对话框应用/导出/导入/保存/重置，show 与 apply 共享 `_apply_editor_dict`）                                         |
-| `editor/webengine_runtime.py`          | WebEngine 启动锚点管理：首个预览挂载前预初始化 Qt WebEngine，挂载后释放锚点                                                                                 |
-| `core/timer_manager.py`                | 定时器生命周期管理（自动保存/统计/挂机奖励）                                                                                                                |
-| `core/event_bus.py`                    | 信号连接集中管理，解耦模块间通信                                                                                                                            |
-| `core/menu_builder.py`                 | 菜单栏构建逻辑，已接入 ShortcutManager                                                                                                                      |
-| `game/game_engine.py`                  | 挂机收益计算（在线/离线奖励、打字奖励、资源上限检查）                                                                                                       |
+| 模块                                   | 职责                                                                                                                                                                                                                                                             |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --- |
+| `main_window.py`                       | 主窗口协调者（~1255 行）：两阶段关闭、会话恢复协调、信号回调、拖放/键盘事件、命令面板、插件/主题集成、统一窗口显示入口（`present()`）；动作经控制器一行委托                                                                                                      |
+| `ui/main_window_ui.py`                 | `MainWindowUIBuilder`：顶层 widget 创建与布局（17 个组件经 `BuiltUI` 返回），不连接业务信号                                                                                                                                                                      |
+| `ui/view_coordinator.py`               | `ViewCoordinator`：视图/分屏/面板切换编排；`_current_view`/`_split_tabs` 状态；分屏状态持久化（3.5.2）、方向切换（3.5.6）、`close_split` 统一未保存确认（3.5.7）、空分屏自动关闭与布局重置（3.5.9）；依赖全构造注入，回调（信号连接/菜单同步）由 MainWindow 注入 |
+| `ui/selection_clear_filter.py`         | `SelectionClearFilter`：应用级事件过滤器，点击列表外空白清除选中高亮                                                                                                                                                                                             |
+| `editor/edit_action_controller.py`     | `EditActionController`：22 个编辑动作（撤销/剪贴板/查找/行操作/大小写/书签/折叠）                                                                                                                                                                                |
+| `editor/export_action_controller.py`   | `ExportActionController`：PDF/HTML 导出（均经 FileGuard 安全写入，含 PDF 回调 `_on_pdf_generated`）                                                                                                                                                              |     |
+| `editor/settings_action_controller.py` | `SettingsActionController`：设置动作编排（对话框应用/导出/导入/保存/重置，show 与 apply 共享 `_apply_editor_dict`）                                                                                                                                              |
+| `editor/webengine_runtime.py`          | WebEngine 启动锚点管理：首个预览挂载前预初始化 Qt WebEngine，挂载后释放锚点                                                                                                                                                                                      |
+| `core/timer_manager.py`                | 定时器生命周期管理（自动保存/统计/挂机奖励）                                                                                                                                                                                                                     |
+| `core/event_bus.py`                    | 信号连接集中管理，解耦模块间通信                                                                                                                                                                                                                                 |
+| `core/menu_builder.py`                 | 菜单栏构建逻辑，已接入 ShortcutManager                                                                                                                                                                                                                           |
+| `game/game_engine.py`                  | 挂机收益计算（在线/离线奖励、打字奖励、资源上限检查）                                                                                                                                                                                                            |
 
 **行数基线**（Wave 3 A~E 五分支完成后的记录）：
 
@@ -384,11 +389,12 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 
 **核心逻辑**：
 
-- `open_file()` — 编码级联检测（UTF-8 → GBK → UTF-16 → 容错UTF-8），Markdown 文件自动使用 `MarkdownPreviewWidget`；新增 `render_preview` 参数（默认 `True`），设为 `False` 时延迟预览渲染以加速启动恢复
+- `open_file()` — 编码级联检测（UTF-8 → GBK → UTF-16 → 容错UTF-8），Markdown 文件自动使用 `MarkdownPreviewWidget`；新增 `render_preview` 参数（默认 `True`），设为 `False` 时延迟预览渲染以加速启动恢复；3.5.8：另一面板已打开同一文件时经 `DocumentRegistry.get_by_path` 命中共享 Document，直接新建 View attach（不重新读盘）
 - `_on_text_changed()` — 比较当前内容与 `last_saved_content`，决定是否标记为已修改（标签名加 ` *`）；粘贴操作不计入打字奖励
-- `move_file_to_folder()` — 先保存最新内容 → `shutil.move` → 更新 TabState 中的 filepath
+- `move_file_to_folder()` — 先保存最新内容 → `shutil.move` → 更新 TabState 中的 filepath；3.5.8：共享 Document 走 `DocumentRegistry.move_path` re-key + `bind_path` 广播（所有 View 路径/标题同步），移动前检查目标路径未被其它 Document 占用
 - 保存状态副作用集中到 TabState：`_on_save_state_changed(tab_id, state_name)` 的 CLEAN 分支统一处理 `mark_saved()` / `mark_new_saved()`（hotfix 阶段 1/5）
 - 所有编辑操作（undo/redo/cut/copy/paste/行操作/大小写/格式化）通过代理方法转发给当前编辑器
+- 3.5.8：每个 View 持有 `shared_doc` 与 `DocumentViewBinding`（`_connect_doc_binding`），dirtyChanged → 标题脏标记、nameChanged → 标题跟随、pathChanged → TabState 路径 + Markdown 预览基准跟随；关闭/迁移前 `_disconnect_doc_binding` 断开；共享 Document 以 Document 侧 `dirty` 为单一源（save_all / save_all_for_close / get_unsaved_tab_infos / 关闭判定同规则）
 
 ### 4.5 Markdown 预览 (`editor/markdown_preview.py`)
 
@@ -743,7 +749,7 @@ LOADED → on_unload() → UNLOADED
 **版本传播链路**：
 
 ```
-src/__init__.py (__version__ = "1.8.5")
+src/__init__.py (__version__ = "1.9.0")
   ├─→ main.py                    (from src import __version__)
   ├─→ src/main_window.py         (from . import __version__)
   ├─→ src/plugins/plugin_base.py (from .. import __version__ as _app_version)
@@ -774,6 +780,26 @@ src/__init__.py (__version__ = "1.8.5")
 1. 仅修改 `src/__init__.py` 中的 `__version__`
 2. 运行 `python scripts/verify_version.py` 验证一致性
 3. 手动同步 `README.md` / `docs/architecture.md` / `plugins/plugin_api.md` 中的版本号
+
+### 4.16 共享文档多视图（3.5.8）
+
+**三层模型**：`Document`（内容与持久化状态）↔ `View`（编辑器/预览，只 attach 不拥有）↔ `ViewState`（每 View 独立展示状态）。
+
+| 模块                            | 职责                                                                                                                                                                                                                 |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `core/shared_document.py`       | `SharedDocument(QObject)` 拥有 `QTextDocument` 与保存状态（dirty/save_status/path/encoding/eol）；信号源直接监听共享 QTextDocument 再统一转发；`ViewState`（cursor/scroll 快照）、`SaveSnapshot`（异步保存内容快照） |
+| `core/document_registry.py`     | 全局注册表：`documents_by_id` / `path_index`（canonical 路径 → doc_id）/ `pending_path_index`（Save As 预留）/ `views`（doc_id → View 列表）；`release()` 仅最后一个 View 关闭时销毁 Document                        |
+| `core/document_view_binding.py` | 每 View 一个信号接线器：`bind(signal_name, slot)` 登记 → `attach()`/`detach()` 幂等建立/断开；防裸 lambda 无人持有连接                                                                                               |
+
+**关键机制**：
+
+- **自动共享**（规格 2.1）：`open_file` 先查 `DocumentRegistry.get_by_path`，命中则 `_create_shared_view` 直接 attach（内容/编码/eol 单一源，不重复读盘）；面板内同 Document 至多一个 View
+- **关闭决策树**（规格 2.3）：非最后 View → 直接关（不弹确认、不销毁 Document、不动未命名编号）；最后 View → dirty 确认 → `release()`（含未命名编号归还与 path_index 清理）
+- **路径 re-key**（规格 2.2）：Save As 走 `reserve_path`（pending 预留）→ 成功后 `commit_path`（pending → path_index + `bind_path` 广播 pathChanged/nameChanged）；文件树移动走 `move_path`（直接换键，无 pending）；目标路径被其它 Document 占用一律拒绝
+- **保存竞态防护**（规格 2.4）：`SaveTaskManager` 按 `(tab_id × save_status)` 两维度管理（面板内）；`SharedDocument.request_save()`/`on_save_succeeded()`/`on_save_failed()` 接线为**跨面板唯一门闩**——主面板与分屏的 Manager 相互独立，`document_key` 合并仅面板内有效，门闩保证同一 Document 全局同时最多一个实际写盘任务（最新内容必然最后落盘），保存完成直接连 `SaveTask.signals.finished` 释放（标签已注销也不卡死）；`safe_write` 原子化（同目录临时文件 + os.replace），并发写目标始终是完整版本
+- **状态收敛 Document 级**：折叠（2.10）与书签（2.12）随 Document 共享；`dirty` 单一源在 Document，各 View 标题经 dirtyChanged 同步（`_on_view_dirty`）
+- **高亮**：两种高亮器（Markdown / Pygments）均实现 `set_dark_mode`，主题切换不经过 `set_file_type`（避免重建时摘除共享高亮）；关闭最后 View 前 `_detach_shared_from_widget` + release，杜绝悬垂引用（C++ deleted 崩溃）
+- **未保存聚合**：`get_unsaved_tab_infos` 返回含 `document_id`，`MainWindow.closeEvent` 按 document_id 跨面板去重（同一共享文件只列一次）；`save_all_for_close` 以 Document 侧 dirty 为准
 
 ---
 
@@ -966,7 +992,7 @@ pip install mypy>=1.20                         # 类型检查
 ### 安全约束
 
 11. **路径安全**：所有文件操作路径必须通过 `PathValidator` 白名单验证，禁止直接使用用户输入构造文件路径。`config.py` 在初始化时将 `_app_dir` 和 `_base_path` 加入白名单
-12. **文件操作安全**：使用 `FileGuard.safe_read()` / `safe_write()` 替代直接 `open()`，确保文件大小和超时控制
+12. **文件操作安全**：使用 `FileGuard.safe_read()` / `safe_write()` 替代直接 `open()`，确保文件大小和超时控制。`safe_write`/`safe_write_bytes` 原子写入（同目录临时文件 + `os.replace`），崩溃/断电不留下半写文件
 13. **输入验证**：所有用户输入（文件名、搜索内容、设置值）必须通过 `InputValidator` 验证。文件名用 `validate_filename_strict()`，搜索内容用 `validate_search()`，设置值用 `validate_setting()`
 14. **存档保存失败提示**：`SavegameManager.save()` 返回 `SavegameSaveResult` 枚举，写入失败时返回 `WRITE_FAILED`。MainWindow 在关闭时检查此状态并弹出警告
 15. **导出安全**：Markdown 转 PDF/HTML 时显式禁用 raw HTML（`MarkdownIt("commonmark", {"html": False})`），python-markdown fallback 仅启用 `tables` 扩展
@@ -996,7 +1022,7 @@ pip install mypy>=1.20                         # 类型检查
 28. **自动配对性能**：`AutoPairHandlerMixin` 使用 `frozenset` 缓存实现 O(1) 入口过滤，`_doc_char_at()` 替代 `toPlainText()` 全文复制，`_wrap_selection()` 替代 `selectedText()` 大字符串复制。修改 `AUTO_PAIR_CHARS` 字典后缓存自动失效重建
 29. **粘贴检测**：`Editor` 重写 `insertFromMimeData()` 设置 `_is_pasting` 标志，`EditorTabWidget._on_text_changed()` 检查此标志跳过粘贴的打字奖励计数。`_PASTE_THRESHOLD = 50`，仅字符增量 ≤50 且非粘贴时计入奖励
 30. **MarkdownIt 实例复用**：`MarkdownPreviewWidget._create_md_parser()` 在 `__init__` 中创建一次解析器实例并缓存为 `_md_parser`，`_render_markdown()` 直接调用缓存实例渲染
-31. **文件保存异步化**：`SaveTask`（`QRunnable`）+ `SaveTaskSignals`（`QObject`）将 `safe_write` 磁盘 IO 放到 `QThreadPool.globalInstance()` 后台线程执行。保存失败时回滚修改状态并恢复标签页 `*` 标记
+31. **文件保存异步化**：`SaveTask`（`QRunnable`）+ `SaveTaskSignals`（`QObject`）将 `safe_write` 磁盘 IO 放到 `QThreadPool.globalInstance()` 后台线程执行；`safe_write` 原子化（同目录临时文件 + `os.replace`），并发写目标始终是完整版本（last-write-wins），共享 Document 另有跨面板唯一门闩保证最新内容最后落盘。保存失败时回滚修改状态并恢复标签页 `*` 标记
 32. **Markdown 预览 JS 局部更新**：首次渲染走 `setHtml` 加载完整模板，`loadFinished` 信号触发后标记 `_html_template_loaded = True`，后续渲染通过 `runJavaScript` 仅更新 `innerHTML`。切换文档时自动重置标志。非 WebEngine 模式仍走全量路径。注意：这不是真正 block 级增量渲染
 33. **Minimap 块级增量失效**：`MinimapWidget` 改用 `QTextDocument.contentsChange` 信号，精确计算受影响缓存块范围并标记为脏块（`_block_dirty`），仅重新渲染脏块。常规打字仅重绘 1 个块，节省约 95% 渲染开销
 34. **状态栏信号驱动统计**：`signal_driven_stats` 默认开启，`characterCount()` 避免全文复制，词数 800ms 防抖，行列号由 `cursorPositionChanged` 驱动
@@ -1010,7 +1036,7 @@ pip install mypy>=1.20                         # 类型检查
 39. **集中式版本管理**：`src/__init__.py` 中的 `__version__` 为唯一真相源，所有模块通过 `from src import __version__` 引用。`pyproject.toml` 使用动态版本配置，`scripts/verify_version.py` 提供一致性验证，`main.py` 启动时自动检查
 40. **依赖梳理**：`pyproject.toml` 分组 format/dev/all，所有运行时依赖均为必需
 41. **增量渲染器命名澄清**：`incremental_renderer.py` 确认为全文 hash 渲染缓存，文档不宣称"真正增量渲染"
-42. **分屏语义**：`ViewCoordinator.split_editor()` 打开新空白文件而非当前文件副本，避免双标签编辑同一文件的数据覆盖风险。菜单文本标注"独立编辑"
+42. **分屏与共享文档语义**：`ViewCoordinator.split_editor()` 打开新空白文件（菜单文本标注"独立编辑"）；同一文件在多个面板打开时共享同一 `SharedDocument`（3.5.8，跨面板联动编辑）——内容/编码/eol/dirty/折叠/书签单一源，每个 View 只持有自己的 `ViewState` 与 `DocumentViewBinding`。共享 Document 的保存以 Document 级状态机为跨面板唯一门闩（全局同时最多一个写盘任务）。禁止创建两个不同 Document 指向同一路径（`DocumentRegistry` 路径占用拒绝）
 43. **封装规范**：禁止通过 `self.config._savegame_manager` 等私有属性访问，使用 `self.config.savegame_manager` 公开属性；新代码优先经 `app_context.<子模块>` 直连（hotfix 阶段 7），Config 门面仅作过渡兼容
 44. **数据防泄漏**：对外暴露配置/存档数据一律走只读视图或拷贝——`savegame_manager.get_savegame()` 返回 MappingProxyType、`get_resources()` 返回拷贝、`settings_store.as_dict()`/`workspace_store.as_dict()` 返回深拷贝。禁止直接返回内部可变 dict 引用
 45. **类型化标签状态**：标签页元数据使用 `TabState`（dataclass）+ `TabStateRegistry`，禁止回退到无类型 `_tab_info` dict
@@ -1018,4 +1044,4 @@ pip install mypy>=1.20                         # 类型检查
 
 ---
 
-_本文档基于 PanzerNote v1.8.5 源码整理。版本变更见 [../CHANGELOG.md](../CHANGELOG.md)，未完成规划见 [roadmap.md](roadmap.md)。_
+_本文档基于 PanzerNote v1.9.0 源码整理。版本变更见 [../CHANGELOG.md](../CHANGELOG.md)，未完成规划见 [roadmap.md](roadmap.md)。_

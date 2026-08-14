@@ -45,6 +45,9 @@ class TabState:
     # 运行时编号（仅 is_new=True 时使用）
     untitled_number: Optional[int] = None
 
+    # 导出用（3.5.10）：仅未命名且 dirty 时写入当前内容，随 workspace.json 条目恢复
+    export_content: Optional[str] = None
+
     def mark_saved(self, content: str) -> None:
         """保存成功后更新状态（集中副作用）"""
         self.is_modified = False
@@ -64,9 +67,18 @@ class TabState:
         self.display_name = os.path.basename(filepath)
 
     def to_open_files_entry(self) -> Optional[dict]:
-        """转换为 workspace.json 的 open_files 条目"""
+        """转换为 workspace.json 的 open_files 条目
+
+        3.5.10：未命名文件（is_new）也持久化，重启后恢复标签（含编号与显示名）；
+        dirty 时附带内容随条目保存，恢复时还原编辑现场。
+        """
         if self.is_new or not self.filepath:
-            return None
+            return {
+                "is_new": True,
+                "untitled_number": self.untitled_number or 1,
+                "display_name": self.display_name,
+                "content": self.export_content,
+            }
         return {
             "path": self.filepath,
             "cursor_position": self.cursor_position or 0,
@@ -76,6 +88,14 @@ class TabState:
     @classmethod
     def from_open_files_entry(cls, tab_id: int, entry: dict) -> "TabState":
         """从 workspace.json 的 open_files 条目恢复"""
+        if entry.get("is_new"):
+            return cls(
+                tab_id=tab_id,
+                filepath=None,
+                display_name=entry.get("display_name", "未命名"),
+                is_new=True,
+                untitled_number=entry.get("untitled_number"),
+            )
         return cls(
             tab_id=tab_id,
             filepath=entry.get("path"),

@@ -20,10 +20,10 @@ import os
 import json
 import xml.dom.minidom as minidom
 from contextlib import contextmanager
-from typing import Generator, Optional, Set
+from typing import Generator, Optional, Set, cast
 from PyQt6.QtWidgets import (
     QPlainTextEdit, QWidget, QTextEdit, QVBoxLayout,
-    QMenu, QMessageBox
+    QMenu, QMessageBox, QPlainTextDocumentLayout
 )
 from PyQt6.QtCore import Qt, QRect, QSize, QTimer, QPointF, pyqtSignal
 from PyQt6.QtGui import (
@@ -33,6 +33,7 @@ from PyQt6.QtGui import (
 )
 
 from ..core.config import Config
+from ..core.shared_document import SharedDocument
 from .syntax_highlighter import get_highlighter_for_file
 from .editor_actions import EditorActionsMixin
 from .auto_pair_handler import AutoPairHandlerMixin
@@ -72,6 +73,10 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
     """文本编辑器"""
 
     word_count_recomputed = pyqtSignal()
+    # 3.5.8（批次 5）：有效折叠管理器的状态变化转发信号（attach 共享 Document 后
+    # 转发 Document 级 FoldingManager 的 fold_state_changed；独立时转发本地）。
+    # MarkdownPreviewWidget 与重绘统一监听本信号，避免 attach 前后连接对象漂移。
+    fold_state_changed = pyqtSignal()
 
     # 需要自动增加缩进的行尾字符（按语言）
     INDENT_TRIGGERS = {
@@ -127,7 +132,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self.config = config
         self._theme_engine = theme_engine
         self.tab_id: Optional[int] = None
-        self._highlighter = None
+        self._highlighter: Optional[QSyntaxHighlighter] = None
         self._file_type = "纯文本"
         self._filepath_or_ext: str = ""
         self._wrap_mode = "no_wrap"
@@ -157,8 +162,11 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self._init_line_numbers()
         self._init_minimap()
         self._lazy_highlight = LazyHighlightManager(self)
-        self._bookmarks: Set[int] = set()
-        self._folding = FoldingManager(self)
+        self._local_bookmarks: Set[int] = set()
+        # 3.5.8（批次 5）：本地折叠管理器（独立编辑时使用）。attach 共享 Document
+        # 后 _folding 属性委托到 Document 级单实例（规格 2.10），本地实例闲置。
+        self._local_folding = FoldingManager(cast(QTextDocument, self.document()), parent=self)
+        self._local_folding.fold_state_changed.connect(self._forward_fold_state_changed)
 
         self._cached_word_count: int = 0
         self._word_count_dirty: bool = True
@@ -166,6 +174,8 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self._word_count_timer.setSingleShot(True)
         self._word_count_timer.setInterval(800)
         self._word_count_timer.timeout.connect(self._recompute_word_count)
+        # 3.5.8 共享 Document：attach 后本 View 使用 Document 级统计/内容
+        self._shared_doc: Optional[SharedDocument] = None
 
         # 自动补全
         self.cursorPositionChanged.connect(self._trigger_completion)
@@ -225,14 +235,14 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
                 color: {colors.text_primary};
             }}
         """)
-        # 更新高亮器的主题
+        # 更新高亮器的主题（3.5.8：两种高亮器均实现 set_dark_mode——Pygments
+        # 走 set_dark_mode 重建 formats，不经过 set_file_type，避免摘除共享高亮）
         if self._highlighter and self._filepath_or_ext:
             is_dark = self._theme_engine.get_active_theme().is_dark
             if hasattr(self._highlighter, 'set_dark_mode'):
-                # Markdown 高亮器
                 self._highlighter.set_dark_mode(is_dark)
             else:
-                # Pygments 高亮器：重新设置文件类型以切换主题
+                # 旧式高亮器回退：重新设置文件类型以切换主题
                 self.set_file_type(self._filepath_or_ext)
         self._highlight_current_line()
 
@@ -613,18 +623,42 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
     # ═══════════════════ 语法高亮 ═══════════════════
 
     def set_file_type(self, filepath_or_ext: str):
-        """根据文件类型设置语法高亮"""
+        """根据文件类型设置语法高亮
+
+        3.5.8（R1 收敛）：共享 Document 只建一次 highlighter——同一 qdocument
+        若有多个 View，后续 View 直接复用（避免多个 QSyntaxHighlighter 反复
+        重排同一 document，高亮重叠/性能浪费）。
+        """
         if self._highlighter:
-            self._highlighter.setDocument(None)
-            self._highlighter = None
+            shared = self._shared_doc
+            # 3.5.8（批次 5 修复）：共享高亮属于 Document（R1 收敛），不能被摘除——
+            # 主题刷新走 set_dark_mode 不经过这里；仅本地/独立高亮才摘除重建，
+            # 否则会把 Document 级高亮从共享文档上摘掉导致渲染永久失效。
+            if shared is None or self._highlighter is not getattr(
+                shared, "_highlighter", None
+            ):
+                self._highlighter.setDocument(None)
+                self._highlighter = None
 
         self._filepath_or_ext = filepath_or_ext
         doc = self.document()
         assert doc is not None
+        shared = self._shared_doc
+        if shared is not None:
+            existing = shared._highlighter
+            if existing is not None:
+                self._highlighter = cast(QSyntaxHighlighter, existing)
+                self._file_type = shared._highlighter_file_type
+                self._lazy_highlight.set_highlighter(self._highlighter)
+                self.apply_auto_minimap()
+                return
         is_dark = self._theme_engine.get_active_theme().is_dark
         self._highlighter, self._file_type = get_highlighter_for_file(
             doc, filepath_or_ext, theme_engine=self._theme_engine, is_dark=is_dark
         )
+        if shared is not None:
+            shared._highlighter = self._highlighter
+            shared._highlighter_file_type = self._file_type
 
         self._lazy_highlight.set_highlighter(self._highlighter)
         self.apply_auto_minimap()
@@ -741,6 +775,36 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             super().insertFromMimeData(source)
         finally:
             self._is_pasting = False
+
+    # === 拖放：本地文件 URL 放行给窗口级打开（3.5.7） ===
+    #
+    # QPlainTextEdit 默认接受 text/uri-list 拖放（把文件内容/路径插入为文本），
+    # 会吞掉从文件树/资源管理器拖入的文件，导致「拖文件到编辑区打开」失效。
+    # 仅拦截"本地文件"URL 拖放并 event.ignore() 冒泡给 MainWindow 打开文件；
+    # 文本/纯链接拖放（如浏览器拖 URL 粘贴）保留默认行为。
+
+    def _has_local_file_urls(self, mime) -> bool:
+        if not mime.hasUrls():
+            return False
+        return any(url.isLocalFile() for url in mime.urls())
+
+    def dragEnterEvent(self, event):
+        if self._has_local_file_urls(event.mimeData()):
+            event.ignore()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        if self._has_local_file_urls(event.mimeData()):
+            event.ignore()
+            return
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event):
+        if self._has_local_file_urls(event.mimeData()):
+            event.ignore()
+            return
+        super().dropEvent(event)
 
     def _handle_enter(self):
         """处理回车键 - 自动缩进、Python 关键词 dedent"""
@@ -893,6 +957,9 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         return int(max(0, doc.characterCount() - 1))
 
     def get_word_count(self) -> int:
+        shared = self._shared_doc
+        if shared is not None:
+            return shared.word_count  # Document 级单一统计（共享后只算一次）
         return count_mixed_words(self.toPlainText())
 
     def get_debounced_word_count(self) -> int:
@@ -905,9 +972,80 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self._word_count_timer.start(800)
 
     def _recompute_word_count(self):
-        self._cached_word_count = count_mixed_words(self.toPlainText())
+        shared = self._shared_doc
+        if shared is not None:
+            self._cached_word_count = shared.word_count
+        else:
+            self._cached_word_count = count_mixed_words(self.toPlainText())
         self._word_count_dirty = False
         self.word_count_recomputed.emit()
+
+    # ═══════════════ 3.5.8 共享 Document attach/detach ═══════════════
+
+    @property
+    def shared_doc(self) -> Optional[SharedDocument]:
+        """当前 attach 的共享 Document（未 attach 时为 None）。"""
+        return self._shared_doc
+
+    def attach_shared_document(self, shared_doc: SharedDocument) -> None:
+        """attach 外部共享 QTextDocument（3.5.8）。
+
+        Editor 只 attach，不取得所有权（SharedDocument 拥有 qdocument）；
+        注册 Document 级字数统计函数（只算一次，两个 View 共享缓存）；
+        folding 收敛 Document 级：首次 attach 创建 Document 单实例并订阅其信号。
+        """
+        self._shared_doc = shared_doc
+        self.setDocument(shared_doc.qdocument)
+        if getattr(shared_doc, '_word_count_fn', None) is None:
+            shared_doc.set_word_count_fn(count_mixed_words)
+        if getattr(shared_doc, "_folding", None) is None:
+            shared_doc._folding = FoldingManager(
+                shared_doc.qdocument, parent=shared_doc
+            )
+        shared_folding = cast(FoldingManager, shared_doc._folding)
+        try:
+            shared_folding.fold_state_changed.connect(self._forward_fold_state_changed)
+        except (TypeError, RuntimeError):
+            pass
+        try:
+            shared_doc.bookmarksChanged.connect(self._repaint_bookmarks)
+        except (TypeError, RuntimeError):
+            pass
+        self.invalidate_word_count()
+
+    def detach_shared_document(self) -> None:
+        """detach：恢复独立编辑器 document。
+
+        新建的默认 QTextDocument 必须显式设置 QPlainTextDocumentLayout，
+        否则 setDocument 静默不绑定（规格 2.3 契约：layout 不兼容会被 Qt 拒绝）。
+        未 attach 过时直接返回——否则会新建空文档清掉独立编辑中的内容。
+        """
+        if self._shared_doc is None:
+            return
+        shared_hl = getattr(self._shared_doc, "_highlighter", None)
+        shared_folding = cast(FoldingManager, self._shared_doc._folding)
+        try:
+            shared_folding.fold_state_changed.disconnect(self._forward_fold_state_changed)
+        except (TypeError, RuntimeError):
+            pass
+        try:
+            self._shared_doc.bookmarksChanged.disconnect(self._repaint_bookmarks)
+        except (TypeError, RuntimeError):
+            pass
+        self._shared_doc = None
+        new_doc = QTextDocument(self)
+        new_doc.setDocumentLayout(QPlainTextDocumentLayout(new_doc))
+        self.setDocument(new_doc)
+        # 3.5.8（批次 5 修复）：detach 后 Editor 用全新 document，原共享高亮仍
+        # 挂在旧 Document 上——必须重建本地高亮，否则旧 Document 销毁后
+        # self._highlighter 悬垂（切主题时报 PygmentsHighlighter has been deleted）。
+        if self._highlighter is not None and self._highlighter is shared_hl:
+            self._highlighter = None
+            if self._filepath_or_ext:
+                self.set_file_type(self._filepath_or_ext)
+        self._local_folding = FoldingManager(new_doc, parent=self)
+        self._local_folding.fold_state_changed.connect(self._forward_fold_state_changed)
+        self.invalidate_word_count()  # 清掉共享 Document 的缓存词数，下次按独立内容重算
 
     def get_current_line(self) -> int:
         return int(self.textCursor().blockNumber() + 1)
@@ -953,13 +1091,33 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             if self._lazy_highlight.is_active():
                 self._lazy_highlight.goto_line(line)
 
+    @property
+    def _bookmarks(self) -> Set[int]:
+        """有效书签集合：attach 共享 Document 时用 Document 级书签，否则本地集合。
+
+        3.5.8（批次 5，规格 2.12）：书签标记文档位置 → Document 级，两个 View
+        看同一份；A 切换书签经 bookmarksChanged 信号驱动 B 重绘行号区。
+        """
+        shared = self._shared_doc
+        if shared is not None:
+            return shared.bookmarks
+        return self._local_bookmarks
+
+    def _repaint_bookmarks(self) -> None:
+        """书签集合变化后刷新行号区（含书签图标）。"""
+        self.line_number_area.update()
+
     def toggle_bookmark(self):
         line = self.textCursor().blockNumber()
-        if line in self._bookmarks:
-            self._bookmarks.discard(line)
+        bookmarks = self._bookmarks
+        if line in bookmarks:
+            bookmarks.discard(line)
         else:
-            self._bookmarks.add(line)
-        self.line_number_area.update()
+            bookmarks.add(line)
+        if self._shared_doc is not None:
+            self._shared_doc.bookmarksChanged.emit()
+        else:
+            self._repaint_bookmarks()
 
     def next_bookmark(self):
         current = self.textCursor().blockNumber()
@@ -985,10 +1143,39 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         return self._bookmarks.copy()
 
     def set_bookmarks(self, bookmarks: Set[int]):
-        self._bookmarks = bookmarks.copy()
-        self.line_number_area.update()
+        shared = self._shared_doc
+        if shared is not None:
+            shared._bookmarks.clear()
+            shared._bookmarks.update(bookmarks)
+            shared.bookmarksChanged.emit()
+        else:
+            self._local_bookmarks = bookmarks.copy()
+            self._repaint_bookmarks()
 
     # === 折叠 ===
+
+    @property
+    def _folding(self) -> FoldingManager:
+        """有效折叠管理器：attach 共享 Document 时用 Document 级单实例，否则本地实例。
+
+        3.5.8（批次 5，规格 2.10）：折叠可见性落在共享 QTextDocument 的 block 上，
+        同 Document 的所有 View 必须共享同一 FoldingManager，A 折叠 B 同步。
+        """
+        shared = self._shared_doc
+        if shared is not None:
+            shared_folding = getattr(shared, "_folding", None)
+            if shared_folding is not None:
+                return cast(FoldingManager, shared_folding)
+        return self._local_folding
+
+    def _forward_fold_state_changed(self) -> None:
+        """有效折叠管理器状态变化 → 本 View 重绘 + 转发给监听方（预览等）。"""
+        self.fold_state_changed.emit()
+        viewport = self.viewport()
+        if viewport is not None:
+            viewport.update()
+        if hasattr(self, "line_number_area"):
+            self.line_number_area.update()
 
     def _handle_fold_marker_click(self, y: int) -> None:
         """检测点击的折叠标记并切换折叠。"""

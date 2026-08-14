@@ -23,7 +23,7 @@ from contextlib import contextmanager
 from typing import Generator, Optional, Set
 from PyQt6.QtWidgets import (
     QPlainTextEdit, QWidget, QTextEdit, QVBoxLayout,
-    QMenu, QMessageBox
+    QMenu, QMessageBox, QPlainTextDocumentLayout
 )
 from PyQt6.QtCore import Qt, QRect, QSize, QTimer, QPointF, pyqtSignal
 from PyQt6.QtGui import (
@@ -166,6 +166,8 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self._word_count_timer.setSingleShot(True)
         self._word_count_timer.setInterval(800)
         self._word_count_timer.timeout.connect(self._recompute_word_count)
+        # 3.5.8 共享 Document：attach 后本 View 使用 Document 级统计/内容
+        self._shared_doc: Optional = None
 
         # 自动补全
         self.cursorPositionChanged.connect(self._trigger_completion)
@@ -923,6 +925,9 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         return int(max(0, doc.characterCount() - 1))
 
     def get_word_count(self) -> int:
+        shared = getattr(self, '_shared_doc', None)
+        if shared is not None:
+            return shared.word_count  # Document 级单一统计（共享后只算一次）
         return count_mixed_words(self.toPlainText())
 
     def get_debounced_word_count(self) -> int:
@@ -935,9 +940,38 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self._word_count_timer.start(800)
 
     def _recompute_word_count(self):
-        self._cached_word_count = count_mixed_words(self.toPlainText())
+        shared = getattr(self, '_shared_doc', None)
+        if shared is not None:
+            self._cached_word_count = shared.word_count
+        else:
+            self._cached_word_count = count_mixed_words(self.toPlainText())
         self._word_count_dirty = False
         self.word_count_recomputed.emit()
+
+    # ═══════════════ 3.5.8 共享 Document attach/detach ═══════════════
+
+    def attach_shared_document(self, shared_doc) -> None:
+        """attach 外部共享 QTextDocument（3.5.8）。
+
+        Editor 只 attach，不取得所有权（SharedDocument 拥有 qdocument）；
+        注册 Document 级字数统计函数（只算一次，两个 View 共享缓存）。
+        """
+        self._shared_doc = shared_doc
+        self.setDocument(shared_doc.qdocument)
+        if getattr(shared_doc, '_word_count_fn', None) is None:
+            shared_doc.set_word_count_fn(count_mixed_words)
+        self.invalidate_word_count()
+
+    def detach_shared_document(self) -> None:
+        """detach：恢复独立编辑器 document。
+
+        新建的默认 QTextDocument 必须显式设置 QPlainTextDocumentLayout，
+        否则 setDocument 静默不绑定（规格 2.3 契约：layout 不兼容会被 Qt 拒绝）。
+        """
+        self._shared_doc = None
+        new_doc = QTextDocument(self)
+        new_doc.setDocumentLayout(QPlainTextDocumentLayout(new_doc))
+        self.setDocument(new_doc)
 
     def get_current_line(self) -> int:
         return int(self.textCursor().blockNumber() + 1)

@@ -17,7 +17,7 @@ SaveSnapshot：每次异步保存捕获的内容快照。
 import os
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
+from typing import Callable, Optional
 
 from PyQt6.QtCore import QObject, pyqtSignal
 from PyQt6.QtGui import QTextDocument
@@ -77,6 +77,7 @@ class SharedDocument(QObject):
         eol: str = "LF",
         is_markdown: bool = False,
         untitled_number: Optional[int] = None,
+        word_count_fn: Optional[Callable[[str], int]] = None,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -89,6 +90,11 @@ class SharedDocument(QObject):
         # 未命名编号（仅 create_untitled 时分配）：Save As 后 display_name 会变，
         # 编号须独立存储才能在释放时可靠归还，不能从 display_name 反推。
         self.untitled_number: Optional[int] = untitled_number
+        # 字数统计：Document 级惰性单一源（规格 2.6 附带收益——两个 View 共享同一
+        # QTextDocument，一次输入只统计一次）。core 层不依赖 editor，计算函数注入。
+        self._word_count_fn = word_count_fn
+        self._word_count = 0
+        self._word_count_dirty = True  # 构造后首次访问才重算
 
         # 内容本体：SharedDocument 为 parent（QObject ownership 契约）；
         # 必须显式设置 QPlainTextDocumentLayout，否则 QPlainTextEdit.setDocument 静默不绑定。
@@ -115,6 +121,22 @@ class SharedDocument(QObject):
     def to_plain_text(self) -> str:
         return self.qdocument.toPlainText()
 
+    def set_word_count_fn(self, fn: Callable[[str], int]) -> None:
+        """注册字数统计函数（editor 层 attach 时注入，避免 core 依赖 editor）。"""
+        self._word_count_fn = fn
+        self._word_count_dirty = True
+
+    @property
+    def word_count(self) -> int:
+        """Document 级惰性字数统计：内容变化后首次访问才重算，两个 View 共享缓存。"""
+        if self._word_count_dirty and self._word_count_fn is not None:
+            self._word_count = self._word_count_fn(self.qdocument.toPlainText())
+            self._word_count_dirty = False
+        return self._word_count
+
+    def _invalidate_word_count(self) -> None:
+        self._word_count_dirty = True
+
     def set_content(self, content: str) -> None:
         """程序化设置内容（打开文件 / 外部 reload），复位修改状态与版本。
 
@@ -129,6 +151,7 @@ class SharedDocument(QObject):
             self.qdocument.blockSignals(False)
         self._dirty = False
         self.content_version = 0
+        self._invalidate_word_count()
         self.contentChanged.emit()
         self.dirtyChanged.emit(False)  # reload 后订阅方需收到"变干净"通知
 
@@ -136,6 +159,7 @@ class SharedDocument(QObject):
 
     def _on_contents_changed(self) -> None:
         self.content_version += 1
+        self._invalidate_word_count()
         self.contentChanged.emit()
 
     def _on_modification_changed(self, modified: bool) -> None:

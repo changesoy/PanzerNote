@@ -175,8 +175,16 @@ class LazyHighlightManager(QObject):
         if self._coordinator is not None:
             self._coordinator.set_highlighter(highlighter)
 
+    def _lazy_enabled(self) -> bool:
+        """E4：lazy 高亮激活条件——显式 lazy_highlight flag，或大文件模式
+        （large_file_mode 开启时达阈值文件自动启用，无需手动开 flag）。
+        flag 默认值不写死 True（实施方案约束），仅运行时按需判定；
+        无全局状态，关闭 large_file_mode / 关闭 tab 即自然恢复，不残留。
+        """
+        return is_enabled("lazy_highlight") or is_enabled("large_file_mode")
+
     def load_content(self, content: str) -> bool:
-        if not is_enabled("lazy_highlight"):
+        if not self._lazy_enabled():
             return False
 
         line_count = content.count('\n') + 1
@@ -214,7 +222,7 @@ class LazyHighlightManager(QObject):
         return True
 
     def _on_scroll(self):
-        if self._is_large_file and is_enabled("lazy_highlight"):
+        if self._is_large_file and self._lazy_enabled():
             if self._coordinator is not None:
                 self._coordinator.schedule()
             else:
@@ -270,7 +278,7 @@ class LazyHighlightManager(QObject):
                 self._schedule_visible_highlight()
 
     def is_active(self) -> bool:
-        return self._is_large_file and is_enabled("lazy_highlight")
+        return self._is_large_file and self._lazy_enabled()
 
     def goto_line(self, line: int):
         if self._is_large_file:

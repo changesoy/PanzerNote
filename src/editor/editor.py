@@ -47,7 +47,6 @@ from .text_stats import count_mixed_words
 from .bracket_matcher import find_matching_bracket
 from ..utils.perf_probe import measure as _perf_measure
 from ..utils.feature_flags import is_enabled as _feature_enabled
-from .completion import CompletionProvider, CompletionPopup
 from .folding import FoldingManager
 from ..themes.theme_aware_mixin import ThemeAwareMixin
 

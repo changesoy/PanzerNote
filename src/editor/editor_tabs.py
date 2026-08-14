@@ -374,12 +374,10 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     def _update_tab_tooltip(self, index: int) -> None:
         """3.5.12：标签 tooltip 区分已保存（完整路径）与未保存（「未保存」）。"""
         widget = self.widget(index)
-        tab_id = getattr(widget, 'tab_id', None)
-        if tab_id is None:
-            return
-        state = self._registry.get(tab_id)
-        if state is not None and state.filepath and not state.is_new:
-            self.setTabToolTip(index, state.filepath)
+        # D3b：路径读 Document（is_new 语义 = filepath is None）
+        shared_doc = getattr(widget, "shared_doc", None)
+        if shared_doc is not None and shared_doc.filepath:
+            self.setTabToolTip(index, shared_doc.filepath)
         else:
             self.setTabToolTip(index, "未保存")
 
@@ -408,10 +406,11 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     def _get_filepath_for_index(self, index: int) -> Optional[str]:
         """获取指定标签页的文件路径（供 DraggableTabBar 使用）"""
         widget = self.widget(index)
-        if widget and hasattr(widget, 'tab_id'):
-            state = self._registry.get(widget.tab_id)
-            if state and state.filepath and not state.is_new:
-                return state.filepath
+        if widget:
+            # D3b：路径读 Document（is_new 语义 = filepath is None）
+            shared_doc = getattr(widget, "shared_doc", None)
+            if shared_doc is not None and shared_doc.filepath:
+                return str(shared_doc.filepath)
         return None
 
     def _get_editor_from_widget(self, widget) -> Optional[Editor]:
@@ -560,9 +559,11 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             self._connect_editor_signals(editor)
         self._connect_doc_binding(widget)  # 重建 Document 信号绑定（按 View 粒度）
         # 3.5.11：未命名标签迁移，编号随标签转移（源释放、目标占用）
-        if state.is_new and state.untitled_number is not None:
-            source_tabs._used_untitled_numbers.discard(state.untitled_number)
-            self._used_untitled_numbers.add(state.untitled_number)
+        # D3b：编号读 Document（is_new 语义 = filepath is None）
+        if (shared_doc is not None and shared_doc.filepath is None
+                and shared_doc.untitled_number is not None):
+            source_tabs._used_untitled_numbers.discard(shared_doc.untitled_number)
+            self._used_untitled_numbers.add(shared_doc.untitled_number)
         # 关键：每个面板 _next_tab_id 独立计数，提升避免未来生成重复 tab_id
         self._next_tab_id = max(self._next_tab_id, tab_id + 1)
         self._update_tab_tooltip(self.indexOf(widget))
@@ -650,16 +651,16 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         render_preview: bool = True,
     ) -> int:
         """打开文件"""
-        # 检查文件是否已经打开
+        # 检查文件是否已经打开（D3b：路径比较读 Document）
         for i in range(self.count()):
             widget = self.widget(i)
-            tab_id = getattr(widget, 'tab_id', None)
-            if tab_id is not None:
-                state = self._registry.get(tab_id)
-                if state and state.filepath == filepath:
-                    if activate:
-                        self.setCurrentIndex(i)
-                    return i
+            if widget is None:
+                continue
+            shared_doc = getattr(widget, "shared_doc", None)
+            if shared_doc is not None and shared_doc.filepath == filepath:
+                if activate:
+                    self.setCurrentIndex(i)
+                return i
 
         # 3.5.8（批次 4b，规格 2.1 自动共享）：另一面板已打开同一文件 →
         # 不重新读盘，直接新建 View attach 到共享 Document（内容/编码/eol 属 Document）。
@@ -908,14 +909,13 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if not widget or not hasattr(widget, 'tab_id'):
             return False, 0
 
-        state = self._registry.get(widget.tab_id)
-        if state is None:
-            return False, 0
-
-        if not state.filepath or state.is_new:
+        # D3b：路径/编码读 Document（is_new 语义 = filepath is None）
+        shared_doc = getattr(widget, "shared_doc", None)
+        filepath = shared_doc.filepath if shared_doc is not None else None
+        if not filepath:
             return self.save_current_as()
-
-        return self._save_file(widget, state.filepath, state.encoding)
+        encoding = shared_doc.encoding if shared_doc is not None else "UTF-8"
+        return self._save_file(widget, filepath, encoding)
 
     def save_current_as(self) -> Tuple[bool, int]:
         """另存为"""
@@ -926,19 +926,18 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         tid = getattr(widget, 'tab_id', None)
         if tid is None:
             return False, 0
-        state = self._registry.get(tid)
-        if state is None:
-            return False, 0
+        shared_doc = getattr(widget, "shared_doc", None)
 
-        if state.filepath:
-            suggested_name = state.filepath
+        # D3b：路径/编码读 Document（is_new 语义 = filepath is None）
+        if shared_doc is not None and shared_doc.filepath:
+            suggested_name = shared_doc.filepath
         else:
             suggested_name = os.path.join(
                 self.config.get_notebooks_path(),
                 self._strip_tab_suffix(self.tabText(self.currentIndex()))
             )
 
-        current_encoding = state.encoding
+        current_encoding = shared_doc.encoding if shared_doc is not None else "UTF-8"
 
         dialog = SaveAsDialog(suggested_name, current_encoding, self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
@@ -970,8 +969,10 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 )
                 return False, 0
 
+        # D3b：is_new 语义 = filepath is None；编号/副本判定读 Document
+        is_new = shared_doc is None or shared_doc.filepath is None
         success, chars = self._save_file(
-            widget, filepath, encoding, is_copy=not state.is_new
+            widget, filepath, encoding, is_copy=not is_new
         )
 
         if success:
@@ -980,9 +981,10 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 self._pending_save_as_info[tab_id] = {
                     "filepath": filepath,
                     "encoding": encoding,
-                    "untitled_number": state.untitled_number if state.is_new else None,
+                    "untitled_number": (shared_doc.untitled_number if shared_doc is not None else None)
+                                       if is_new else None,
                     # 已有文件另存为 = 副本保存：当前标签保持指向原文件
-                    "is_copy": not state.is_new,
+                    "is_copy": not is_new,
                 }
 
         return success, chars
@@ -994,9 +996,6 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         mark_new_saved / 编号释放 / 标题更新（与 save_current_as 一致）。
         同名冲突弹框确认（默认不覆盖）；空内容也直接落盘（行为统一）。
         """
-        state = self._registry.get(tab_id)
-        if state is None or not state.is_new or state.filepath:
-            return False, 0
         widget = None
         for i in range(self.count()):
             w = self.widget(i)
@@ -1006,7 +1005,12 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if widget is None:
             return False, 0
 
-        filename = state.display_name or f"未命名{state.untitled_number or 1}.txt"
+        # D3b：is_new 语义 = filepath is None；display_name/编号/编码读 Document
+        shared_doc = getattr(widget, "shared_doc", None)
+        if shared_doc is None or shared_doc.filepath is not None:
+            return False, 0
+
+        filename = shared_doc.display_name or f"未命名{shared_doc.untitled_number or 1}.txt"
         filepath = os.path.join(dest_folder, filename)
 
         if os.path.exists(filepath):
@@ -1020,12 +1024,12 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             if reply != QMessageBox.StandardButton.Yes:
                 return False, 0
 
-        success, chars = self._save_file(widget, filepath, state.encoding)
+        success, chars = self._save_file(widget, filepath, shared_doc.encoding)
         if success:
             self._pending_save_as_info[tab_id] = {
                 "filepath": filepath,
-                "encoding": state.encoding,
-                "untitled_number": state.untitled_number if state.is_new else None,
+                "encoding": shared_doc.encoding,
+                "untitled_number": shared_doc.untitled_number,
                 "is_copy": False,
             }
         return success, chars
@@ -1191,7 +1195,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                       if shared_doc is not None else state.last_saved_chars)
 
         # EOL 规范化：将编辑器内部的 \n 替换为文档目标行尾
-        current_eol_label = state.eol
+        # D3b：eol 读 Document（Document 级语义，切换全局生效）
+        current_eol_label = shared_doc.eol if shared_doc is not None else state.eol
         target_eol = {"LF": "\n", "CRLF": "\r\n", "CR": "\r"}.get(current_eol_label, "\n")
         from .eol_utils import normalize_eol
         content = normalize_eol(content, target_eol)
@@ -1199,7 +1204,11 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         new_chars = max(0, len(content) - last_chars)
 
         if not is_copy:
-            state.encoding = encoding
+            # D3b：编码写 Document（TabState.encoding 不再维护）
+            if shared_doc is not None:
+                shared_doc.encoding = encoding
+            else:
+                state.encoding = encoding
 
         self._pending_save_info[tab_id] = {
             "content": content,
@@ -1254,9 +1263,10 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             widget = self.widget(i)
             if getattr(widget, 'tab_id', None) != tab_id:
                 continue
-            state = self._registry.get(tab_id)
-            if state and state.filepath:
-                self._save_file(widget, state.filepath, state.encoding)
+            # D3b：路径/编码读 Document
+            shared_doc = getattr(widget, "shared_doc", None)
+            if shared_doc is not None and shared_doc.filepath:
+                self._save_file(widget, shared_doc.filepath, shared_doc.encoding)
             return
 
     def _on_shared_save_finished(self, shared_doc, snapshot, tab_id: int,
@@ -1289,8 +1299,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             shared_doc = getattr(widget, "shared_doc", None)
             is_modified = shared_doc.dirty if shared_doc is not None else bool(state and state.is_modified)
             if is_modified and state is not None:
-                if state.filepath and not state.is_new:
-                    success, chars = self._save_file(widget, state.filepath, state.encoding)
+                # D3b：路径/编码读 Document（is_new 语义 = filepath is None）
+                if shared_doc is not None and shared_doc.filepath:
+                    success, chars = self._save_file(widget, shared_doc.filepath, shared_doc.encoding)
                     if success:
                         total_chars += chars
                 else:
@@ -1324,15 +1335,20 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             is_modified = shared_doc.dirty if shared_doc is not None else bool(state and state.is_modified)
             if not is_modified or state is None:
                 continue
-            if state.filepath and not state.is_new:
-                success, _ = self._save_file(widget, state.filepath, state.encoding)
+            # D3b：路径/编码读 Document（is_new 语义 = filepath is None）
+            if shared_doc is not None and shared_doc.filepath:
+                success, _ = self._save_file(widget, shared_doc.filepath, shared_doc.encoding)
                 if not success:
                     return False
             else:
                 editor = self._get_editor_from_widget(widget)
                 content = editor.toPlainText() if editor else ""
-                if state.is_new and len(content.strip()) == 0:
-                    # 空未命名跳过（与 get_unsaved_tab_infos 一致，关闭确认框未列出）
+                # 空未命名跳过（与 get_unsaved_tab_infos 一致，关闭确认框未列出）
+                if shared_doc is not None:
+                    is_unnamed = shared_doc.filepath is None
+                else:
+                    is_unnamed = bool(state and state.is_new)
+                if is_unnamed and len(content.strip()) == 0:
                     continue
                 unnamed_indices.append(i)
 
@@ -1389,10 +1405,12 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
             tab_infos.append({
                 "tab_id": tab_id,
-                "filepath": state.filepath,
+                # D3b：filepath/is_new/encoding 读 Document
+                "filepath": shared_doc.filepath if shared_doc is not None else state.filepath,
                 "content": content,
-                "encoding": state.encoding,
-                "is_new": state.is_new,
+                "encoding": shared_doc.encoding if shared_doc is not None else state.encoding,
+                "is_new": (shared_doc.filepath is None if shared_doc is not None
+                           else state.is_new),
                 "is_modified": True,
                 "doc_key": doc_key,
                 "panel": self._panel_name,
@@ -1454,9 +1472,11 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         scroll_pos = entry.get("scroll_position", 0)
         for i in range(self.count()):
             w = self.widget(i)
-            tid = getattr(w, 'tab_id', None) if w is not None else None
-            state = self._registry.get(tid) if tid else None
-            if state and state.filepath == filepath:
+            if w is None:
+                continue
+            # D3b：路径读 Document
+            shared_doc = getattr(w, "shared_doc", None)
+            if shared_doc is not None and shared_doc.filepath == filepath:
                 self.setCurrentIndex(i)
                 return True
         index = self.open_file(filepath)
@@ -1679,20 +1699,12 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self.setTabText(index, name + title[len(stripped):])
 
     def _on_view_path_changed(self, widget, path: str) -> None:
-        """Document.pathChanged → 本 View 路径状态与预览基准跟随（规格 2.8）。
+        """Document.pathChanged → 本 View 预览基准跟随（规格 2.8）。
 
-        Save As（首次保存）或文件移动后 Document 换路径，pathChanged 广播给
-        所有 View：本面板的 TabState 同步指向新路径——否则其它面板的 View
-        仍持旧路径，保存会写回旧文件（数据错位）。
+        D3b：路径 authority 在 Document——pathChanged 由 bind_path 广播给所有
+        View 时无需再回写 TabState（state.filepath 已退役，读点全部走 Document）。
+        仅保留预览 widget 的 base_path / invalidate 副作用。
         """
-        tab_id = getattr(widget, "tab_id", None)
-        if tab_id is not None:
-            state = self._registry.get(tab_id)
-            if state is not None and path:
-                state.filepath = path
-                state.display_name = os.path.basename(path)
-                if state.is_new:
-                    state.is_new = False
         if not isinstance(widget, MarkdownPreviewWidget):
             return
         base = os.path.dirname(os.path.abspath(path)) if path else "."
@@ -1745,7 +1757,11 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             content = ""
 
         title = self._strip_tab_suffix(self.tabText(index))
-        is_new = state.is_new
+        # D3b：is_new 语义 = filepath is None（读 Document；非共享回退 TabState）
+        if shared_doc is not None:
+            is_new = shared_doc.filepath is None
+        else:
+            is_new = state.is_new
         is_empty = len(content.strip()) == 0
 
         if is_new and is_empty:
@@ -1791,10 +1807,16 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                         self.setCurrentIndex(old_index)
                         return False
                 else:
-                    filepath = state.filepath
+                    # D3b：路径/编码读 Document（非共享回退 TabState）
+                    if shared_doc is not None:
+                        filepath = shared_doc.filepath
+                        encoding = shared_doc.encoding
+                    else:
+                        filepath = state.filepath
+                        encoding = state.encoding
                     if not filepath:
                         return False
-                    success, _ = self._save_file(widget, filepath, state.encoding)
+                    success, _ = self._save_file(widget, filepath, encoding)
                     if not success:
                         return False
                 if self._save_manager.is_saving(tab_id):
@@ -1803,10 +1825,15 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             elif clicked == cancel_btn:
                 return False
 
-        if state.is_new:
+        # D3b：is_new 语义 = filepath is None（读 Document）
+        if shared_doc is not None:
+            is_new_now = shared_doc.filepath is None
+        else:
+            is_new_now = state.is_new
+        if is_new_now:
             self._release_untitled_number(title)
         else:
-            filepath = state.filepath
+            filepath = shared_doc.filepath if shared_doc is not None else state.filepath
             if filepath and os.path.isfile(filepath):
                 self._record_closed_tab(filepath, widget)
 
@@ -1882,9 +1909,16 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         state = self._registry.get(widget.tab_id)
         if state is None:
             return
-        filepath = state.filepath
+        # D3b：路径/is_new 读 Document（is_new 语义 = filepath is None）
+        shared_doc = getattr(widget, "shared_doc", None)
+        if shared_doc is not None:
+            filepath = shared_doc.filepath
+            is_new = filepath is None
+        else:
+            filepath = state.filepath
+            is_new = state.is_new
 
-        if not filepath or state.is_new:
+        if not filepath or is_new:
             self._context_save_as(index)
             return
 
@@ -1895,7 +1929,6 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             new_path = os.path.join(os.path.dirname(filepath), new_name)
             # 3.5.8（修复）：目标路径已被其它已打开 Document 占用 → 拒绝（与移动 /
             # Save As 同规则，避免两个 Document 指向同一路径的非法形态）。
-            shared_doc = getattr(widget, "shared_doc", None)
             if (shared_doc is not None
                     and self._document_registry.is_path_owned_by_other(
                         shared_doc.document_id, new_path)):
@@ -2043,13 +2076,14 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             if state is None:
                 return
             save_as_info = self._pending_save_as_info.pop(tab_id, None)
+            # D3b：路径 authority 在 Document——提前取本 View 的共享 Document
+            shared_doc = getattr(widget, "shared_doc", None)
             if save_as_info and save_as_info.get("is_copy"):
                 # 已有文件另存为副本：保存成功，但当前标签仍指向原文件。
                 # 跳过全部保存副作用（不清 dirty、不改标题、不结算收益），
                 # 避免原文件未保存的修改被误标记为已保存（数据安全）。
                 self._pending_save_info.pop(tab_id, None)
                 # 3.5.8（批次 4d）：副本路径不属当前 Document → 释放 pending 预留
-                shared_doc = getattr(widget, "shared_doc", None)
                 if shared_doc is not None:
                     self._document_registry.cancel_reservation(
                         shared_doc.document_id, save_as_info["filepath"]
@@ -2072,8 +2106,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 content = pending["content"]
                 new_chars = pending["new_chars"]
                 # D3a：保存统计迁移至 Document 级（on_save_succeeded 同语义；
-                # 非共享时回退 TabState.mark_saved）
-                shared_doc = getattr(widget, "shared_doc", None)
+                # 非共享时回退 TabState.mark_saved；shared_doc 取函数顶部）
                 if shared_doc is not None:
                     shared_doc.last_saved_chars = len(content)
                     shared_doc.last_text_length = len(content)
@@ -2084,9 +2117,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
             if save_as_info:
                 # 新建文件首次保存：正式化为该文件
+                # D3b：TabState.mark_new_saved 退役——Document 由 commit_path
+                # bind_path 正式化（filepath/display_name/encoding 均在 Document）。
                 filepath_new = save_as_info["filepath"]
-                encoding_new = save_as_info["encoding"]
-                state.mark_new_saved(filepath_new, encoding_new)
                 if save_as_info.get("untitled_number"):
                     self._used_untitled_numbers.discard(save_as_info["untitled_number"])
                 if editor:
@@ -2094,12 +2127,12 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 self.setTabText(index, os.path.basename(filepath_new))
                 # 3.5.8（批次 4d）：pending → path_index，Document 正式绑定新路径
                 # （nameChanged/pathChanged 驱动所有 View 标题同步）
-                shared_doc = getattr(widget, "shared_doc", None)
                 if shared_doc is not None:
                     self._document_registry.commit_path(shared_doc, filepath_new)
 
-            if state.filepath:
-                self._session_manager.remove_autosave_for_file(state.filepath)
+            # D3b：autosave 清理路径读 Document
+            if shared_doc is not None and shared_doc.filepath:
+                self._session_manager.remove_autosave_for_file(shared_doc.filepath)
             self._update_tab_tooltip(index)
             self.file_saved.emit()
             if tab_id in self._pending_close_tab_ids:
@@ -2147,10 +2180,16 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         state = self._registry.get(tab_id)
         title = self._strip_tab_suffix(self.tabText(index))
 
-        if state and state.is_new:
+        # D3b：is_new 语义 = filepath is None（读 Document）
+        shared_doc = getattr(widget, "shared_doc", None)
+        if shared_doc is not None:
+            is_new = shared_doc.filepath is None
+        else:
+            is_new = bool(state and state.is_new)
+        if is_new:
             self._release_untitled_number(title)
         else:
-            filepath = state.filepath if state else None
+            filepath = shared_doc.filepath if shared_doc is not None else (state.filepath if state else None)
             if filepath and os.path.isfile(filepath):
                 self._record_closed_tab(filepath, widget)
 
@@ -2179,40 +2218,43 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             widget = self.widget(i)
             if widget is None:
                 continue
-            tab_id = getattr(widget, 'tab_id', None)
-            if tab_id is None:
-                continue
-            state = self._registry.get(tab_id)
-            if state and state.filepath and not state.is_new:
-                paths.append(state.filepath)
+            # D3b：路径读 Document（is_new 语义 = filepath is None）
+            shared_doc = getattr(widget, "shared_doc", None)
+            if shared_doc is not None and shared_doc.filepath:
+                paths.append(shared_doc.filepath)
         return paths
 
     def get_current_encoding(self) -> str:
         """获取当前文件的编码"""
         widget = self.currentWidget()
-        if widget and hasattr(widget, 'tab_id'):
-            state = self._registry.get(widget.tab_id)
-            if state:
-                return str(state.encoding)
+        if widget:
+            shared_doc = getattr(widget, "shared_doc", None)
+            if shared_doc is not None:
+                return str(shared_doc.encoding)
         return "UTF-8"
 
     def get_current_eol(self) -> str:
         """获取当前文档的行尾类型（LF / CRLF / CR / Mixed）"""
         widget = self.currentWidget()
-        if widget and hasattr(widget, 'tab_id'):
-            state = self._registry.get(widget.tab_id)
-            if state:
-                return str(state.eol)
+        if widget:
+            shared_doc = getattr(widget, "shared_doc", None)
+            if shared_doc is not None:
+                return str(shared_doc.eol)
         return "LF"
 
     def set_current_eol(self, eol: str) -> None:
         """切换当前文档的行尾类型，并标记为已修改"""
         widget = self.currentWidget()
         if widget and hasattr(widget, 'tab_id'):
-            state = self._registry.get(widget.tab_id)
-            if state is None:
-                return
-            state.eol = eol
+            shared_doc = getattr(widget, "shared_doc", None)
+            # D3b：eol 写 Document（Document 级语义，多 View 一致）
+            if shared_doc is None:
+                state = self._registry.get(widget.tab_id)
+                if state is None:
+                    return
+                state.eol = eol
+            else:
+                shared_doc.eol = eol
             # D3a：dirty 由 doc.setModified(True) 驱动（Document 单一源）
             editor = self._get_editor_from_widget(widget)
             if editor:
@@ -2243,10 +2285,17 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 if is_modified:
                     editor = self._get_editor_from_widget(widget)
                     content = editor.toPlainText() if editor else ""
-                    if state.is_new and len(content.strip()) == 0:
+                    # D3b：is_new/filepath 读 Document（is_new 语义 = filepath is None）
+                    if shared_doc is not None:
+                        is_new = shared_doc.filepath is None
+                        filepath = shared_doc.filepath
+                    else:
+                        is_new = state.is_new
+                        filepath = state.filepath
+                    if is_new and len(content.strip()) == 0:
                         continue
-                    if state.filepath:
-                        unsaved.append(os.path.basename(state.filepath))
+                    if filepath:
+                        unsaved.append(os.path.basename(filepath))
                     else:
                         unsaved.append(self._strip_tab_suffix(self.tabText(i)))
         return unsaved
@@ -2281,12 +2330,19 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 continue
             editor = self._get_editor_from_widget(widget)
             content = editor.toPlainText() if editor else ""
-            if state.is_new and len(content.strip()) == 0:
+            # D3b：is_new/filepath 读 Document（is_new 语义 = filepath is None）
+            if shared_doc is not None:
+                is_new = shared_doc.filepath is None
+                filepath = shared_doc.filepath
+            else:
+                is_new = bool(state and state.is_new)
+                filepath = state.filepath if state else None
+            if is_new and len(content.strip()) == 0:
                 continue
-            if state.filepath:
+            if filepath:
                 infos.append({
-                    "title": os.path.basename(state.filepath),
-                    "filepath": state.filepath,
+                    "title": os.path.basename(filepath),
+                    "filepath": filepath,
                     "document_id": doc_id,
                 })
             else:
@@ -2319,10 +2375,11 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         tab_id = getattr(widget, 'tab_id', None)
         if tab_id is None:
             return None
-        state = self._registry.get(tab_id)
-        if state is None or not state.filepath:
+        # D3b：filepath 读 Document
+        shared_doc = getattr(widget, "shared_doc", None)
+        filepath = shared_doc.filepath if shared_doc is not None else None
+        if not filepath:
             return None
-        filepath = state.filepath
         editor = self._get_editor_from_widget(widget)
         result: Dict[str, object] = {"filepath": filepath}
         if editor:
@@ -2343,9 +2400,17 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             state = self._registry.get(tab_id)
             if state is None:
                 continue
+            shared_doc = getattr(widget, "shared_doc", None)
+            # D3b：文件属性以 Document 为准——先同步 TabState 导出镜像
+            # （filepath/is_new/display_name/untitled_number），保证 to_open_files_list
+            # 导出的是 Document 当前值（Save As / 改名后 TabState 不再被写入）。
+            if shared_doc is not None:
+                state.filepath = shared_doc.filepath
+                state.display_name = shared_doc.display_name
+                state.is_new = shared_doc.filepath is None
+                state.untitled_number = shared_doc.untitled_number
             if state.is_new or not state.filepath:
                 # 3.5.10：未命名文件（dirty 时）同步内容，随条目恢复编辑现场
-                shared_doc = getattr(widget, "shared_doc", None)
                 if shared_doc is not None and shared_doc.dirty:
                     editor = self._get_editor_from_widget(widget)
                     if editor is not None:
@@ -2503,17 +2568,14 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             shared_doc = None
             for i in range(self.count()):
                 widget = self.widget(i)
-                tab_id = getattr(widget, 'tab_id', None)
-                if tab_id is not None:
-                    state = self._registry.get(tab_id)
-                    if state and state.filepath == filepath:
-                        shared_doc = getattr(widget, "shared_doc", None)
-                        # D3a：dirty 单一源 = SharedDocument
-                        is_dirty = (shared_doc.dirty if shared_doc is not None
-                                    else state.is_modified)
-                        if is_dirty:
-                            self._save_file(widget, filepath, state.encoding)
-                        break
+                # D3b：路径读 Document
+                w_doc = getattr(widget, "shared_doc", None)
+                if w_doc is not None and w_doc.filepath == filepath:
+                    shared_doc = w_doc
+                    # D3a：dirty 单一源 = SharedDocument
+                    if shared_doc.dirty:
+                        self._save_file(widget, filepath, shared_doc.encoding)
+                    break
 
             # 3.5.8：共享 Document 移动前检查目标路径未被其它 Document 占用
             # （否则移动后两个 Document 指向同一路径，编辑/保存错乱）
@@ -2533,17 +2595,20 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             # 广播 pathChanged/nameChanged，所有 View 的路径/标题随 Document 同步）
             for i in range(self.count()):
                 widget = self.widget(i)
+                # D3b：路径读 Document（非共享回退 TabState）
+                w_doc = getattr(widget, "shared_doc", None)
                 tab_id = getattr(widget, 'tab_id', None)
-                if tab_id is not None:
+                if w_doc is not None:
+                    if w_doc.filepath == filepath:
+                        self._document_registry.move_path(w_doc, new_path)
+                    break
+                elif tab_id is not None:
                     state = self._registry.get(tab_id)
                     if state and state.filepath == filepath:
-                        if shared_doc is not None:
-                            self._document_registry.move_path(shared_doc, new_path)
-                        else:
-                            state.filepath = new_path
-                            state.display_name = filename
-                            self.setTabText(i, filename)
-                        break
+                        state.filepath = new_path
+                        state.display_name = filename
+                        self.setTabText(i, filename)
+                    break
 
             return True
         except Exception as e:
@@ -2572,15 +2637,18 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             # 若标签打开且已修改，先保存再复制，保证副本包含最新内容
             for i in range(self.count()):
                 widget = self.widget(i)
+                # D3b：路径读 Document（非共享回退 TabState）
+                w_doc = getattr(widget, "shared_doc", None)
                 tab_id = getattr(widget, 'tab_id', None)
-                if tab_id is not None:
+                if w_doc is not None:
+                    if w_doc.filepath == filepath:
+                        if w_doc.dirty:
+                            self._save_file(widget, filepath, w_doc.encoding)
+                        break
+                elif tab_id is not None:
                     state = self._registry.get(tab_id)
                     if state and state.filepath == filepath:
-                        # D3a：dirty 单一源 = SharedDocument
-                        shared_doc = getattr(widget, "shared_doc", None)
-                        is_dirty = (shared_doc.dirty if shared_doc is not None
-                                    else state.is_modified)
-                        if is_dirty:
+                        if state.is_modified:
                             self._save_file(widget, filepath, state.encoding)
                         break
 
@@ -2603,13 +2671,11 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         indices = []
         for i in range(self.count()):
             widget = self.widget(i)
-            tab_id = getattr(widget, 'tab_id', None)
-            if tab_id is None:
+            # D3b：路径读 Document
+            w_doc = getattr(widget, "shared_doc", None)
+            if w_doc is None or not w_doc.filepath:
                 continue
-            state = self._registry.get(tab_id)
-            if not state or not state.filepath:
-                continue
-            fp = os.path.normpath(state.filepath)
+            fp = os.path.normpath(w_doc.filepath)
             if is_dir:
                 matched = fp.startswith(norm + os.sep)
             else:
@@ -2663,15 +2729,24 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             if msg.clickedButton() is not close_btn:
                 return
 
-        if state.is_new:
+        # D3b：is_new 语义 = filepath is None（读 Document）
+        if shared_doc is not None:
+            is_new = shared_doc.filepath is None
+        else:
+            is_new = state.is_new
+        if is_new:
             title = self._strip_tab_suffix(self.tabText(index))
             self._release_untitled_number(title)
         else:
-            filepath = state.filepath
+            filepath = shared_doc.filepath if shared_doc is not None else state.filepath
             if filepath and os.path.isfile(filepath):
                 self._record_closed_tab(filepath, widget)
 
-        if state.filepath:
+        # D3b：autosave 清理路径读 Document
+        if shared_doc is not None:
+            if shared_doc.filepath:
+                self._session_manager.remove_autosave_for_file(shared_doc.filepath)
+        elif state.filepath:
             self._session_manager.remove_autosave_for_file(state.filepath)
 
         self._save_manager.unregister_tab(tab_id)
@@ -2847,16 +2922,14 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             widget = self.widget(i)
             if widget is None:
                 continue
-            tab_id = getattr(widget, 'tab_id', None)
-            if tab_id is None:
-                continue
-            state = self._registry.get(tab_id)
-            if state is None or not state.filepath:
+            # D3b：路径读 Document
+            shared_doc = getattr(widget, "shared_doc", None)
+            if shared_doc is None or not shared_doc.filepath:
                 continue
             editor = self._get_editor_from_widget(widget)
             if editor is not None:
                 bookmarks = editor.get_bookmarks()
-                self.config.set_bookmarks(state.filepath, list(bookmarks) if bookmarks else [])
+                self.config.set_bookmarks(shared_doc.filepath, list(bookmarks) if bookmarks else [])
 
     def _restore_folds(self, widget, filepath: str, lines: list) -> None:
         """恢复已保存的折叠状态。"""
@@ -2872,13 +2945,11 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             widget = self.widget(i)
             if widget is None:
                 continue
-            tab_id = getattr(widget, 'tab_id', None)
-            if tab_id is None:
-                continue
-            state = self._registry.get(tab_id)
-            if state is None or not state.filepath:
+            # D3b：路径读 Document
+            shared_doc = getattr(widget, "shared_doc", None)
+            if shared_doc is None or not shared_doc.filepath:
                 continue
             editor = self._get_editor_from_widget(widget)
             if editor is not None and hasattr(editor, '_folding'):
                 collapsed = editor._folding.get_collapsed_lines()
-                self.config.set_folds(state.filepath, collapsed if collapsed else [])
+                self.config.set_folds(shared_doc.filepath, collapsed if collapsed else [])

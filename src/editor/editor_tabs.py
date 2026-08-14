@@ -23,6 +23,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QMimeData, QPoint, QByteArray
 from PyQt6.QtGui import QFont, QTextCursor, QColor, QTextCharFormat, QDrag, QAction
 
 from ..core.config import Config
+from ..core import workspace_entries
 from ..core.document_model import TabState, TabStateRegistry
 from ..core.document_registry import DocumentRegistry
 from ..core.document_view_binding import DocumentViewBinding
@@ -1432,16 +1433,12 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         for i in range(self.count()):
             widget = self.widget(i)
             if widget != current:
-                tab_id = getattr(widget, 'tab_id', None)
-                if tab_id:
-                    state = self._registry.get(tab_id)
-                    if state:
-                        state.history.clear()
-                    editor = self._get_editor_from_widget(widget)
-                    if editor:
-                        doc = editor.document()
-                        if doc is not None:
-                            doc.clearUndoRedoStacks()
+                # D3c：history 字段已删（TabState 仅剩过渡字段）
+                editor = self._get_editor_from_widget(widget)
+                if editor:
+                    doc = editor.document()
+                    if doc is not None:
+                        doc.clearUndoRedoStacks()
 
     def close_current_tab(self):
         if self.count() > 0:
@@ -1583,8 +1580,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             vbar = widget.editor.verticalScrollBar()
             scroll = vbar.value() if vbar is not None else 0
         # 3.5.8（批次 5，ViewState 接线）：View 级位置快照 → view_state
-        # （workspace schema 不动，TabState.cursor_position/scroll_position 照旧由
-        # get_open_files_info 维护；view_state 供关闭/迁移时保留 View 侧状态）。
+        # （workspace schema 不动；D3c 后 TabState.cursor_position/scroll_position
+        # 不再维护，workspace 导出经 get_open_files_info 实时捕获 view_state）。
         view_state = getattr(widget, "view_state", None)
         if view_state is not None:
             view_state.cursor_position = cursor
@@ -2391,39 +2388,67 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         return result
 
     def get_open_files_info(self) -> List[Dict]:
-        # 先把每个标签的实时光标/滚动位置同步到 TabState，再经 registry 导出
+        """导出为 workspace.json 的 open_files 条目（D3c：经 D2 适配层导出）。
+
+        View 位置状态单一源 = widget.view_state：先实时捕获 cursor/scroll
+        写入 view_state，再经 workspace_entries 纯函数导出（named / untitled
+        逐键等价现 schema）；未命名 dirty 内容即时从 Document 读取
+        （TabState.export_content / cursor_position / scroll_position 退役）。
+        """
+        entries: List[Dict] = []
         for i in range(self.count()):
             widget = self.widget(i)
             tab_id = getattr(widget, 'tab_id', None)
             if tab_id is None:
                 continue
-            state = self._registry.get(tab_id)
-            if state is None:
-                continue
             shared_doc = getattr(widget, "shared_doc", None)
-            # D3b：文件属性以 Document 为准——先同步 TabState 导出镜像
-            # （filepath/is_new/display_name/untitled_number），保证 to_open_files_list
-            # 导出的是 Document 当前值（Save As / 改名后 TabState 不再被写入）。
-            if shared_doc is not None:
-                state.filepath = shared_doc.filepath
-                state.display_name = shared_doc.display_name
-                state.is_new = shared_doc.filepath is None
-                state.untitled_number = shared_doc.untitled_number
-            if state.is_new or not state.filepath:
-                # 3.5.10：未命名文件（dirty 时）同步内容，随条目恢复编辑现场
-                if shared_doc is not None and shared_doc.dirty:
+            if shared_doc is None:
+                # 过渡期回退：无 Document 时读 TabState（D4 后无此分支）
+                state = self._registry.get(tab_id)
+                if state is None:
+                    continue
+                if state.is_new or not state.filepath:
                     editor = self._get_editor_from_widget(widget)
-                    if editor is not None:
-                        state.export_content = editor.toPlainText()
+                    content = (
+                        editor.toPlainText()
+                        if editor is not None and state.is_modified else None
+                    )
+                    entries.append(workspace_entries.untitled_entry(
+                        state.display_name, state.untitled_number, content))
+                else:
+                    editor = self._get_editor_from_widget(widget)
+                    if editor is None:
+                        continue
+                    cursor = editor.textCursor().position()
+                    vbar = editor.verticalScrollBar()
+                    entries.append(workspace_entries.named_entry(
+                        state.filepath, cursor,
+                        vbar.value() if vbar is not None else 0))
                 continue
+            # 共享 Document：View 位置实时捕获写入 view_state
             editor = self._get_editor_from_widget(widget)
-            if editor is None:
-                continue
-            cursor = editor.textCursor()
-            vbar2 = editor.verticalScrollBar()
-            state.cursor_position = cursor.position()
-            state.scroll_position = vbar2.value() if vbar2 is not None else 0
-        return self._registry.to_open_files_list()
+            if editor is not None:
+                cursor = editor.textCursor().position()
+                vbar = editor.verticalScrollBar()
+                scroll = vbar.value() if vbar is not None else 0
+                view_state = getattr(widget, "view_state", None)
+                if view_state is not None:
+                    view_state.cursor_position = cursor
+                    view_state.scroll_position = scroll
+            if shared_doc.filepath is None:
+                # 未命名条目：dirty 时携带即时内容（恢复编辑现场）
+                content = shared_doc.to_plain_text() if shared_doc.dirty else None
+                entries.append(workspace_entries.untitled_entry(
+                    shared_doc.display_name, shared_doc.untitled_number, content))
+            else:
+                if editor is None:
+                    continue
+                cursor = editor.textCursor().position()
+                vbar = editor.verticalScrollBar()
+                entries.append(workspace_entries.named_entry(
+                    shared_doc.filepath, cursor,
+                    vbar.value() if vbar is not None else 0))
+        return entries
 
     # === 文档状态公开接口（替代 MainWindow 的私有穿透） ===
 
@@ -2463,13 +2488,38 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if editor is not None and editor.shared_doc is not None:
             editor.shared_doc.qdocument.setModified(True)
 
-    def get_tab_state(self, tab_id: int) -> Optional[TabState]:
-        """获取指定标签的文档状态（只读用途）。"""
-        return self._registry.get(tab_id)
-
     def get_failed_filenames(self, failed_tab_ids: List[int]) -> List[str]:
-        """根据失败的 tab_id 列表返回文件名（供关闭流程提示）。"""
-        return self._registry.get_failed_filenames(failed_tab_ids)
+        """根据失败的 tab_id 列表返回文件名（供关闭流程提示）。
+
+        D3c：TabState 退役——tab_id → widget → Document 的 display_name
+        （未命名用 display_name，具名用 basename，与原 TabState 语义一致）。
+        """
+        names: List[str] = []
+        for tab_id in failed_tab_ids:
+            widget = self._widget_for_tab_id(tab_id)
+            if widget is None:
+                continue
+            shared_doc = getattr(widget, "shared_doc", None)
+            if shared_doc is not None:
+                if shared_doc.filepath:
+                    names.append(os.path.basename(shared_doc.filepath))
+                else:
+                    names.append(shared_doc.display_name)
+            else:
+                state = self._registry.get(tab_id)
+                if state is not None:
+                    if state.filepath:
+                        names.append(os.path.basename(state.filepath))
+                    else:
+                        names.append(state.display_name)
+        return names
+
+    def _widget_for_tab_id(self, tab_id: int):
+        for i in range(self.count()):
+            widget = self.widget(i)
+            if getattr(widget, 'tab_id', None) == tab_id:
+                return widget
+        return None
 
     def _editor_for_tab_id(self, tab_id: int) -> Optional[Editor]:
         for i in range(self.count()):

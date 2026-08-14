@@ -511,6 +511,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         # 3.5.8（批次 4e，规格 2.5）：目标面板已有同一 Document 的 View →
         # 合并：源直接关闭（不迁移 widget），保留目标已有 View 的 ViewState。
         # 不销毁 Document（目标仍持有）；未命名编号不动（编号属 Document）。
+        # D1：合并不触碰目标 widget，目标 view_state（cursor/scroll）天然保留，
+        # 符合「View 位置状态单一源」契约。
         shared_doc = getattr(widget, "shared_doc", None)
         if shared_doc is not None:
             target_has_same_doc = any(
@@ -1441,11 +1443,13 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 break
 
     def reopen_closed_tab(self) -> bool:
+        """D1：Ctrl+Shift+T 重开关闭的标签——恢复光标 + 滚动位置（view_state 快照）。"""
         if not self._closed_tabs_stack:
             return False
         entry = self._closed_tabs_stack.pop()
         filepath = entry["filepath"]
         cursor_pos = entry.get("cursor_position")
+        scroll_pos = entry.get("scroll_position", 0)
         for i in range(self.count()):
             w = self.widget(i)
             tid = getattr(w, 'tab_id', None) if w is not None else None
@@ -1454,16 +1458,17 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 self.setCurrentIndex(i)
                 return True
         index = self.open_file(filepath)
-        if index is not None and cursor_pos is not None:
-            widget = self.widget(index)
-            if isinstance(widget, Editor):
-                cursor = widget.textCursor()
-                cursor.setPosition(min(cursor_pos, len(widget.toPlainText())))
-                widget.setTextCursor(cursor)
-            elif isinstance(widget, MarkdownPreviewWidget):
-                cursor = widget.editor.textCursor()
-                cursor.setPosition(min(cursor_pos, len(widget.editor.toPlainText())))
-                widget.editor.setTextCursor(cursor)
+        if index is None:
+            return True
+        widget = self.widget(index)
+        editor = self._get_editor_from_widget(widget)
+        if editor is not None:
+            if cursor_pos is not None:
+                cursor = editor.textCursor()
+                cursor.setPosition(min(cursor_pos, len(editor.toPlainText())))
+                editor.setTextCursor(cursor)
+            if scroll_pos:
+                self._restore_scroll_position(editor, scroll_pos)
         return True
 
     def close_other_tabs(self, keep_index: int):
@@ -1542,6 +1547,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         """记录关闭标签页的位置：内存栈（Ctrl+Shift+T）+ 持久化记忆（重开恢复）。
 
         仅记录已保存文件（调用方已确认 filepath 存在）。
+        D1：View 位置状态单一源 = widget.view_state——先实时捕获写入 view_state，
+        内存栈与持久化记忆都从同一处取值（cursor + scroll 一并记录）。
         """
         cursor = None
         scroll = 0
@@ -1562,12 +1569,37 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             view_state.scroll_position = scroll
         self._closed_tabs_stack.append({
             "filepath": filepath,
-            "cursor_position": cursor
+            "cursor_position": cursor,
+            "scroll_position": scroll,
         })
         if len(self._closed_tabs_stack) > 50:
             self._closed_tabs_stack.pop(0)
         if cursor is not None:
             self.config.set_closed_tab_memory(filepath, cursor, scroll)
+
+    @staticmethod
+    def _restore_scroll_position(editor, scroll_pos: int) -> None:
+        """恢复编辑器滚动位置。
+
+        首帧布局未完成时 setValue 会被 clamp：等待滚动范围就绪后重试一次
+        （与 open_file 的 closed_tabs_memory 恢复逻辑一致）。
+        """
+        vbar = editor.verticalScrollBar()
+        if vbar is None or not scroll_pos:
+            return
+        vbar.setValue(scroll_pos)
+        if vbar.value() == scroll_pos:
+            return
+
+        def _retry(vmin, vmax):
+            if vmax >= scroll_pos:
+                vbar.setValue(scroll_pos)
+                try:
+                    vbar.rangeChanged.disconnect(_retry)
+                except TypeError:
+                    pass
+
+        vbar.rangeChanged.connect(_retry)
 
     @staticmethod
     def _detach_shared_from_widget(widget) -> None:

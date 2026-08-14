@@ -12,7 +12,7 @@ v1.5.4 改动：
 import os
 import html as html_module
 from functools import partial
-import shiboken6  # type: ignore[import-not-found]  # PyQt6 硬依赖，无独立 stub
+import shiboken6  # type: ignore[import-not-found]  # 显式依赖（requirements.txt），mypy 无 stub
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QSplitter, QMenuBar, QMenu, QStatusBar,

@@ -2,6 +2,40 @@
 
 本文件记录 PanzerNote 各版本的变更。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
 
+## v1.9.0
+
+**分屏功能修复（3.5.1~3.5.12）**
+
+- **布局方向对称（3.5.1）**：`split_editor` 水平/垂直方向 `setSizes` 基准尺寸对称
+- **分屏状态持久化（3.5.2）**：workspace.json 记录分屏布局与激活标签，重启恢复布局与文件；临时会话纳入分屏（内容不丢）
+- **打开/新建焦点感知（3.5.3）**：`FileActionController` 目标面板改为构造注入的 Callable 提供者（焦点感知），打开/新建文件进入当前聚焦的分屏而非固定主面板
+- **标签跨分屏拖拽迁移（3.5.4）**：标签可在分屏间拖拽迁移，`tab_id`/`TabState`/脏标记随标签转移不丢失；迁移后编辑器信号重绑
+- **分屏方向切换（3.5.6）**：按方向记忆分割比例，切换方向沿用该方向上次占比
+- **统一未保存关闭确认（3.5.7）**：新增 `ui/unsaved_files_dialog.py`（VS Code 风格单级确认，1 个→单文件样式、多个→汇总样式）；关闭分屏与退出程序统一走确认；保存并关闭遍历各面板 `save_all_for_close()`，任一另存为取消/提交失败中止关闭，全部提交后异步等待各面板保存任务完成
+- **拖放文件按释放位置路由**：`dropEvent` 按释放点落在哪个面板矩形内决定打开目标（拖拽期间焦点在文件树上，焦点追踪会回退到"最近聚焦面板"），释放点不在任何面板内则回退焦点面板
+- **空分屏自动关闭与空会话兜底（3.5.9）**：分屏标签全关自动关闭分屏；主面板标签全关自动新建未命名标签（总有可编辑位置）；新增「重置分屏布局」菜单项；`tab_count_changed` 改带参数，主面板与分屏复用同一处理器（移除 event_bus 重复连接）
+- **未命名文件持久化恢复（3.5.10）**：未命名标签随会话持久化（workspace.json 存编号/显示名，dirty 时附带内容），重启后还原标签与编辑现场（沿用原编号，无 IO 开销）
+- **未命名标签拖拽（3.5.11）**：新增 `MIME_TAB_ID`，未命名标签也可跨分屏迁移与拖到文件树落盘保存；未命名编号随标签迁移（源释放/目标占用），避免编号冲突；空 MIME 数据格式在平台拖拽协议中被丢弃导致落盘失败的兼容处理
+- **文件树拖拽修复（3.5.11）**：PyQt6 拖拽事件仅 `position()`（QPointF），改用 `position().toPoint()`；`QFileSystemModel` 默认 `readOnly` 导致 `dropMimeData` 失败，改为 `setReadOnly(False)+setDragEnabled(True)+NoEditTriggers`；标签拖到文件树由静默移动升级为异步移动/复制/取消询问（新增 `copy_file_to_folder`）
+- **文件树删除同步关标签（3.5.11）**：`FileTreeWidget` 新增 `file_deleted` 信号，删除成功后同步关闭匹配路径的打开标签（已修改弹确认「关闭并放弃修改」，不提供保存以免把已删除文件重建回来），并清理 autosave
+- **标签 tooltip 路径区分（3.5.12）**：tooltip 区分已保存（完整路径）与未保存（「未保存」），迁移/打开/保存后统一刷新；主题样式表补充 QToolTip 段落
+
+**共享文档多视图（3.5.8，跨面板联动编辑）**
+
+- **核心模型**：新增 `core/shared_document.py`（`SharedDocument` 真正拥有 `QTextDocument`，`Document` = 内容与持久化状态；`ViewState` 每 View 独立 cursor/scroll 快照）、`core/document_registry.py`（`document_id`/路径索引/View 关联/生命周期）、`core/document_view_binding.py`（View↔Document 信号接线器，attach/detach 幂等）
+- **自动共享**：另一面板已打开同一文件 → 不重新读盘，直接新建 View attach 到共享 Document（内容/编码/eol 单一源）
+- **关闭决策树**：非最后一个 View 关闭直接关（不弹确认、不销毁 Document、不动未命名编号）；最后一个 View 关闭才走 dirty 确认 → release 销毁
+- **Save As re-key**：另存为成功后 `document_id` 不变、路径更新；目标路径已被其它 Document 占用 → 拒绝（不允许两个 Document 指向同一路径）
+- **迁移合并**：标签跨面板迁移合并到共享 View（同 Document 不重复创建）；autosave 按 Document 一份
+- **保存竞态防护**：`SaveTaskManager` 两维度改造（dirty × save_status 状态机）+ 单槽合并保存（IDLE/SAVING/FAILED），多 View 防并发写盘；保存任务按 Document 合并
+- **折叠/书签收敛 Document 级**：折叠状态与书签随 Document 共享（规格 2.10/2.12）
+- **信号按 View 接入**：`DocumentViewBinding` 每 View 一个（dirtyChanged → 标题脏标记；nameChanged → 标题跟随；pathChanged → TabState 路径 + Markdown 预览 base_path 跟随），关闭/迁移即断，无 UniqueConnection 残留
+- **ViewState 接线**：每 View 独立 `view_state`，关闭时写入 cursor/scroll 快照，重启恢复
+- **共享高亮与主题切换**：共享 `QTextDocument`；两种高亮器均实现 `set_dark_mode`（主题切换不再经过 `set_file_type` 重建，避免摘除共享高亮）；关闭最后 View 前断开 Document 依赖，杜绝 C++ deleted 悬垂崩溃
+- **文件移动 re-key**：文件树移动共享文件后路径索引换键 + `bind_path` 广播，所有 View 的路径/标题随 Document 同步（保存不再写回旧文件）
+- **未保存跨面板去重**：退出确认框按 `document_id` 去重，同一共享文件只列一次
+- **依赖声明**：`shiboken6` 显式写入 `requirements.txt`
+
 ## v1.8.5
 
 **Wave 3 主窗口职责拆分收尾（A~E 分支）**

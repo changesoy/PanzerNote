@@ -870,6 +870,19 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if filepath.lower().endswith((".html", ".htm")):
             return self._save_as_html(widget, filepath)
 
+        # 3.5.8（批次 4d，规格 2.2）：另存为的目标路径已被其它已打开 Document
+        # 占用（含副本写向其它面板已打开文件的路径）→ 拒绝，避免两个 Document
+        # 指向同一路径。reserve 占位 pending，成功/失败回调负责 commit / cancel。
+        shared_doc = getattr(widget, "shared_doc", None)
+        if shared_doc is not None:
+            if not self._document_registry.reserve_path(shared_doc.document_id, filepath):
+                QMessageBox.warning(
+                    self,
+                    "另存为",
+                    f"该文件已在其他面板打开，不能另存为到同一路径：\n{filepath}",
+                )
+                return False, 0
+
         success, chars = self._save_file(
             widget, filepath, encoding, is_copy=not state.is_new
         )
@@ -1719,6 +1732,12 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 # 跳过全部保存副作用（不清 dirty、不改标题、不结算收益），
                 # 避免原文件未保存的修改被误标记为已保存（数据安全）。
                 self._pending_save_info.pop(tab_id, None)
+                # 3.5.8（批次 4d）：副本路径不属当前 Document → 释放 pending 预留
+                shared_doc = getattr(widget, "shared_doc", None)
+                if shared_doc is not None:
+                    self._document_registry.cancel_reservation(
+                        shared_doc.document_id, save_as_info["filepath"]
+                    )
                 # 恢复标题（去除 SAVING 阶段追加的 ⏳ 后缀）
                 self.setTabText(index, base_title)
                 if tab_id in self._pending_close_tab_ids:
@@ -1751,6 +1770,11 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 if editor:
                     editor.set_file_type(filepath_new)
                 self.setTabText(index, os.path.basename(filepath_new))
+                # 3.5.8（批次 4d）：pending → path_index，Document 正式绑定新路径
+                # （nameChanged/pathChanged 驱动所有 View 标题同步）
+                shared_doc = getattr(widget, "shared_doc", None)
+                if shared_doc is not None:
+                    self._document_registry.commit_path(shared_doc, filepath_new)
 
             if state.filepath:
                 self._session_manager.remove_autosave_for_file(state.filepath)
@@ -1763,6 +1787,13 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             self.setTabText(index, base_title + " ⏳")
         elif save_state == SaveState.SAVE_FAILED:
             save_as_info = self._pending_save_as_info.pop(tab_id, None)
+            # 3.5.8（批次 4d）：另存为失败 → 释放路径预留（副本与非副本一致）
+            if save_as_info:
+                shared_doc = getattr(widget, "shared_doc", None)
+                if shared_doc is not None:
+                    self._document_registry.cancel_reservation(
+                        shared_doc.document_id, save_as_info["filepath"]
+                    )
             if save_as_info and save_as_info.get("is_copy"):
                 # 副本保存失败：当前标签状态不变（原文件未受影响），恢复标题
                 self._pending_save_info.pop(tab_id, None)

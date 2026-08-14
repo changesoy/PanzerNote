@@ -12,6 +12,7 @@ v1.5.4 改动：
 import os
 import html as html_module
 from functools import partial
+import shiboken6  # type: ignore[import-not-found]  # PyQt6 硬依赖，无独立 stub
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QSplitter, QMenuBar, QMenu, QStatusBar,
@@ -852,7 +853,13 @@ class MainWindow(QMainWindow):
             for tabs in [self.editor_tabs, *self.view_coordinator.split_tabs]:
                 if tabs is focus or tabs.isAncestorOf(focus):
                     return tabs
-        return self._last_focused_editor_tabs
+        last = self._last_focused_editor_tabs
+        if last is not None and not shiboken6.isValid(last):
+            # 3.5.8（批次 5 修复）：分屏关闭销毁后旧引用悬垂
+            # （C++ deleted）——清掉并回退主面板，避免 open_file 崩溃
+            self._last_focused_editor_tabs = None
+            return self.editor_tabs
+        return last
 
     def _save_current(self):
         """保存当前文件（焦点在分屏时保存分屏）"""

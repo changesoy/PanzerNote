@@ -630,8 +630,15 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         重排同一 document，高亮重叠/性能浪费）。
         """
         if self._highlighter:
-            self._highlighter.setDocument(None)
-            self._highlighter = None
+            shared = self._shared_doc
+            # 3.5.8（批次 5 修复）：共享高亮属于 Document（R1 收敛），不能被摘除——
+            # 主题刷新走 set_dark_mode 不经过这里；仅本地/独立高亮才摘除重建，
+            # 否则会把 Document 级高亮从共享文档上摘掉导致渲染永久失效。
+            if shared is None or self._highlighter is not getattr(
+                shared, "_highlighter", None
+            ):
+                self._highlighter.setDocument(None)
+                self._highlighter = None
 
         self._filepath_or_ext = filepath_or_ext
         doc = self.document()
@@ -1015,6 +1022,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         """
         if self._shared_doc is None:
             return
+        shared_hl = getattr(self._shared_doc, "_highlighter", None)
         shared_folding = cast(FoldingManager, self._shared_doc._folding)
         try:
             shared_folding.fold_state_changed.disconnect(self._forward_fold_state_changed)
@@ -1028,6 +1036,13 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         new_doc = QTextDocument(self)
         new_doc.setDocumentLayout(QPlainTextDocumentLayout(new_doc))
         self.setDocument(new_doc)
+        # 3.5.8（批次 5 修复）：detach 后 Editor 用全新 document，原共享高亮仍
+        # 挂在旧 Document 上——必须重建本地高亮，否则旧 Document 销毁后
+        # self._highlighter 悬垂（切主题时报 PygmentsHighlighter has been deleted）。
+        if self._highlighter is not None and self._highlighter is shared_hl:
+            self._highlighter = None
+            if self._filepath_or_ext:
+                self.set_file_type(self._filepath_or_ext)
         self._local_folding = FoldingManager(new_doc, parent=self)
         self._local_folding.fold_state_changed.connect(self._forward_fold_state_changed)
         self.invalidate_word_count()  # 清掉共享 Document 的缓存词数，下次按独立内容重算

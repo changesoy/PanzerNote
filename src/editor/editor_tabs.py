@@ -1861,11 +1861,38 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
         if ok and new_name and new_name != old_name:
             new_path = os.path.join(os.path.dirname(filepath), new_name)
+            # 3.5.8（修复）：目标路径已被其它已打开 Document 占用 → 拒绝（与移动 /
+            # Save As 同规则，避免两个 Document 指向同一路径的非法形态）。
+            shared_doc = getattr(widget, "shared_doc", None)
+            if (shared_doc is not None
+                    and self._document_registry.is_path_owned_by_other(
+                        shared_doc.document_id, new_path)):
+                QMessageBox.warning(
+                    self, "无法重命名",
+                    f"目标文件已在其他面板打开，不能重命名到同一路径：\n{new_path}",
+                )
+                return
+            if os.path.exists(new_path):
+                msg = QMessageBox.question(
+                    self, "文件已存在",
+                    f"目标文件夹中已存在 '{new_name}'，是否覆盖？",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                if msg != QMessageBox.StandardButton.Yes:
+                    return
             try:
                 os.rename(filepath, new_path)
-                state.filepath = new_path
-                self.setTabText(index, new_name)
                 editor = self._get_editor_from_widget(widget)
+                if shared_doc is not None:
+                    # 3.5.8（修复）：共享 Document 由 registry re-key + bind_path 广播
+                    # pathChanged / nameChanged——所有面板 View 的路径/标题/预览基准
+                    # 随 Document 同步（否则其它面板仍持旧路径，保存会写回旧文件）。
+                    self._document_registry.move_path(shared_doc, new_path)
+                else:
+                    state.filepath = new_path
+                    state.display_name = new_name
+                    self.setTabText(index, new_name)
                 if editor:
                     editor.set_file_type(new_path)
             except Exception as e:

@@ -24,6 +24,7 @@ from PyQt6.QtGui import QFont, QTextCursor, QColor, QTextCharFormat, QDrag, QAct
 
 from ..core.config import Config
 from ..core.document_model import TabState, TabStateRegistry
+from ..core.document_registry import DocumentRegistry
 from ..utils.logger import get_logger
 from ..utils.error_handler import ErrorHandler, ErrorCategory
 from ..utils.feature_flags import is_enabled
@@ -277,6 +278,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         config: Config,
         theme_engine,
         webengine_runtime: WebEngineRuntime | None = None,
+        document_registry=None,
         parent=None,
     ):
         super().__init__(parent)
@@ -285,6 +287,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self.config = config
         self._theme_engine = theme_engine
         self._webengine_runtime = webengine_runtime
+        # 3.5.8（批次 4a）：跨面板共享 DocumentRegistry——主面板与分屏注入同一实例，
+        # 多 View 打开同一文件时共享同一 Document（规格 2.1）。未传入时自建（独立使用）。
+        self._document_registry = document_registry or DocumentRegistry()
 
         self._registry = TabStateRegistry()
         self._next_tab_id = 0
@@ -360,6 +365,11 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     def registry(self) -> TabStateRegistry:
         """类型化的文档状态注册表（替代 _tab_info dict）"""
         return self._registry
+
+    @property
+    def document_registry(self):
+        """跨面板共享的 DocumentRegistry（3.5.8：Document 生命周期全局唯一）"""
+        return self._document_registry
 
     def _get_filepath_for_index(self, index: int) -> Optional[str]:
         """获取指定标签页的文件路径（供 DraggableTabBar 使用）"""
@@ -569,6 +579,17 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                         self.setCurrentIndex(i)
                     return i
 
+        # 3.5.8（批次 4b，规格 2.1 自动共享）：另一面板已打开同一文件 →
+        # 不重新读盘，直接新建 View attach 到共享 Document（内容/编码/eol 属 Document）。
+        shared_doc = self._document_registry.get_by_path(filepath)
+        if shared_doc is not None:
+            return self._create_shared_view(
+                shared_doc,
+                activate=activate,
+                insert_index=insert_index,
+                render_preview=render_preview,
+            )
+
         # 读取文件内容，检测编码
         file_guard = self.config.get_file_guard()
 
@@ -621,13 +642,25 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
         is_md = self._is_markdown_file(filepath)
 
+        # 3.5.8（批次 4b）：Document 全局唯一——读盘成功后注册共享 Document，
+        # 所有 View attach 到同一 QTextDocument（内容/编码/eol 属 Document）。
+        # 若 registry 已命中（另一面板已打开），会走上方共享分支，不会到这里。
+        shared_doc = self._document_registry.create_from_path(
+            filepath,
+            content,
+            encoding=detected_encoding,
+            eol=eol_label,
+            is_markdown=is_md,
+        )
+
         if is_md:
             widget = MarkdownPreviewWidget(
                 self.config,
                 theme_engine=self._theme_engine,
                 webengine_runtime=self._webengine_runtime,
             )
-            widget.editor.load_content(content)
+            widget.editor.attach_shared_document(shared_doc)
+            widget.editor.load_content(content)  # 幂等重建补全词集/折叠（内容相同）
             self._connect_editor_signals(widget.editor)
             widget.editor.set_file_type(filepath)
             widget.set_base_path(os.path.dirname(os.path.abspath(filepath)))
@@ -635,7 +668,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 widget.refresh_preview_now()
         else:
             widget = Editor(self.config, theme_engine=self._theme_engine)
-            widget.load_content(content)
+            widget.attach_shared_document(shared_doc)
+            widget.load_content(content)  # 幂等重建补全词集/折叠（内容相同）
             self._connect_editor_signals(widget)
             widget.set_file_type(filepath)
 
@@ -664,6 +698,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             is_markdown=is_md,
         ))
         self._save_manager.register_tab(tab_id)
+        self._document_registry.attach_view(shared_doc.document_id, widget)
 
         if activate:
             self.setCurrentIndex(index)
@@ -709,6 +744,75 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                             vbar.rangeChanged.connect(_apply_scroll)
             self.config.clear_closed_tab_memory(filepath)
 
+        return int(index)
+
+    def _create_shared_view(
+        self,
+        shared_doc,
+        *,
+        activate: bool = True,
+        insert_index: int | None = None,
+        render_preview: bool = True,
+    ) -> int:
+        """为已有共享 Document 创建新 View（规格 2.1 自动共享）。
+
+        跨面板打开同一文件时由 open_file 调用：不重新读盘——内容、编码、eol
+        均属 Document（SharedDocument 已持有）；View 只 attach 共享 QTextDocument，
+        编辑/undo 与其它 View 天然同步。
+        """
+        is_md = shared_doc.is_markdown
+        widget: "Editor | MarkdownPreviewWidget"
+        if is_md:
+            widget = MarkdownPreviewWidget(
+                self.config,
+                theme_engine=self._theme_engine,
+                webengine_runtime=self._webengine_runtime,
+            )
+            editor = widget.editor
+        else:
+            widget = Editor(self.config, theme_engine=self._theme_engine)
+            editor = widget
+
+        editor.attach_shared_document(shared_doc)
+        self._connect_editor_signals(editor)
+        if shared_doc.filepath:
+            editor.set_file_type(shared_doc.filepath)
+        if is_md:
+            md_widget = cast(MarkdownPreviewWidget, widget)
+            md_widget.set_base_path(
+                os.path.dirname(os.path.abspath(shared_doc.filepath or "."))
+            )
+            if render_preview:
+                md_widget.refresh_preview_now()
+
+        filename = shared_doc.display_name
+        if insert_index is not None:
+            index = self.insertTab(insert_index, widget, filename)
+        else:
+            index = self.addTab(widget, filename)
+
+        tab_id = self._generate_tab_id()
+        widget.tab_id = tab_id
+        editor.tab_id = tab_id
+
+        self._registry.register(tab_id, TabState(
+            tab_id=tab_id,
+            filepath=shared_doc.filepath,
+            is_new=shared_doc.filepath is None,
+            encoding=shared_doc.encoding,
+            eol=shared_doc.eol,
+            last_saved_content=shared_doc.to_plain_text(),
+            last_saved_chars=len(shared_doc.to_plain_text()),
+            last_text_length=len(shared_doc.to_plain_text()),
+            is_markdown=is_md,
+        ))
+        self._save_manager.register_tab(tab_id)
+        self._document_registry.attach_view(shared_doc.document_id, widget)
+
+        if activate:
+            self.setCurrentIndex(index)
+        self.tab_count_changed.emit(self.count())
+        self._update_tab_tooltip(index)
         return int(index)
 
     def save_current(self) -> Tuple[bool, int]:

@@ -877,6 +877,11 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self._init_ui()
         self._connect_signals()
 
+    @property
+    def shared_doc(self):
+        """当前 attach 的共享 Document（代理编辑器，未 attach 时为 None）。"""
+        return self.editor.shared_doc
+
     def set_base_path(self, path: str):
         """设置基础路径（文件所在目录），用于解析本地相对图片路径
 

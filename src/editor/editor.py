@@ -951,6 +951,11 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
 
     # ═══════════════ 3.5.8 共享 Document attach/detach ═══════════════
 
+    @property
+    def shared_doc(self) -> Optional[SharedDocument]:
+        """当前 attach 的共享 Document（未 attach 时为 None）。"""
+        return self._shared_doc
+
     def attach_shared_document(self, shared_doc: SharedDocument) -> None:
         """attach 外部共享 QTextDocument（3.5.8）。
 

@@ -53,10 +53,12 @@ class ViewCoordinator:
         shortcut_panel: ShortcutPanel,
         connect_tabs_signals: Callable[[EditorTabWidget], None],
         on_wrap_mode_changed: Callable[[str], None],
+        document_registry=None,
     ) -> None:
         self._config = config
         self._theme_engine = theme_engine
         self._webengine_runtime = webengine_runtime
+        self._document_registry = document_registry
         self._editor_splitter = editor_splitter
         self._editor_tabs = editor_tabs
         self._find_replace_bar = find_replace_bar
@@ -115,6 +117,7 @@ class ViewCoordinator:
             self._config,
             theme_engine=self._theme_engine,
             webengine_runtime=self._webengine_runtime,
+            document_registry=self._document_registry,
         )
         split_tabs.set_find_bar(self._find_replace_bar)
         self._connect_tabs_signals(split_tabs)
@@ -266,6 +269,7 @@ class ViewCoordinator:
             self._config,
             theme_engine=self._theme_engine,
             webengine_runtime=self._webengine_runtime,
+            document_registry=self._document_registry,
         )
         split_tabs.set_find_bar(self._find_replace_bar)
         self._connect_tabs_signals(split_tabs)

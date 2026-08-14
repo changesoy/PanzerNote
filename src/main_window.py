@@ -24,6 +24,7 @@ from PyQt6.QtGui import QIcon, QCloseEvent, QAction
 from typing import Optional, cast
 
 from . import __version__
+from .core.document_registry import DocumentRegistry
 from .core.app_context import AppContext
 from .core.session_restore_service import SessionRestoreService
 from .core.timer_manager import TimerManager
@@ -116,11 +117,15 @@ class MainWindow(QMainWindow):
         self._save_notify_timer.setSingleShot(True)
         self._save_notify_timer.timeout.connect(self._do_save_notify)
 
+        # 3.5.8（批次 4a）：Document 生命周期全局唯一——主面板与全部分屏共享同一 registry
+        self._document_registry = DocumentRegistry()
+
         self._ui_builder = MainWindowUIBuilder(
             self.config,
             self.theme_engine,
             self.shortcut_manager,
             self.webengine_runtime,
+            self._document_registry,
         )
 
         self._init_ui()
@@ -215,6 +220,7 @@ class MainWindow(QMainWindow):
             self.shortcut_panel,
             self._connect_editor_tabs_signals,
             lambda _mode: self._sync_wrap_menu(),
+            self._document_registry,
         )
         self._connect_ui_signals()
 

@@ -73,6 +73,10 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
     """文本编辑器"""
 
     word_count_recomputed = pyqtSignal()
+    # 3.5.8（批次 5）：有效折叠管理器的状态变化转发信号（attach 共享 Document 后
+    # 转发 Document 级 FoldingManager 的 fold_state_changed；独立时转发本地）。
+    # MarkdownPreviewWidget 与重绘统一监听本信号，避免 attach 前后连接对象漂移。
+    fold_state_changed = pyqtSignal()
 
     # 需要自动增加缩进的行尾字符（按语言）
     INDENT_TRIGGERS = {
@@ -158,8 +162,11 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self._init_line_numbers()
         self._init_minimap()
         self._lazy_highlight = LazyHighlightManager(self)
-        self._bookmarks: Set[int] = set()
-        self._folding = FoldingManager(self)
+        self._local_bookmarks: Set[int] = set()
+        # 3.5.8（批次 5）：本地折叠管理器（独立编辑时使用）。attach 共享 Document
+        # 后 _folding 属性委托到 Document 级单实例（规格 2.10），本地实例闲置。
+        self._local_folding = FoldingManager(cast(QTextDocument, self.document()), parent=self)
+        self._local_folding.fold_state_changed.connect(self._forward_fold_state_changed)
 
         self._cached_word_count: int = 0
         self._word_count_dirty: bool = True
@@ -977,12 +984,26 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         """attach 外部共享 QTextDocument（3.5.8）。
 
         Editor 只 attach，不取得所有权（SharedDocument 拥有 qdocument）；
-        注册 Document 级字数统计函数（只算一次，两个 View 共享缓存）。
+        注册 Document 级字数统计函数（只算一次，两个 View 共享缓存）；
+        folding 收敛 Document 级：首次 attach 创建 Document 单实例并订阅其信号。
         """
         self._shared_doc = shared_doc
         self.setDocument(shared_doc.qdocument)
         if getattr(shared_doc, '_word_count_fn', None) is None:
             shared_doc.set_word_count_fn(count_mixed_words)
+        if getattr(shared_doc, "_folding", None) is None:
+            shared_doc._folding = FoldingManager(
+                shared_doc.qdocument, parent=shared_doc
+            )
+        shared_folding = cast(FoldingManager, shared_doc._folding)
+        try:
+            shared_folding.fold_state_changed.connect(self._forward_fold_state_changed)
+        except (TypeError, RuntimeError):
+            pass
+        try:
+            shared_doc.bookmarksChanged.connect(self._repaint_bookmarks)
+        except (TypeError, RuntimeError):
+            pass
         self.invalidate_word_count()
 
     def detach_shared_document(self) -> None:
@@ -994,10 +1015,21 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         """
         if self._shared_doc is None:
             return
+        shared_folding = cast(FoldingManager, self._shared_doc._folding)
+        try:
+            shared_folding.fold_state_changed.disconnect(self._forward_fold_state_changed)
+        except (TypeError, RuntimeError):
+            pass
+        try:
+            self._shared_doc.bookmarksChanged.disconnect(self._repaint_bookmarks)
+        except (TypeError, RuntimeError):
+            pass
         self._shared_doc = None
         new_doc = QTextDocument(self)
         new_doc.setDocumentLayout(QPlainTextDocumentLayout(new_doc))
         self.setDocument(new_doc)
+        self._local_folding = FoldingManager(new_doc, parent=self)
+        self._local_folding.fold_state_changed.connect(self._forward_fold_state_changed)
         self.invalidate_word_count()  # 清掉共享 Document 的缓存词数，下次按独立内容重算
 
     def get_current_line(self) -> int:
@@ -1044,13 +1076,33 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             if self._lazy_highlight.is_active():
                 self._lazy_highlight.goto_line(line)
 
+    @property
+    def _bookmarks(self) -> Set[int]:
+        """有效书签集合：attach 共享 Document 时用 Document 级书签，否则本地集合。
+
+        3.5.8（批次 5，规格 2.12）：书签标记文档位置 → Document 级，两个 View
+        看同一份；A 切换书签经 bookmarksChanged 信号驱动 B 重绘行号区。
+        """
+        shared = self._shared_doc
+        if shared is not None:
+            return shared.bookmarks
+        return self._local_bookmarks
+
+    def _repaint_bookmarks(self) -> None:
+        """书签集合变化后刷新行号区（含书签图标）。"""
+        self.line_number_area.update()
+
     def toggle_bookmark(self):
         line = self.textCursor().blockNumber()
-        if line in self._bookmarks:
-            self._bookmarks.discard(line)
+        bookmarks = self._bookmarks
+        if line in bookmarks:
+            bookmarks.discard(line)
         else:
-            self._bookmarks.add(line)
-        self.line_number_area.update()
+            bookmarks.add(line)
+        if self._shared_doc is not None:
+            self._shared_doc.bookmarksChanged.emit()
+        else:
+            self._repaint_bookmarks()
 
     def next_bookmark(self):
         current = self.textCursor().blockNumber()
@@ -1076,10 +1128,39 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         return self._bookmarks.copy()
 
     def set_bookmarks(self, bookmarks: Set[int]):
-        self._bookmarks = bookmarks.copy()
-        self.line_number_area.update()
+        shared = self._shared_doc
+        if shared is not None:
+            shared._bookmarks.clear()
+            shared._bookmarks.update(bookmarks)
+            shared.bookmarksChanged.emit()
+        else:
+            self._local_bookmarks = bookmarks.copy()
+            self._repaint_bookmarks()
 
     # === 折叠 ===
+
+    @property
+    def _folding(self) -> FoldingManager:
+        """有效折叠管理器：attach 共享 Document 时用 Document 级单实例，否则本地实例。
+
+        3.5.8（批次 5，规格 2.10）：折叠可见性落在共享 QTextDocument 的 block 上，
+        同 Document 的所有 View 必须共享同一 FoldingManager，A 折叠 B 同步。
+        """
+        shared = self._shared_doc
+        if shared is not None:
+            shared_folding = getattr(shared, "_folding", None)
+            if shared_folding is not None:
+                return cast(FoldingManager, shared_folding)
+        return self._local_folding
+
+    def _forward_fold_state_changed(self) -> None:
+        """有效折叠管理器状态变化 → 本 View 重绘 + 转发给监听方（预览等）。"""
+        self.fold_state_changed.emit()
+        viewport = self.viewport()
+        if viewport is not None:
+            viewport.update()
+        if hasattr(self, "line_number_area"):
+            self.line_number_area.update()
 
     def _handle_fold_marker_click(self, y: int) -> None:
         """检测点击的折叠标记并切换折叠。"""

@@ -975,10 +975,9 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         vbar = self.editor.verticalScrollBar()
         if vbar is not None:
             vbar.valueChanged.connect(self._sync_scroll)
-        # 折叠状态变更 → 同步预览
-        folding = getattr(self.editor, '_folding', None)
-        if folding is not None:
-            folding.fold_state_changed.connect(self._sync_folds_to_preview)
+        # 折叠状态变更 → 同步预览（3.5.8 批次 5：监听编辑器转发的有效折叠信号，
+        # attach 共享 Document 后仍指向 Document 级 FoldingManager，连接不漂移）
+        self.editor.fold_state_changed.connect(self._sync_folds_to_preview)
 
     def refresh_preview_now(self) -> None:
         """文件装载/主题重建后强制刷新预览，不依赖 textChanged 防抖。"""

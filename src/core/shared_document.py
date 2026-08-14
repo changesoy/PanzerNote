@@ -17,7 +17,7 @@ SaveSnapshot：每次异步保存捕获的内容快照。
 import os
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable, Optional
+from typing import Callable, Optional, Set
 
 from PyQt6.QtCore import QObject, pyqtSignal
 from PyQt6.QtGui import QTextDocument
@@ -65,6 +65,7 @@ class SharedDocument(QObject):
     pathChanged = pyqtSignal(str)        # filepath（可为空字符串）
     nameChanged = pyqtSignal(str)        # display_name
     saveStateChanged = pyqtSignal(str)   # SaveStatus.value
+    bookmarksChanged = pyqtSignal()      # Document 级书签集合变化（规格 2.12）
 
     def __init__(
         self,
@@ -100,6 +101,13 @@ class SharedDocument(QObject):
         # 复用。core 层不依赖 editor，仅作为 View 层扩展槽（editor.set_file_type 写入）。
         self._highlighter: Optional[object] = None
         self._highlighter_file_type: str = "Text"
+
+        # 折叠（3.5.8 批次 5 收敛）：同 Document 一个 FoldingManager（规格 2.10）。
+        # core 层不依赖 editor，由 editor 层首次 attach 时创建并写入（同 _highlighter 模式）。
+        self._folding: Optional[object] = None
+
+        # 书签（3.5.8 批次 5 收敛）：Document 级（规格 2.12）——两个 View 看同一份。
+        self._bookmarks: Set[int] = set()
 
         # 内容本体：SharedDocument 为 parent（QObject ownership 契约）；
         # 必须显式设置 QPlainTextDocumentLayout，否则 QPlainTextEdit.setDocument 静默不绑定。
@@ -141,6 +149,20 @@ class SharedDocument(QObject):
 
     def _invalidate_word_count(self) -> None:
         self._word_count_dirty = True
+
+    @property
+    def folding(self) -> Optional[object]:
+        """Document 级折叠管理器（规格 2.10）。
+
+        editor 层首次 attach 时创建并写入 _folding（core 不依赖 editor）；未创建
+        返回 None，调用方（View）需回退到本地折叠管理器。
+        """
+        return self._folding
+
+    @property
+    def bookmarks(self) -> "set[int]":
+        """Document 级书签（规格 2.12）：两个 View 看同一份书签。"""
+        return self._bookmarks
 
     def set_content(self, content: str) -> None:
         """程序化设置内容（打开文件 / 外部 reload），复位修改状态与版本。

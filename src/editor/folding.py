@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import ast
+import re
 from typing import List, Optional, Set, Dict, Tuple
 
 from PyQt6.QtCore import pyqtSignal, QObject
@@ -143,9 +145,6 @@ class FoldingManager(QObject):
         2. 分组 — ≥2 行连续的 import/from 单行，首行可折叠整组
         在 rebuild_from_indent 之后调用。仅 Python 文件使用。
         """
-        import ast
-        import re
-
         # ── 1. AST：多行 import ──
         try:
             tree = ast.parse(text)

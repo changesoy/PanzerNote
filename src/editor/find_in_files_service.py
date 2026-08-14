@@ -367,7 +367,6 @@ class FindInFilesWorker(QThread):
             part = part.strip()
             if not part:
                 continue
-            import fnmatch
             regex = fnmatch.translate(part)
             patterns.append(re.compile(regex, re.IGNORECASE))
         return patterns

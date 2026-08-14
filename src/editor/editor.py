@@ -18,6 +18,7 @@ v1.6 改动：
 
 import os
 import json
+import re
 import xml.dom.minidom as minidom
 from contextlib import contextmanager
 from typing import Generator, Optional, Set, cast
@@ -1324,7 +1325,6 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         line = block.text()
         col = cursor.positionInBlock()
         line_prefix = line[:col]
-        import re
         match = re.search(r'[a-zA-Z0-9_\u4e00-\u9fff]+$', line_prefix)
         return match.group() if match else ''
 

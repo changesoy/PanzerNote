@@ -21,6 +21,7 @@ v1.6.2 改动：
 import os
 import re
 import time
+import json
 import html as html_module
 from typing import Optional, Union
 
@@ -989,7 +990,6 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             self.preview.set_code_blocks(self._code_blocks)
 
         if HAS_WEBENGINE and isinstance(self.preview, QWebEngineView) and self._html_template_loaded:
-            import json
             escaped = json.dumps(html_content)
             doc = self.editor.document()
             assert doc is not None
@@ -1226,7 +1226,6 @@ a {{
         折叠区间计算与 FoldingManager 一致，确保编辑器和预览折叠对应。
         在 _process_code_blocks 之后、_push_to_preview 之前调用。
         """
-        import re
         from src.editor.outline_parser import parse_headings
 
         headings = parse_headings(text)
@@ -1297,7 +1296,6 @@ a {{
         if not self._html_template_loaded:
             return
 
-        import json
         collapsed = folding.get_collapsed_lines()
         js = f"window.updateFoldVisibility('{json.dumps(collapsed)}');"
         page = self.preview.page()

@@ -16,7 +16,7 @@ from typing import Callable, Tuple
 
 from PyQt6.QtGui import QTextDocument
 
-# 每 document 一条：content_version -> 最终 HTML
+# 每 document 一条：revision -> 最终 HTML
 _CacheEntry = Tuple[int, str]
 
 

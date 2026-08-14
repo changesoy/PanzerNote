@@ -10,9 +10,10 @@
 4. 渲染进度指示和超时处理
 """
 
+import time
 import uuid
-from typing import Optional, Dict, Callable
 from collections import OrderedDict
+from typing import Callable, Dict, Optional
 
 from PyQt6.QtCore import QThread, pyqtSignal, QObject, QTimer, Qt
 
@@ -187,5 +188,4 @@ class AsyncHighlightRenderer(QObject):
 
     @staticmethod
     def _now_ms() -> int:
-        import time
         return int(time.time() * 1000)

@@ -17,12 +17,13 @@
 - 不迁移：_toggle_fullscreen（窗口级）、命令面板、keyPressEvent。
 """
 
-from typing import Callable, List
+from typing import Callable, List, Optional
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QMessageBox, QSplitter, QWidget
 
 from ..core.config import Config
+from ..core.document_registry import DocumentRegistry
 from ..editor.editor_tabs import EditorTabWidget
 from ..editor.find_replace import FindReplaceBar
 from ..editor.webengine_runtime import WebEngineRuntime
@@ -53,7 +54,7 @@ class ViewCoordinator:
         shortcut_panel: ShortcutPanel,
         connect_tabs_signals: Callable[[EditorTabWidget], None],
         on_wrap_mode_changed: Callable[[str], None],
-        document_registry=None,
+        document_registry: Optional[DocumentRegistry] = None,
     ) -> None:
         self._config = config
         self._theme_engine = theme_engine

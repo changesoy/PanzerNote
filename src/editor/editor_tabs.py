@@ -10,6 +10,7 @@ v1.5.4 改动：
 """
 
 import os
+import shutil
 from datetime import datetime
 from typing import Optional, List, Dict, Tuple, Set, cast
 
@@ -2434,7 +2435,6 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 )
                 return False
 
-            import shutil
             shutil.move(filepath, new_path)
 
             # 更新标签页信息（3.5.8：共享 Document 由 registry re-key + bind_path
@@ -2481,7 +2481,6 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                         self._save_file(widget, filepath, w_doc.encoding)
                     break
 
-            import shutil
             shutil.copy2(filepath, new_path)
             return True
         except Exception as e:

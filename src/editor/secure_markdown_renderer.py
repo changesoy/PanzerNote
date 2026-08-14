@@ -113,6 +113,102 @@ def render_plain_text_to_safe_html(text: str) -> str:
     return f"<pre>{html_module.escape(text)}</pre>"
 
 
+# ════════════════════════════════════════════════════════
+#  Markdown 内容排版 CSS（单一来源，Wave 1.5）
+# ════════════════════════════════════════════════════════
+#  预览（markdown_preview.PREVIEW_HTML_TEMPLATE）与导出文档
+#  （build_export_html_document）共用这份内容排版样式，颜色一律经
+#  CSS 变量引用，避免两处各自维护一套排版规则导致主题逐渐分裂。
+#  本常量是普通字符串（非 format 模板），花括号为字面量。
+
+MARKDOWN_LAYOUT_CSS = """/* ========== 标题 ========== */
+h1, h2, h3, h4, h5, h6 {
+    color: var(--text-primary);
+    font-weight: bold;
+    margin-top: 24px;
+    margin-bottom: 12px;
+    line-height: 1.3;
+}
+h1 {
+    font-size: 1.85em;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 6px;
+}
+h2 {
+    font-size: 1.5em;
+    border-bottom: 1px solid var(--border-soft);
+    padding-bottom: 5px;
+}
+h3 { font-size: 1.3em; }
+h4 { font-size: 1.15em; }
+h5 { font-size: 1.05em; }
+h6 { font-size: 1em; color: var(--text-muted); }
+
+/* ========== 段落 / 文本 ========== */
+p { margin: 8px 0; }
+strong { font-weight: 700; }
+em { font-style: italic; }
+
+/* ========== 行内代码 ========== */
+:not(pre) > code {
+    font-family: "JetBrains Mono", Consolas, "Courier New", "Microsoft YaHei", monospace;
+    background: var(--surface);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 0.92em;
+    color: var(--text-primary);
+    border: 1px solid var(--divider);
+}
+
+/* ========== 引用 ========== */
+blockquote {
+    border-left: 3px solid var(--scrollbar-thumb-hover);
+    padding: 4px 16px;
+    margin: 10px 0;
+    background: var(--surface-soft);
+    color: var(--text-secondary);
+}
+blockquote p { margin: 4px 0; }
+
+/* ========== 表格 ========== */
+table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 12px 0;
+}
+th, td {
+    border: 1px solid var(--border);
+    padding: 6px 12px;
+    text-align: left;
+}
+th {
+    background: var(--surface);
+    font-weight: 600;
+}
+tr:nth-child(even) { background: var(--surface-hover); }
+
+/* ========== 链接 ========== */
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; color: var(--primary-hover); }
+
+/* ========== 图片 ========== */
+img { max-width: 100%; border-radius: 3px; }
+
+/* ========== 分割线 ========== */
+hr { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+
+/* ========== 列表 ========== */
+ul, ol { padding-left: 26px; margin: 6px 0; }
+li { margin: 3px 0; }
+
+/* ========== 任务列表 ========== */
+li input[type="checkbox"] {
+    margin-right: 6px;
+    vertical-align: middle;
+}
+"""
+
+
 def build_export_html_document(body_html: str, colors, title: str = "") -> str:
     """构建完整的导出 HTML 文档
 
@@ -122,73 +218,58 @@ def build_export_html_document(body_html: str, colors, title: str = "") -> str:
       title：文档标题（可选）
 
     返回：完整的 HTML 文档字符串
+
+    样式来源（Wave 1.5）：
+      - :root 内联主题色值定义 CSS 变量（变量名与预览模板一致）
+      - 内容排版复用 MARKDOWN_LAYOUT_CSS（与预览单一来源）
+      - body / pre 为导出特有（静态文档外壳，居中限定宽度）
     """
     title_tag = f"<title>{html_module.escape(title)}</title>" if title else ""
-    text_primary = colors.text_primary
-    surface = colors.surface
-    bg_codeblock = colors.bg_codeblock
-    border = colors.border
-    divider = colors.divider
+    root_vars = f""":root {{
+    --text-primary: {colors.text_primary};
+    --text-secondary: {colors.text_secondary};
+    --text-muted: {colors.text_disabled};
+    --border: {colors.border};
+    --border-soft: {colors.divider};
+    --divider: {colors.divider};
+    --surface: {colors.surface};
+    --surface-soft: {colors.surface};
+    --surface-hover: {colors.sidebar_bg};
+    --primary: {colors.primary};
+    --primary-hover: {colors.primary_dark};
+    --bg-codeblock: {colors.bg_codeblock};
+    --scrollbar-thumb-hover: {colors.text_disabled};
+}}"""
+    export_shell_css = """/* ========== 导出文档外壳 ========== */
+body {
+    font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;
+    padding: 20px;
+    max-width: 800px;
+    margin: 0 auto;
+    line-height: 1.7;
+    color: var(--text-primary);
+}
+pre {
+    white-space: pre-wrap;
+    background: var(--bg-codeblock);
+    padding: 10px;
+    border-radius: 4px;
+    overflow-x: auto;
+}
+pre code {
+    display: block;
+    padding: 10px;
+}
+"""
     return f"""<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
 {title_tag}
 <style>
-body {{
-    font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;
-    padding: 20px;
-    max-width: 800px;
-    margin: 0 auto;
-    line-height: 1.7;
-    color: {text_primary};
-}}
-pre {{
-    white-space: pre-wrap;
-    background: {bg_codeblock};
-    padding: 10px;
-    border-radius: 4px;
-    overflow-x: auto;
-}}
-code {{
-    background: {surface};
-    padding: 2px 4px;
-    border-radius: 3px;
-}}
-pre code {{
-    display: block;
-    padding: 10px;
-}}
-table {{
-    border-collapse: collapse;
-    width: 100%;
-    margin: 16px 0;
-}}
-th, td {{
-    border: 1px solid {border};
-    padding: 8px 12px;
-    text-align: left;
-}}
-th {{
-    background: {surface};
-    font-weight: bold;
-}}
-img {{
-    max-width: 100%;
-}}
-h1, h2, h3, h4, h5, h6 {{
-    color: {text_primary};
-    margin-top: 24px;
-    margin-bottom: 12px;
-}}
-h1 {{
-    border-bottom: 1px solid {border};
-    padding-bottom: 6px;
-}}
-h2 {{
-    border-bottom: 1px solid {divider};
-    padding-bottom: 5px;
-}}
+{root_vars}
+{MARKDOWN_LAYOUT_CSS}
+{export_shell_css}
 </style>
 </head>
 <body>

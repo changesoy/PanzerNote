@@ -86,7 +86,10 @@ _MK_S2 = "\u231D"  # ⌝
 _MK_E1 = "\u231E"  # ⌞
 _MK_E2 = "\u231F"  # ⌟
 
-from .secure_markdown_renderer import strip_dangerous_html as _strip_dangerous_html
+from .secure_markdown_renderer import (
+    MARKDOWN_LAYOUT_CSS as _MARKDOWN_LAYOUT_CSS,
+    strip_dangerous_html as _strip_dangerous_html,
+)
 
 
 def _extract_language_from_code_attrs(attrs: str) -> str:
@@ -147,91 +150,8 @@ body {{
     overflow-wrap: break-word;
 }}
 
-/* ========== 标题 ========== */
-h1, h2, h3, h4, h5, h6 {{
-    color: var(--text-primary);
-    font-weight: bold;
-    margin-top: 24px;
-    margin-bottom: 12px;
-    line-height: 1.3;
-}}
-h1 {{
-    font-size: 1.85em;
-    border-bottom: 1px solid var(--border);
-    padding-bottom: 6px;
-}}
-h2 {{
-    font-size: 1.5em;
-    border-bottom: 1px solid var(--border-soft);
-    padding-bottom: 5px;
-}}
-h3 {{ font-size: 1.3em; }}
-h4 {{ font-size: 1.15em; }}
-h5 {{ font-size: 1.05em; }}
-h6 {{ font-size: 1em; color: var(--text-muted); }}
-
-/* ========== 段落 / 文本 ========== */
-p {{ margin: 8px 0; }}
-strong {{ font-weight: 700; }}
-em {{ font-style: italic; }}
-
-/* ========== 行内代码 ========== */
-:not(pre) > code {{
-    font-family: "JetBrains Mono", Consolas, "Courier New", "Microsoft YaHei", monospace;
-    background: var(--surface);
-    padding: 1px 5px;
-    border-radius: 3px;
-    font-size: 0.92em;
-    color: var(--text-primary);
-    border: 1px solid var(--divider);
-}}
-
-/* ========== 引用 ========== */
-blockquote {{
-    border-left: 3px solid var(--scrollbar-thumb-hover);
-    padding: 4px 16px;
-    margin: 10px 0;
-    background: var(--surface-soft);
-    color: var(--text-secondary);
-}}
-blockquote p {{ margin: 4px 0; }}
-
-/* ========== 表格 ========== */
-table {{
-    border-collapse: collapse;
-    width: 100%;
-    margin: 12px 0;
-}}
-th, td {{
-    border: 1px solid var(--border);
-    padding: 6px 12px;
-    text-align: left;
-}}
-th {{
-    background: var(--surface);
-    font-weight: 600;
-}}
-tr:nth-child(even) {{ background: var(--surface-hover); }}
-
-/* ========== 链接 ========== */
-a {{ color: var(--primary); text-decoration: none; }}
-a:hover {{ text-decoration: underline; color: var(--primary-hover); }}
-
-/* ========== 图片 ========== */
-img {{ max-width: 100%; border-radius: 3px; }}
-
-/* ========== 分割线 ========== */
-hr {{ border: none; border-top: 1px solid var(--border); margin: 20px 0; }}
-
-/* ========== 列表 ========== */
-ul, ol {{ padding-left: 26px; margin: 6px 0; }}
-li {{ margin: 3px 0; }}
-
-/* ========== 任务列表 ========== */
-li input[type="checkbox"] {{
-    margin-right: 6px;
-    vertical-align: middle;
-}}
+/* ========== Markdown 内容排版（共享单一来源，Wave 1.5） ========== */
+{layout_css}
 
 /* ========== TOC 目录 ========== */
 .toc {{
@@ -1074,7 +994,10 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             css_vars = _build_preview_css_vars(self._theme_engine)
             template = PREVIEW_HTML_TEMPLATE
             try:
-                full_html = template.format(content=html_content).replace(
+                full_html = template.format(
+                    content=html_content,
+                    layout_css=_MARKDOWN_LAYOUT_CSS,
+                ).replace(
                     "</style>", css_vars + "\n</style>", 1
                 )
             except Exception as exc:

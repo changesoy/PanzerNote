@@ -49,19 +49,19 @@ Excluded paths:
 
 ## Summary
 
-| File                                     | Count | Status                   | Notes                                                        |
-| ---------------------------------------- | ----: | ------------------------ | ------------------------------------------------------------ |
-| `src/editor/markdown_preview.py`         |    49 | Mostly allowed           | HTML template CSS and dark map; monitor carefully            |
-| `src/editor/editor.py`                   |    21 | Needs migration          | gutter bookmark/fold colors and fallbacks                    |
-| `src/editor/minimap.py`                  |    13 | Low priority             | most colors are fallback; theme path exists                  |
-| `src/editor/find_replace.py`             |    10 | Needs migration          | search match/current match colors should become theme tokens |
-| `src/ui/side_panel_host.py`              |     8 | Needs review             | checked button should not depend on Material purple          |
-| `src/editor/secure_markdown_renderer.py` |     8 | Needs ownership decision | legacy/secure renderer may duplicate preview CSS             |
-| `src/game/game_sidebar.py`               |     7 | Needs review             | likely resource/status colors                                |
-| `src/themes/theme_preview.py`            |     4 | Low priority             | color swatches are intentionally literal                     |
-| `src/game/secretary_widget.py`           |     4 | Needs review             | bubble/status colors should map to theme tokens              |
-| `src/ui/command_palette.py`              |     3 | Low priority             | hint fallback only; themed after init                        |
-| `src/editor/find_in_files_panel.py`      |     2 | Low priority             | already mostly themed                                        |
+| File                                     | Count | Status              | Notes                                                                                     |
+| ---------------------------------------- | ----: | ------------------- | ----------------------------------------------------------------------------------------- |
+| `src/editor/markdown_preview.py`         |    49 | Mostly allowed      | HTML template CSS and dark map; monitor carefully                                         |
+| `src/editor/editor.py`                   |     0 | Resolved (Batch B)  | gutter bookmark/fold colors now read from theme tokens                                    |
+| `src/editor/minimap.py`                  |    13 | Low priority        | most colors are fallback; theme path exists                                               |
+| `src/editor/find_replace.py`             |     0 | Resolved (Batch C)  | search match/current match colors now read from search tokens                             |
+| `src/ui/side_panel_host.py`              |     0 | Resolved            | hardcoded colors removed; reads theme tokens                                              |
+| `src/editor/secure_markdown_renderer.py` |     8 | Resolved (Wave 1.5) | unified safe render / export entry, not legacy; layout CSS shared via MARKDOWN_LAYOUT_CSS |
+| `src/game/game_sidebar.py`               |     7 | Needs review        | likely resource/status colors                                                             |
+| `src/themes/theme_preview.py`            |     4 | Low priority        | color swatches are intentionally literal                                                  |
+| `src/game/secretary_widget.py`           |     4 | Needs review        | bubble/status colors should map to theme tokens                                           |
+| `src/ui/command_palette.py`              |     3 | Low priority        | hint fallback only; themed after init                                                     |
+| `src/editor/find_in_files_panel.py`      |     2 | Low priority        | already mostly themed                                                                     |
 
 ## Unreasonable Color Arrangements
 
@@ -100,6 +100,27 @@ Excluded paths:
 
 ~~If `primary` remains `#BB86FC`, white text is not ideal.~~
 **RESOLVED (Batch E)**: `primary` is now VS Code blue `#0078D4`; white text on blue is the intended contrast.
+
+### 7. Markdown preview vs export duplicate layout CSS (Wave 1.5)
+
+~~Preview template and export document each maintained a copy of the Markdown content
+layout CSS (headings / table / code / list / quote …), drifting from each other over time.~~
+**RESOLVED (Wave 1.5)**: single source `MARKDOWN_LAYOUT_CSS` in
+`src/editor/secure_markdown_renderer.py`, consumed by both the preview template
+(`markdown_preview.PREVIEW_HTML_TEMPLATE`) and the export document
+(`build_export_html_document`). Colors are referenced via CSS variables
+(`--text-primary` / `--border` / `--surface` …), injected from theme tokens by each consumer.
+
+**Render path decision (Wave 1.5)**:
+
+- Primary preview path: `markdown_preview.py` (markdown-it-py, with source-line injection / async highlight / local image resolution). Not a legacy renderer.
+- Unified safe render + export entry: `secure_markdown_renderer.py`
+  (`render_markdown_to_safe_html` / `render_plain_text_to_safe_html` /
+  `build_export_html_document`), kept and used for HTML/PDF export, preview fallback,
+  and `strip_dangerous_html` sanitization reused by the preview.
+- Layout CSS that is allowed to stay local to each consumer: document shell (`body`),
+  preview-only interactive styles (TOC / code-container / copy button / folding / scrollbar),
+  export-only shell (`pre` simple blocks).
 
 ## Target Token Values (VS Code Dark Modern / Dark+)
 

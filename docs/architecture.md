@@ -398,6 +398,11 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 
 ### 4.5 Markdown 预览 (`editor/markdown_preview.py`)
 
+**渲染路径与样式单一来源（Wave 1.5）**：
+
+- 主渲染路径为 `markdown_preview.py`（markdown-it-py，含源码行号注入 / 异步高亮 / 本地图片解析）；`secure_markdown_renderer.py` 为统一安全渲染与 HTML/PDF 导出入口（`render_markdown_to_safe_html` / `build_export_html_document`），兼作预览回退与 `strip_dangerous_html` 清洗来源，非遗留渲染器。
+- 预览模板 `PREVIEW_HTML_TEMPLATE` 与导出文档共用 `secure_markdown_renderer.MARKDOWN_LAYOUT_CSS` 内容排版（单一来源），颜色经 CSS 变量由各端从主题 token 注入；文档外壳（body）与预览交互样式（TOC / 代码块容器 / 复制按钮 / 折叠 / 滚动条）保留各端局部。
+
 **渲染管线**：
 
 ```

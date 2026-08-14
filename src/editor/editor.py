@@ -43,6 +43,7 @@ from .indentation import get_indent_width, get_indent_unit
 from .completion import CompletionPopup, CompletionProvider
 from .text_stats import count_mixed_words
 from .bracket_matcher import find_matching_bracket
+from ..utils.perf_probe import measure as _perf_measure
 from .completion import CompletionProvider, CompletionPopup
 from .folding import FoldingManager
 from ..themes.theme_aware_mixin import ThemeAwareMixin
@@ -1067,7 +1068,11 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self._completion_popup.hide()
 
         with self.programmatic_modify():
-            if not self._lazy_highlight.load_content(content):
+            # E1 profiling：大文件 lazy 加载耗时（≥LARGE_FILE_THRESHOLD 行才走此路径）
+            if not _perf_measure(
+                "editor.load_content.lazy",
+                lambda: self._lazy_highlight.load_content(content),
+            ):
                 self.setPlainText(content)
 
         # 重建补全词集

@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import QPlainTextEdit
 
 from ..utils.logger import get_logger
 from ..utils.feature_flags import is_enabled
+from ..utils.perf_probe import measure as _perf_measure
 
 BUFFER_LINES = 100
 CHUNK_SIZE = 5000
@@ -86,11 +87,17 @@ class LazyHighlightManager(QObject):
     def _do_pending_highlight(self):
         if not self._highlighter or not self._is_large_file:
             return
+        # E1 profiling：首屏 / 滚动后的高亮调度耗时
+        _perf_measure("lazy_highlight.pending", self._highlight_visible_range)
 
+    def _highlight_visible_range(self):
         first_block = self._editor.firstVisibleBlock()
         first_line = first_block.blockNumber()
 
-        viewport_h = self._editor.viewport().height()
+        viewport = self._editor.viewport()
+        if viewport is None:
+            return
+        viewport_h = viewport.height()
         block = first_block
         visible_count = 0
         while block.isValid():

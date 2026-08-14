@@ -294,6 +294,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self._save_manager = SaveTaskManager(self)
         self._save_manager.save_state_changed.connect(self._on_save_state_changed)
         self._save_manager.save_failed.connect(self._on_save_failed)
+        self._save_manager.resave_requested.connect(self._on_resave_requested)
 
         self._pending_close_tab_ids: Set[int] = set()
         self._pending_save_info: Dict[int, Dict] = {}
@@ -942,6 +943,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             return False, 0
 
         if self._save_manager.is_saving(tab_id):
+            # 3.5.8 单槽合并：保存中再次保存请求 → 仅置 pending，不并发写盘
+            self._save_manager.request_resave(tab_id)
             return False, 0
 
         state = self._registry.get(tab_id)
@@ -970,12 +973,45 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         from .eol_utils import normalize_eol
 
         task = SaveTask(self.config.get_file_guard(), filepath, content, encoding.lower())
-        self._save_manager.submit_task(tab_id, task)
+        # 3.5.8：提交时附带内容快照 + 当前内容提供者，保存成功按「当前 == 快照」判定
+        # dirty（保存期间继续编辑不误清）；on_resave 用于单槽合并补保存。
+        self._save_manager.submit_task(
+            tab_id, task,
+            snapshot=content,
+            provider=lambda: self._current_normalized_content(widget, target_eol),
+            on_resave=lambda tid=tab_id: self._on_resave_requested(tid),
+        )
         pool = QThreadPool.globalInstance()
         if pool is not None:
             pool.start(task)
 
         return True, 0
+
+    def _current_normalized_content(self, widget, target_eol: str) -> str:
+        """当前编辑器内容（按目标 EOL 规范化），用于保存成功时的 snapshot 判定。"""
+        if isinstance(widget, MarkdownPreviewWidget):
+            raw = widget.editor.toPlainText()
+        elif isinstance(widget, Editor):
+            raw = widget.toPlainText()
+        else:
+            return ""
+        from .eol_utils import normalize_eol
+        return normalize_eol(raw, target_eol)
+
+    def _on_resave_requested(self, tab_id: int) -> None:
+        """单槽合并补保存：保存成功但内容已变且保存期间有 pending 请求。
+
+        以最新内容重新提交一次保存；未命名首次保存（filepath 尚为空）期间
+        编辑的场景跳过——此时对话框流程尚未完成，下次 Ctrl+S 正常覆盖。
+        """
+        for i in range(self.count()):
+            widget = self.widget(i)
+            if getattr(widget, 'tab_id', None) != tab_id:
+                continue
+            state = self._registry.get(tab_id)
+            if state and state.filepath:
+                self._save_file(widget, state.filepath, state.encoding)
+            return
 
     def save_all(self) -> int:
         total_chars = 0

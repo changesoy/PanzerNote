@@ -498,6 +498,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                     shared_doc.document_id, widget
                 )
                 source_tabs._detach_shared_from_widget(widget)
+                source_tabs._disconnect_shared_signals(shared_doc)
                 source_tabs.tab_count_changed.emit(source_tabs.count())
                 for i in range(self.count()):
                     if getattr(self.widget(i), "shared_doc", None) is shared_doc:
@@ -515,6 +516,11 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         source_tabs.removeTab(index)
         source_tabs._registry.unregister(tab_id)
         source_tabs._save_manager.unregister_tab(tab_id)
+        # 3.5.8（R2 边界）：共享 Document 信号连接随 View 迁移——源面板若已无
+        # 该 Document 的其它 View，断开连接；目标面板 _connect_editor_signals 重建。
+        shared_doc = getattr(widget, "shared_doc", None)
+        if shared_doc is not None:
+            source_tabs._disconnect_shared_signals(shared_doc)
         source_tabs.tab_count_changed.emit(source_tabs.count())
 
         # 目标：添加标签 + 注册状态（tabInserted 自动重建关闭按钮）
@@ -1472,6 +1478,26 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         elif isinstance(widget, Editor):
             widget.detach_shared_document()
 
+    def _disconnect_shared_signals(self, shared_doc) -> None:
+        """断开面板对共享 Document 的 dirtyChanged/nameChanged 连接。
+
+        3.5.8（R2 边界）：信号连接以「面板 × Document」为单位（UniqueConnection
+        防重）。非最后 View 关闭/迁移时若面板内已无该 Document 的其它 View，
+        必须显式断开——否则面板残留旧连接，之后重开同一文件再连接时
+        UniqueConnection 会抛 "connection is not unique"。
+        """
+        for i in range(self.count()):
+            if getattr(self.widget(i), "shared_doc", None) is shared_doc:
+                return  # 面板内仍有该 Document 的 View，保留连接
+        try:
+            shared_doc.dirtyChanged.disconnect(self._on_shared_doc_dirty)
+        except (TypeError, RuntimeError):
+            pass
+        try:
+            shared_doc.nameChanged.disconnect(self._on_shared_doc_renamed)
+        except (TypeError, RuntimeError):
+            pass
+
     def _close_tab(self, index: int, *, force: bool = False) -> bool:
         """关闭标签页。
 
@@ -1503,6 +1529,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             if self._document_registry.view_count(doc_id) > 1:
                 self._document_registry.detach_view(doc_id, widget)
                 self._detach_shared_from_widget(widget)
+                self._disconnect_shared_signals(shared_doc)
                 self._save_manager.unregister_tab(tab_id)
                 self._registry.unregister(tab_id)
                 self.removeTab(index)
@@ -2400,6 +2427,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             if self._document_registry.view_count(doc_id) > 1:
                 self._document_registry.detach_view(doc_id, widget)
                 self._detach_shared_from_widget(widget)
+                self._disconnect_shared_signals(shared_doc)
                 self._save_manager.unregister_tab(tab_id)
                 self._registry.unregister(tab_id)
                 self.removeTab(index)

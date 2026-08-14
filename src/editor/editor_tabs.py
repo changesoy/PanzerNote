@@ -1648,6 +1648,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             self.removeTab(index)
             self.tab_count_changed.emit(self.count())
             if shared_doc is not None:
+                # 批次 5 修复：最后 View 关闭前断开 Document 依赖——否则共享高亮
+                # 随 Document 销毁后 widget 仍悬垂引用（切主题报 C++ deleted）
+                self._detach_shared_from_widget(widget)
                 self._document_registry.release(shared_doc.document_id)
             return True
 
@@ -1708,6 +1711,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self.tab_count_changed.emit(self.count())
         # 3.5.8（批次 4c）：最后一个 View 关闭 → 销毁 Document
         if shared_doc is not None:
+            # 批次 5 修复：最后 View 关闭前断开 Document 依赖，防高亮悬垂
+            self._detach_shared_from_widget(widget)
             self._document_registry.release(shared_doc.document_id)
         return True
 
@@ -2038,6 +2043,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if shared_doc is not None:
             doc_id = shared_doc.document_id
             if self._document_registry.view_count(doc_id) <= 1:
+                # 批次 5 修复：最后 View 关闭前断开 Document 依赖，防高亮悬垂
+                self._detach_shared_from_widget(widget)
                 self._document_registry.release(doc_id)
 
     def current_editor(self) -> Optional[Editor]:
@@ -2510,6 +2517,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self.tab_count_changed.emit(self.count())
         # 3.5.8（批次 4c）：最后一个 View 关闭（删除语义）→ 销毁 Document
         if shared_doc is not None:
+            # 批次 5 修复：最后 View 关闭前断开 Document 依赖，防高亮悬垂
+            self._detach_shared_from_widget(widget)
             self._document_registry.release(shared_doc.document_id)
 
     # === 编辑操作代理 ===

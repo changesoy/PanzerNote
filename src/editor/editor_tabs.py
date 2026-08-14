@@ -1382,6 +1382,19 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if cursor is not None:
             self.config.set_closed_tab_memory(filepath, cursor, scroll)
 
+    @staticmethod
+    def _detach_shared_from_widget(widget) -> None:
+        """解除 widget 与共享 Document 的 attach（Editor 或 Markdown 预览组件）。
+
+        3.5.8（批次 4c）：非最后 View 关闭前调用，避免 View 残留对共享
+        qdocument 的引用；SharedDocument 仍由其它 View 持有。
+        """
+        editor = getattr(widget, "editor", None)
+        if editor is not None:
+            editor.detach_shared_document()
+        elif isinstance(widget, Editor):
+            widget.detach_shared_document()
+
     def _close_tab(self, index: int, *, force: bool = False) -> bool:
         """关闭标签页。
 
@@ -1404,6 +1417,21 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if self._save_manager.is_saving(tab_id):
             return False
 
+        # 3.5.8（批次 4c，规格 2.3）：共享 Document 还有其他 View →
+        # 直接关本 View：不弹确认、不销毁 Document、不动未命名编号（编号属 Document）。
+        # 只有最后一个 View 关闭才走 dirty 确认，成功后 release 销毁 Document。
+        shared_doc = getattr(widget, "shared_doc", None)
+        if shared_doc is not None:
+            doc_id = shared_doc.document_id
+            if self._document_registry.view_count(doc_id) > 1:
+                self._document_registry.detach_view(doc_id, widget)
+                self._detach_shared_from_widget(widget)
+                self._save_manager.unregister_tab(tab_id)
+                self._registry.unregister(tab_id)
+                self.removeTab(index)
+                self.tab_count_changed.emit(self.count())
+                return True
+
         if isinstance(widget, MarkdownPreviewWidget):
             content = widget.editor.toPlainText()
         elif isinstance(widget, Editor):
@@ -1421,6 +1449,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             self._registry.unregister(tab_id)
             self.removeTab(index)
             self.tab_count_changed.emit(self.count())
+            if shared_doc is not None:
+                self._document_registry.release(shared_doc.document_id)
             return True
 
         if state.is_modified and not force:
@@ -1471,6 +1501,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self._registry.unregister(tab_id)
         self.removeTab(index)
         self.tab_count_changed.emit(self.count())
+        # 3.5.8（批次 4c）：最后一个 View 关闭 → 销毁 Document
+        if shared_doc is not None:
+            self._document_registry.release(shared_doc.document_id)
         return True
 
     def _show_tab_context_menu(self, position):
@@ -1774,6 +1807,12 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self._registry.unregister(tab_id)
         self.removeTab(index)
         self.tab_count_changed.emit(self.count())
+        # 3.5.8（批次 4c）：保存后关闭的最后 View → 销毁 Document
+        shared_doc = getattr(widget, "shared_doc", None)
+        if shared_doc is not None:
+            doc_id = shared_doc.document_id
+            if self._document_registry.view_count(doc_id) <= 1:
+                self._document_registry.release(doc_id)
 
     def current_editor(self) -> Optional[Editor]:
         """获取当前编辑器"""
@@ -2177,6 +2216,20 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             self.tab_count_changed.emit(self.count())
             return
 
+        # 3.5.8（批次 4c，规格 2.3）：共享 Document 还有其他 View → 直接关本 View
+        # （删除语义下同样不弹确认，Document 仍由其它 View 持有）
+        shared_doc = getattr(widget, "shared_doc", None)
+        if shared_doc is not None:
+            doc_id = shared_doc.document_id
+            if self._document_registry.view_count(doc_id) > 1:
+                self._document_registry.detach_view(doc_id, widget)
+                self._detach_shared_from_widget(widget)
+                self._save_manager.unregister_tab(tab_id)
+                self._registry.unregister(tab_id)
+                self.removeTab(index)
+                self.tab_count_changed.emit(self.count())
+                return
+
         if state.is_modified:
             name = self._strip_tab_suffix(self.tabText(index))
             msg = QMessageBox(self)
@@ -2206,6 +2259,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self._registry.unregister(tab_id)
         self.removeTab(index)
         self.tab_count_changed.emit(self.count())
+        # 3.5.8（批次 4c）：最后一个 View 关闭（删除语义）→ 销毁 Document
+        if shared_doc is not None:
+            self._document_registry.release(shared_doc.document_id)
 
     # === 编辑操作代理 ===
 

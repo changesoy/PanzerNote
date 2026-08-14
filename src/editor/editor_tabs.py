@@ -1186,7 +1186,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         state = self._registry.get(tab_id)
         if state is None:
             return False, 0
-        last_chars = state.last_saved_chars
+        # D3a：保存统计迁移至 Document 级（非共享时回退 TabState）
+        last_chars = (shared_doc.last_saved_chars
+                      if shared_doc is not None else state.last_saved_chars)
 
         # EOL 规范化：将编辑器内部的 \n 替换为文档目标行尾
         current_eol_label = state.eol
@@ -1283,11 +1285,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             if tab_id is None:
                 continue
             state = self._registry.get(tab_id)
-            is_modified = bool(state and state.is_modified)
-            # 3.5.8（R2）：共享 Document 以 Document 侧 dirty 为准（同 _close_tab）
+            # D3a：dirty 单一源 = SharedDocument（state.is_modified 不再维护）
             shared_doc = getattr(widget, "shared_doc", None)
-            if shared_doc is not None and shared_doc.dirty:
-                is_modified = True
+            is_modified = shared_doc.dirty if shared_doc is not None else bool(state and state.is_modified)
             if is_modified and state is not None:
                 if state.filepath and not state.is_new:
                     success, chars = self._save_file(widget, state.filepath, state.encoding)
@@ -1319,11 +1319,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             if tab_id is None:
                 continue
             state = self._registry.get(tab_id)
-            is_modified = bool(state and state.is_modified)
-            # 3.5.8（R2）：共享 Document 以 Document 侧 dirty 为准（同 _close_tab）
+            # D3a：dirty 单一源 = SharedDocument（state.is_modified 不再维护）
             shared_doc = getattr(widget, "shared_doc", None)
-            if shared_doc is not None and shared_doc.dirty:
-                is_modified = True
+            is_modified = shared_doc.dirty if shared_doc is not None else bool(state and state.is_modified)
             if not is_modified or state is None:
                 continue
             if state.filepath and not state.is_new:
@@ -1364,7 +1362,12 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 continue
 
             state = self._registry.get(tab_id)
-            if state is None or not state.is_modified:
+            if state is None:
+                continue
+            # D3a：dirty 单一源 = SharedDocument
+            shared_doc = getattr(widget, "shared_doc", None)
+            is_modified = shared_doc.dirty if shared_doc is not None else state.is_modified
+            if not is_modified:
                 continue
 
             if isinstance(widget, MarkdownPreviewWidget):
@@ -1376,7 +1379,6 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
             # 3.5.8（批次 4e）：同一 Document 多个 View 只写一份 autosave——
             # doc_key 稳定（document_id / filepath），用于文件名与去重（规格 3.2）
-            shared_doc = getattr(widget, "shared_doc", None)
             if shared_doc is not None:
                 doc_key = shared_doc.document_id
             else:
@@ -1654,10 +1656,10 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         state = self._registry.get(tab_id)
         if state is None:
             return
-        if dirty != state.is_modified:
-            state.is_modified = dirty
-            if dirty:
-                self._save_manager.mark_dirty(tab_id)
+        # D3a：dirty 单一源在 Document——这里只做副作用的单一入口
+        # （保存状态机 mark_dirty + 标题更新），不再回写 TabState.is_modified。
+        if dirty:
+            self._save_manager.mark_dirty(tab_id)
         title = self.tabText(index)
         stripped = self._strip_tab_suffix(title)
         if dirty and not stripped.endswith(" *"):
@@ -1759,12 +1761,10 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 self._document_registry.release(shared_doc.document_id)
             return True
 
-        # 3.5.8（R2）：共享 Document 以 Document 侧 dirty 为准——其它 View 编辑
-        # 也会置脏，关闭最后一个 View 时不能只看本 View 的 state.is_modified
-        # （否则未编辑的那个 View 关闭会直接丢弃其它 View 的修改）。
-        is_modified = state.is_modified
-        if shared_doc is not None and shared_doc.dirty:
-            is_modified = True
+        # D3a：dirty 单一源 = SharedDocument（关闭最后一个 View 时其它 View 的
+        # 编辑也会置脏，不能只看本 View 的旧状态）。
+        is_modified = (shared_doc.dirty if shared_doc is not None
+                       else state.is_modified)
 
         if is_modified and not force:
             msg_box = QMessageBox(self)
@@ -1998,9 +1998,17 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if doc is None:
             return
         current_len = doc.characterCount() - 1
-        last_len = state.last_text_length or current_len
-        delta = current_len - last_len
-        state.last_text_length = current_len
+        # D3a：字数增量统计迁移至 Document 级（内容共享，跨 View 连续输入 delta
+        # 正确）；非共享时回退 TabState 统计。
+        shared_doc = getattr(editor, "shared_doc", None)
+        if shared_doc is not None:
+            last_len = shared_doc.last_text_length or current_len
+            delta = current_len - last_len
+            shared_doc.last_text_length = current_len
+        else:
+            last_len = state.last_text_length or current_len
+            delta = current_len - last_len
+            state.last_text_length = current_len
 
         is_pasting = getattr(editor, '_is_pasting', False)
         is_programmatic = getattr(editor, 'is_programmatic_modify', False)
@@ -2008,30 +2016,6 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if delta > 0 and not is_pasting and not is_programmatic:
             if delta <= self._PASTE_THRESHOLD:
                 self.chars_typed.emit(delta)
-
-        last_saved_chars = state.last_saved_chars
-        is_modified = doc.isModified()
-
-        if is_modified != state.is_modified:
-            state.is_modified = is_modified
-            if is_modified:
-                self._save_manager.mark_dirty(tab_id)
-                for i in range(self.count()):
-                    widget = self.widget(i)
-                    if getattr(widget, 'tab_id', None) == tab_id:
-                        title = self.tabText(i)
-                        if not title.endswith(" *") and not title.endswith(" ⏳") and not title.endswith(" !"):
-                            self.setTabText(i, title + " *")
-                        break
-            else:
-                for i in range(self.count()):
-                    widget = self.widget(i)
-                    if getattr(widget, 'tab_id', None) == editor.tab_id:
-                        title = self.tabText(i)
-                        stripped = self._strip_tab_suffix(title)
-                        if stripped != title:
-                            self.setTabText(i, stripped)
-                        break
 
         if is_enabled("signal_driven_stats"):
             editor.invalidate_word_count()
@@ -2076,7 +2060,6 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                     self._pending_close_tab_ids.discard(tab_id)
                     self._close_tab_after_save(widget_index)
                 return
-            state.is_modified = False
             editor = self._get_editor_from_widget(widget)
             if editor:
                 doc = editor.document()
@@ -2088,7 +2071,14 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             if pending:
                 content = pending["content"]
                 new_chars = pending["new_chars"]
-                state.mark_saved(content)
+                # D3a：保存统计迁移至 Document 级（on_save_succeeded 同语义；
+                # 非共享时回退 TabState.mark_saved）
+                shared_doc = getattr(widget, "shared_doc", None)
+                if shared_doc is not None:
+                    shared_doc.last_saved_chars = len(content)
+                    shared_doc.last_text_length = len(content)
+                else:
+                    state.mark_saved(content)
                 if new_chars > 0:
                     self.chars_typed.emit(new_chars)
 
@@ -2131,8 +2121,6 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 self._pending_save_info.pop(tab_id, None)
                 self.setTabText(index, base_title)
                 return
-            if state is not None:
-                state.is_modified = True
             editor = self._get_editor_from_widget(widget)
             if editor:
                 doc = editor.document()
@@ -2143,8 +2131,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             if tab_id in self._pending_close_tab_ids:
                 self._pending_close_tab_ids.discard(tab_id)
         elif save_state == SaveState.DIRTY:
-            if state is not None:
-                state.is_modified = True
+            # D3a：Document 已是 dirty（由 qdocument.setModified 驱动），无附加动作
+            pass
 
     def _on_save_failed(self, tab_id: int, filepath: str, exc: BaseException) -> None:
         basename = os.path.basename(filepath) if filepath else "未知文件"
@@ -2225,7 +2213,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             if state is None:
                 return
             state.eol = eol
-            state.is_modified = True
+            # D3a：dirty 由 doc.setModified(True) 驱动（Document 单一源）
             editor = self._get_editor_from_widget(widget)
             if editor:
                 doc = editor.document()
@@ -2247,7 +2235,12 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             tab_id = getattr(widget, 'tab_id', None)
             if tab_id is not None:
                 state = self._registry.get(tab_id)
-                if state and state.is_modified:
+                if state is None:
+                    continue
+                # D3a：dirty 单一源 = SharedDocument
+                shared_doc = getattr(widget, "shared_doc", None)
+                is_modified = shared_doc.dirty if shared_doc is not None else state.is_modified
+                if is_modified:
                     editor = self._get_editor_from_widget(widget)
                     content = editor.toPlainText() if editor else ""
                     if state.is_new and len(content.strip()) == 0:
@@ -2276,16 +2269,14 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             state = self._registry.get(tab_id)
             shared_doc = getattr(widget, "shared_doc", None)
             doc_id = shared_doc.document_id if shared_doc is not None else None
-            is_modified = bool(state and state.is_modified)
-            # 3.5.8（R2）：共享 Document 以 Document 侧 dirty 为准——其它 View
-            # 编辑置脏时本 View 状态可能未同步（与 has_modified_files 同规则）；
-            # 同一共享 Document 在本面板只列一次（跨面板去重由调用方按 document_id 做）
+            # D3a：dirty 单一源 = SharedDocument（其它 View 编辑置脏时本 View
+            # 旧状态不维护，直接以 Document 为准）；同一共享 Document 在本面板
+            # 只列一次（跨面板去重由调用方按 document_id 做）
+            is_modified = shared_doc.dirty if shared_doc is not None else bool(state and state.is_modified)
             if doc_id is not None:
                 if doc_id in seen_docs:
                     continue
                 seen_docs.add(doc_id)
-                if not is_modified and shared_doc is not None:
-                    is_modified = shared_doc.dirty
             if not is_modified or state is None:
                 continue
             editor = self._get_editor_from_widget(widget)
@@ -2307,10 +2298,10 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         return infos
 
     def has_modified_files(self) -> bool:
-        for state in self._registry.all_states():
-            if state.is_modified:
-                return True
-        # 3.5.8（R2）：共享 Document 侧 dirty（其它面板的 View 编辑）也算修改
+        """是否有未保存修改（D3a：dirty 单一源 = SharedDocument.dirty，逐 widget 查询）。
+
+        3.5.8（R2）：其它面板的 View 编辑也会置脏，同 Document 去重后按 dirty 判定。
+        """
         seen_docs = set()
         for i in range(self.count()):
             widget = self.widget(i)
@@ -2354,7 +2345,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 continue
             if state.is_new or not state.filepath:
                 # 3.5.10：未命名文件（dirty 时）同步内容，随条目恢复编辑现场
-                if state.is_modified:
+                shared_doc = getattr(widget, "shared_doc", None)
+                if shared_doc is not None and shared_doc.dirty:
                     editor = self._get_editor_from_widget(widget)
                     if editor is not None:
                         state.export_content = editor.toPlainText()
@@ -2384,6 +2376,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             return False
         shared_doc = editor.shared_doc
         if shared_doc is not None:
+            # D3a：set_content 已复位 Document 级保存统计（last_saved_*）
             shared_doc.set_content(content)
         else:
             editor.setPlainText(content)
@@ -2391,17 +2384,16 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             if doc is not None:
                 doc.setModified(False)
                 doc.clearUndoRedoStacks()
-        state.mark_saved(content)
+            state.mark_saved(content)
         return True
 
     def mark_tab_dirty(self, tab_id: int) -> None:
-        """将指定标签标记为已修改（供崩溃恢复后的脏标记）。"""
-        state = self._registry.get(tab_id)
-        if state is None:
-            return
-        state.is_modified = True
+        """将指定标签标记为已修改（供崩溃恢复后的脏标记）。
+
+        D3a：dirty 单一源 = SharedDocument——qdocument.setModified(True)
+        驱动 dirtyChanged → 各 View 标题与保存状态机同步。
+        """
         self._save_manager.mark_dirty(tab_id)
-        # 3.5.8（批次 4e）：共享 Document 侧 dirty 同步（dirty 单一源）
         editor = self._editor_for_tab_id(tab_id)
         if editor is not None and editor.shared_doc is not None:
             editor.shared_doc.qdocument.setModified(True)
@@ -2516,7 +2508,10 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                     state = self._registry.get(tab_id)
                     if state and state.filepath == filepath:
                         shared_doc = getattr(widget, "shared_doc", None)
-                        if state.is_modified or (shared_doc is not None and shared_doc.dirty):
+                        # D3a：dirty 单一源 = SharedDocument
+                        is_dirty = (shared_doc.dirty if shared_doc is not None
+                                    else state.is_modified)
+                        if is_dirty:
                             self._save_file(widget, filepath, state.encoding)
                         break
 
@@ -2581,7 +2576,11 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 if tab_id is not None:
                     state = self._registry.get(tab_id)
                     if state and state.filepath == filepath:
-                        if state.is_modified:
+                        # D3a：dirty 单一源 = SharedDocument
+                        shared_doc = getattr(widget, "shared_doc", None)
+                        is_dirty = (shared_doc.dirty if shared_doc is not None
+                                    else state.is_modified)
+                        if is_dirty:
                             self._save_file(widget, filepath, state.encoding)
                         break
 
@@ -2648,10 +2647,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 self.tab_count_changed.emit(self.count())
                 return
 
-        # 3.5.8（R2）：共享 Document 以 Document 侧 dirty 为准（同 _close_tab）
-        is_modified = state.is_modified
-        if shared_doc is not None and shared_doc.dirty:
-            is_modified = True
+        # 3.5.8（D3a）：dirty 单一源 = SharedDocument（同 _close_tab）
+        is_modified = shared_doc.dirty if shared_doc is not None else state.is_modified
         if is_modified:
             name = self._strip_tab_suffix(self.tabText(index))
             msg = QMessageBox(self)

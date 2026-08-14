@@ -125,6 +125,12 @@ class SharedDocument(QObject):
         self.last_saved_snapshot: Optional[SaveSnapshot] = None
         self.content_version: int = 0
 
+        # 保存统计（D3a：TabState.last_saved_* 迁移至 Document 级——内容共享，
+        # 字数增量 / 新字数按 Document 粒度统计，避免跨 View 漏计/重计）。
+        # 初始值 = 创建时内容长度（对应旧 TabState 构造时的 last_saved_chars）。
+        self.last_saved_chars: int = len(content)
+        self.last_text_length: int = len(content)
+
         # 信号源：只监听共享 QTextDocument 一次（不监听各 View）
         self.qdocument.contentsChanged.connect(self._on_contents_changed)
         self.qdocument.modificationChanged.connect(self._on_modification_changed)
@@ -178,6 +184,8 @@ class SharedDocument(QObject):
             self.qdocument.blockSignals(False)
         self._dirty = False
         self.content_version = 0
+        self.last_saved_chars = len(content)
+        self.last_text_length = len(content)
         self._invalidate_word_count()
         self.contentChanged.emit()
         self.dirtyChanged.emit(False)  # reload 后订阅方需收到"变干净"通知
@@ -233,6 +241,9 @@ class SharedDocument(QObject):
         current == snapshot → clean；否则保持 dirty（保存成功 ≠ 当前 clean）。
         """
         self.last_saved_snapshot = snapshot
+        # D3a：保存统计随成功保存更新（对应旧 TabState.mark_saved 语义）
+        self.last_saved_chars = len(snapshot.content)
+        self.last_text_length = len(snapshot.content)
         retry = False
         if self.to_plain_text() == snapshot.content:
             # 先复位 _dirty 再 setModified(False)：槽内 `_dirty != modified` 为 False，

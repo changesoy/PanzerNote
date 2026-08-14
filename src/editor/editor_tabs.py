@@ -26,6 +26,7 @@ from ..core.config import Config
 from ..core.document_model import TabState, TabStateRegistry
 from ..core.document_registry import DocumentRegistry
 from ..core.document_view_binding import DocumentViewBinding
+from ..core.shared_document import ViewState
 from ..utils.logger import get_logger
 from ..utils.error_handler import ErrorHandler, ErrorCategory
 from ..utils.feature_flags import is_enabled
@@ -615,6 +616,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
         tab_id = self._generate_tab_id()
         editor.tab_id = tab_id
+        setattr(editor, "view_state", ViewState.new())  # 3.5.8（批次 5，ViewState 接线）
         self._registry.register(tab_id, TabState(
             tab_id=tab_id,
             filepath=None,
@@ -762,6 +764,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
         tab_id = self._generate_tab_id()
         widget.tab_id = tab_id
+        setattr(widget, "view_state", ViewState.new())  # 3.5.8（批次 5，ViewState 接线）
 
         # 如果是MarkdownPreviewWidget，也设置editor的tab_id
         if is_md and isinstance(widget, MarkdownPreviewWidget):
@@ -876,6 +879,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         tab_id = self._generate_tab_id()
         widget.tab_id = tab_id
         editor.tab_id = tab_id
+        setattr(widget, "view_state", ViewState.new())  # 3.5.8（批次 5，ViewState 接线）
 
         self._registry.register(tab_id, TabState(
             tab_id=tab_id,
@@ -1489,6 +1493,13 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             cursor = widget.editor.textCursor().position()
             vbar = widget.editor.verticalScrollBar()
             scroll = vbar.value() if vbar is not None else 0
+        # 3.5.8（批次 5，ViewState 接线）：View 级位置快照 → view_state
+        # （workspace schema 不动，TabState.cursor_position/scroll_position 照旧由
+        # get_open_files_info 维护；view_state 供关闭/迁移时保留 View 侧状态）。
+        view_state = getattr(widget, "view_state", None)
+        if view_state is not None:
+            view_state.cursor_position = cursor
+            view_state.scroll_position = scroll
         self._closed_tabs_stack.append({
             "filepath": filepath,
             "cursor_position": cursor

@@ -37,13 +37,16 @@ from ..core.shared_document import SharedDocument
 from .syntax_highlighter import get_highlighter_for_file
 from .editor_actions import EditorActionsMixin
 from .auto_pair_handler import AutoPairHandlerMixin
-from .virtual_scroll import LazyHighlightManager, DocumentLazyHighlightCoordinator
+from .virtual_scroll import (
+    LazyHighlightManager, DocumentLazyHighlightCoordinator, LARGE_FILE_THRESHOLD,
+)
 from .extra_selection_manager import ExtraSelectionManager
 from .indentation import get_indent_width, get_indent_unit
 from .completion import CompletionPopup, CompletionProvider
 from .text_stats import count_mixed_words
 from .bracket_matcher import find_matching_bracket
 from ..utils.perf_probe import measure as _perf_measure
+from ..utils.feature_flags import is_enabled as _feature_enabled
 from .completion import CompletionProvider, CompletionPopup
 from .folding import FoldingManager
 from ..themes.theme_aware_mixin import ThemeAwareMixin
@@ -177,6 +180,9 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self._word_count_timer.timeout.connect(self._recompute_word_count)
         # 3.5.8 共享 Document：attach 后本 View 使用 Document 级统计/内容
         self._shared_doc: Optional[SharedDocument] = None
+        # Wave 4 E3：大文件模式（达 LARGE_FILE_THRESHOLD 行 + 开关开启）——
+        # load_content 时判定，降级补全/折叠/Minimap/预览。
+        self._large_file_mode_active = False
 
         # 自动补全
         self.cursorPositionChanged.connect(self._trigger_completion)
@@ -613,7 +619,11 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         规则：
         - auto_minimap 关闭时：使用全局 show_minimap 设置
         - auto_minimap 开启时：仅代码文件（非 .txt / .md）显示缩略图
+        - E3 大文件模式：强制隐藏缩略图（大文件 minimap 渲染为高成本路径）
         """
+        if self._large_file_mode_active:
+            self.set_minimap_visible(False)
+            return
         auto = self.config.get_editor_setting("auto_minimap", False)
         if auto:
             should_show = self._file_type not in self._NO_MINIMAP_TYPES
@@ -1086,6 +1096,12 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         # 停止补全相关状态，避免加载过程中弹窗
         self._completion_timer.stop()
         self._completion_popup.hide()
+        # E3：大文件模式判定（达阈值 + 开关开启，不依赖 lazy_highlight flag）。
+        # 阈值判定与 LazyHighlightManager 一致（content.count('\\n') + 1）。
+        self._large_file_mode_active = (
+            content.count('\n') + 1 >= LARGE_FILE_THRESHOLD
+            and _feature_enabled("large_file_mode")
+        )
 
         with self.programmatic_modify():
             # E1 profiling：大文件 lazy 加载耗时（≥LARGE_FILE_THRESHOLD 行才走此路径）
@@ -1095,12 +1111,17 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             ):
                 self.setPlainText(content)
 
-        # 重建补全词集
-        self._completion_provider.rebuild_from_text(self.toPlainText())
+        # 重建补全词集（大文件模式跳过——全量词集重建为高成本路径）
+        if not self._large_file_mode_active:
+            self._completion_provider.rebuild_from_text(self.toPlainText())
         # 重建折叠区间
         self._refresh_folding()
         # 再次确保补全弹窗已隐藏
         self._completion_popup.hide()
+
+    def is_large_file_mode(self) -> bool:
+        """Wave 4 E3：当前编辑器是否处于大文件模式（达阈值 + 开关开启）。"""
+        return self._large_file_mode_active
 
     def goto_line(self, line: int):
         """跳转到指定行（如果行在折叠区域内则自动展开）"""
@@ -1234,6 +1255,9 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
 
     def _refresh_folding(self) -> None:
         """文本变化后重建折叠区间。"""
+        # E3 大文件模式：跳过全量折叠计算（大文件 fold 重建为高成本路径）
+        if self._large_file_mode_active:
+            return
         if self._file_type not in self._FOLD_SUPPORTED_TYPES:
             return
         try:
@@ -1252,6 +1276,10 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
 
     def _trigger_completion(self) -> None:
         """光标位置改变时触发补全检查。"""
+        # E3 大文件模式：补全整体降级（词集未重建，弹框不出现）
+        if self._large_file_mode_active:
+            self._completion_popup.hide()
+            return
         # 编辑器不可见/无焦点/程序化修改/粘贴/IME 组字中直接隐藏并返回
         if self._programmatic_modify or self._is_pasting or self._composing:
             self._completion_popup.hide()
@@ -1284,6 +1312,9 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
 
     def _rebuild_completion_words(self) -> None:
         """从文档全文重建补全词集。"""
+        # E3 大文件模式：跳过全量词集重建（高成本路径，补全弹框也不触发）
+        if self._large_file_mode_active:
+            return
         if self.config.get_editor_setting("enable_completion", False):
             self._completion_provider.rebuild_from_text(self.toPlainText())
 

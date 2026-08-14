@@ -926,6 +926,11 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self.refresh_preview_now()
 
     def _on_text_changed(self):
+        # Wave 4 E3：大文件模式暂停自动刷新（大文件 md 全量渲染高成本），
+        # 保留 refresh_preview_now() 手动刷新入口。
+        editor = getattr(self, "editor", None)
+        if editor is not None and editor.is_large_file_mode():
+            return
         self._preview_timer.start()
 
     def resizeEvent(self, event):

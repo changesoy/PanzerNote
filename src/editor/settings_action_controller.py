@@ -25,6 +25,7 @@ from ..core.config import Config
 from ..core.config_import_service import ConfigImportError, ConfigImportService
 from ..core.timer_manager import TimerManager
 from ..game.secretary_widget import SecretaryWidget
+from ..utils.feature_flags import set_enabled as _feature_set_enabled
 from .editor_settings_dialog import EditorSettingsDialog
 from .editor_tabs import EditorTabWidget
 from .file_open_service import (
@@ -72,6 +73,10 @@ class SettingsActionController:
                 self._config.set_secretary_setting(key, value)
 
             self._config.save_settings()
+
+            # E3：大文件模式开关写 feature flag（持久化 feature_flags.json，
+            # 不混入 config.json 的 editor 设置）。
+            _feature_set_enabled("large_file_mode", dialog.large_file_mode_cb.isChecked())
 
             # 应用设置（与 apply_editor_settings 共享路径）
             self._apply_editor_dict(editor, secretary)

@@ -726,7 +726,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             self._connect_doc_binding(widget)
             widget.editor.set_file_type(filepath)
             widget.set_base_path(os.path.dirname(os.path.abspath(filepath)))
-            if render_preview:
+            # E3 大文件模式：打开时不自动渲染预览（大文件 md 全量渲染高成本），
+            # 保留手动刷新入口（refresh_preview_now / 预览面板刷新）。
+            if render_preview and not widget.editor.is_large_file_mode():
                 widget.refresh_preview_now()
         else:
             widget = Editor(self.config, theme_engine=self._theme_engine)

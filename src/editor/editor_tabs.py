@@ -1419,8 +1419,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 self.setCurrentIndex(i)
                 return True
         index = self.open_file(filepath)
-        if index is None:
-            return True
+        if index == -1:
+            return False
         widget = self.widget(index)
         editor = self._get_editor_from_widget(widget)
         if editor is not None:
@@ -2137,6 +2137,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             # D3b：eol 写 Document（Document 级语义，多 View 一致）
             if shared_doc is None:
                 return
+            if shared_doc.eol == eol:
+                return  # 行尾未变化：不触发修改标记
             shared_doc.eol = eol
             # D3a：dirty 由 doc.setModified(True) 驱动（Document 单一源）
             editor = self._get_editor_from_widget(widget)
@@ -2153,35 +2155,10 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                         self.setTabText(i, base + " *")
                     break
 
-    def get_unsaved_files(self) -> List[str]:
-        unsaved = []
-        for i in range(self.count()):
-            widget = self.widget(i)
-            tab_id = getattr(widget, 'tab_id', None)
-            if tab_id is not None:
-                # D3a：dirty 单一源 = SharedDocument
-                shared_doc = getattr(widget, "shared_doc", None)
-                if shared_doc is None:
-                    continue
-                is_modified = shared_doc.dirty
-                if is_modified:
-                    editor = self._get_editor_from_widget(widget)
-                    content = editor.toPlainText() if editor else ""
-                    # D3b：is_new 语义 = filepath is None（读 Document）
-                    is_new = shared_doc.filepath is None
-                    filepath = shared_doc.filepath
-                    if is_new and len(content.strip()) == 0:
-                        continue
-                    if filepath:
-                        unsaved.append(os.path.basename(filepath))
-                    else:
-                        unsaved.append(self._strip_tab_suffix(self.tabText(i)))
-        return unsaved
-
     def get_unsaved_tab_infos(self) -> List[Dict]:
         """返回本面板未保存标签的结构化信息（3.5.7 关闭确认用）。
 
-        与 get_unsaved_files 语义一致（跳过空未命名），但返回
+        跳过空未命名标签，返回
         `{"title": str, "filepath": Optional[str], "document_id": Optional[str]}` 列表，
         供「未保存文件确认对话框」展示。document_id 供多面板聚合时去重
         （共享 Document 在主面板与分屏各有一个 View，退出确认应只列一次）。
@@ -2242,28 +2219,6 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 if shared.dirty:
                     return True
         return False
-
-    def get_current_file_info(self) -> Optional[Dict]:
-        widget = self.currentWidget()
-        if not widget:
-            return None
-        tab_id = getattr(widget, 'tab_id', None)
-        if tab_id is None:
-            return None
-        # D3b：filepath 读 Document
-        shared_doc = getattr(widget, "shared_doc", None)
-        filepath = shared_doc.filepath if shared_doc is not None else None
-        if not filepath:
-            return None
-        editor = self._get_editor_from_widget(widget)
-        result: Dict[str, object] = {"filepath": filepath}
-        if editor:
-            cursor = editor.textCursor()
-            result["cursor_position"] = cursor.position()
-            vbar = editor.verticalScrollBar()
-            if vbar is not None:
-                result["scroll_position"] = vbar.value()
-        return result
 
     def get_open_files_info(self) -> List[Dict]:
         """导出为 workspace.json 的 open_files 条目（D3c：经 D2 适配层导出）。

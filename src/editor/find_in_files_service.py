@@ -212,12 +212,14 @@ class FindInFilesWorker(QThread):
         total = 0
         pattern = None
         start_time = time.monotonic()
+        finished_emitted = False
 
         try:
             if self._use_regex:
                 pattern = self._compile_regex(self._query)
                 if pattern is None:
                     self.search_finished.emit(0)
+                    finished_emitted = True
                     return
 
             if self._file_list is not None:
@@ -231,6 +233,7 @@ class FindInFilesWorker(QThread):
                     total = self._search_file(filepath, pattern, total)
                     if total >= self._max_results:
                         self.search_finished.emit(total)
+                        finished_emitted = True
                         return
             else:
                 include_globs = self._compile_globs(self._include)
@@ -266,9 +269,11 @@ class FindInFilesWorker(QThread):
                         total = self._search_file(filepath, pattern, total)
                         if total >= self._max_results:
                             self.search_finished.emit(total)
+                            finished_emitted = True
                             return
         finally:
-            self.search_finished.emit(total)
+            if not finished_emitted:
+                self.search_finished.emit(total)
 
     def _expired(self, start_time: float) -> bool:
         if self._timeout <= 0:

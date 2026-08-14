@@ -781,7 +781,6 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self._md_parser = self._create_md_parser()
         self._html_template_loaded = False
         self._preview_dirty = True
-        self._initial_preview_rendered = False
         self._last_sync_frac: float = 1.0
         self._last_at_top: bool = True
         self._last_at_bottom: bool = False
@@ -798,7 +797,6 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         if is_enabled("async_highlight"):
             from .async_highlight import AsyncHighlightRenderer
             self._async_renderer = AsyncHighlightRenderer(self)
-            self._async_renderer.result_ready.connect(self._on_async_highlight_ready)
 
         self._init_ui()
         self._connect_signals()
@@ -912,7 +910,6 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         if hasattr(self, "_preview_timer"):
             self._preview_timer.stop()
         self._update_preview()
-        self._initial_preview_rendered = True
 
     def invalidate_preview(self) -> None:
         self._preview_dirty = True
@@ -922,7 +919,6 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             return
 
         self._preview_dirty = False
-        self._initial_preview_rendered = True
         self.refresh_preview_now()
 
     def _on_text_changed(self):
@@ -1432,9 +1428,6 @@ a {{
         html_content = self._wrap_fold_sections(html_content, text)
         self._push_to_preview(html_content)
 
-    def _on_async_highlight_ready(self, task_id: str, html: str, language: str):
-        pass
-
     @staticmethod
     def _wrap_code_lines_with_source_map(
         code_html: str,
@@ -1712,32 +1705,10 @@ a {{
 
     # ──────────── 预览显隐 ────────────
 
-    def debug_sync_state(self) -> None:
-        """打印运行时同步调试信息到日志。"""
-        if HAS_WEBENGINE and isinstance(self.preview, QWebEngineView):
-            page = self.preview.page()
-            if page is not None:
-                page.runJavaScript(
-                    "var nodes = document.querySelectorAll('[data-source-line]'); "
-                    "var sample = Array.from(nodes).slice(0, 15).map(function(el) {"
-                    "  return { line: el.getAttribute('data-source-line'), tag: el.tagName, cls: el.className };"
-                    "});"
-                    "JSON.stringify({ nodeCount: nodes.length, sample: sample, debug: window.__panzerSyncDebug || {} })",
-                    lambda result: get_logger(__name__).debug(
-                        "Markdown sync debug: %s", result
-                    ),
-                )
-
     def toggle_preview(self):
         self._preview_visible = not self._preview_visible
         self.preview.setVisible(self._preview_visible)
         if self._preview_visible:
-            self._update_preview()
-
-    def set_preview_visible(self, visible: bool):
-        self._preview_visible = visible
-        self.preview.setVisible(visible)
-        if visible:
             self._update_preview()
 
     # ══════════════════════════════════════════════════

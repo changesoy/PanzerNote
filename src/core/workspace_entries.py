@@ -39,22 +39,3 @@ def untitled_entry(
         "display_name": display_name,
         "content": content,
     }
-
-
-def is_untitled_entry(entry: dict) -> bool:
-    """判定条目是否为未命名文件（恢复路由：restore_untitled_file vs open_file）。"""
-    return bool(entry.get("is_new"))
-
-
-def entry_filepath(entry: dict) -> Optional[str]:
-    """具名条目 → 文件路径；未命名条目返回 None。"""
-    return entry.get("path")
-
-
-def parse_untitled(entry: dict) -> Dict[str, Any]:
-    """未命名条目 → 恢复标签所需字段 {display_name, untitled_number, content}。"""
-    return {
-        "display_name": entry.get("display_name", "未命名"),
-        "untitled_number": entry.get("untitled_number"),
-        "content": entry.get("content"),
-    }

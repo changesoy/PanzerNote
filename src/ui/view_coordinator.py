@@ -118,6 +118,7 @@ class ViewCoordinator:
             theme_engine=self._theme_engine,
             webengine_runtime=self._webengine_runtime,
             document_registry=self._document_registry,
+            session_manager=self._editor_tabs.session_manager,
         )
         split_tabs.set_find_bar(self._find_replace_bar)
         self._connect_tabs_signals(split_tabs)
@@ -270,6 +271,7 @@ class ViewCoordinator:
             theme_engine=self._theme_engine,
             webengine_runtime=self._webengine_runtime,
             document_registry=self._document_registry,
+            session_manager=self._editor_tabs.session_manager,
         )
         split_tabs.set_find_bar(self._find_replace_bar)
         self._connect_tabs_signals(split_tabs)

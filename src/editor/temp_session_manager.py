@@ -118,10 +118,13 @@ class TempSessionManager:
             if filepath:
                 path_hash = hashlib.sha256(filepath.encode('utf-8')).hexdigest()[:12]
                 basename = os.path.basename(filepath)
-                autosave_name = f"{tab_id}_{path_hash}_{basename}.autosave"
+                # 3.5.8（批次 4e）：autosave 文件名去 tab_id——tab_id 按面板独立计数，
+                # 同一 Document 跨面板共享 session 后命名必须唯一且稳定（规格 3.2）
+                autosave_name = f"{path_hash}_{basename}.autosave"
                 display_name = basename
             else:
-                autosave_name = f"untitled_{tab_id}.autosave"
+                doc_key = info.get("doc_key") or f"untitled_{tab_id}"
+                autosave_name = f"{doc_key}.autosave"
                 display_name = f"未命名_{tab_id}"
 
             autosave_path = os.path.join(files_dir, autosave_name)

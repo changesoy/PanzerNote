@@ -93,6 +93,7 @@ logs/
 *.bak
 *.tmp
 *.temp
+commit_msg_tmp.txt
 
 # --- 用户本地配置 ---
 user_data_path.txt

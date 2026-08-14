@@ -21,7 +21,7 @@ _FLAGS: Dict[str, bool] = {
     "lazy_highlight": False,
     "minimap_block_cache": True,
     "async_highlight": False,
-    "markdown_incremental": False,
+    "markdown_incremental": True,
     "lazy_loading": False,
     "signal_driven_stats": True,
 }

@@ -90,6 +90,7 @@ from .secure_markdown_renderer import (
     MARKDOWN_LAYOUT_CSS as _MARKDOWN_LAYOUT_CSS,
     strip_dangerous_html as _strip_dangerous_html,
 )
+from .document_render_cache import _DOC_RENDER_CACHE, clear_document_render_cache
 
 
 def _extract_language_from_code_attrs(attrs: str) -> str:
@@ -775,7 +776,8 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self._base_path = ""
         self._async_renderer = None
         self._pending_async_task: Optional[str] = None
-        self._render_cache = None
+        self._last_render_text: str = ""
+        self._last_render_html: str = ""
         self._md_parser = self._create_md_parser()
         self._html_template_loaded = False
         self._preview_dirty = True
@@ -797,12 +799,6 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             from .async_highlight import AsyncHighlightRenderer
             self._async_renderer = AsyncHighlightRenderer(self)
             self._async_renderer.result_ready.connect(self._on_async_highlight_ready)
-
-        if is_enabled("markdown_incremental"):
-            from .incremental_renderer import RenderCache
-            self._render_cache = RenderCache(
-                self._render_markdown_with_source_map, cache_size=50
-            )
 
         self._init_ui()
         self._connect_signals()
@@ -895,6 +891,8 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
     def _apply_theme_colors(self, colors):
         if isinstance(self.preview, PreviewBrowser):
             self.preview._apply_copy_btn_style(colors)
+        # 主题变更时清空 Document 级渲染缓存（高亮颜色/折叠样式依赖主题）
+        clear_document_render_cache()
         # 主题变更时重建预览以应用新 CSS（重置标志让 _push_to_preview 走 setHtml 路径）
         self._html_template_loaded = False
         if getattr(self, 'editor', None) is not None:
@@ -944,10 +942,23 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
 
     def _update_preview(self):
         text = self.editor.toPlainText()
+        doc = self.editor.document()
+        if doc is not None and is_enabled("markdown_incremental"):
+            # Document 级缓存：同一 SharedDocument 多 View 共用，内容未变跳过渲染
+            html_content = _DOC_RENDER_CACHE.get_or_render(
+                doc, doc.revision(), lambda: self._render_full(text)
+            )
+        else:
+            html_content = self._render_full(text)
+        self._push_to_preview(html_content)
 
-        if self._render_cache and is_enabled("markdown_incremental"):
-            html_content = self._render_cache.render(text)
-        elif HAS_MARKDOWN_IT or HAS_MARKDOWN:
+    def _render_full(self, text: str) -> str:
+        """完整渲染流程（渲染 → 高亮 → 图片 → 折叠），最终产物整体可被 Document 缓存复用。"""
+        # widget 层快路径：同一 widget 连续相同文本秒回（同 revision 已由 Document 缓存覆盖）
+        if text == self._last_render_text:
+            return self._last_render_html
+
+        if HAS_MARKDOWN_IT or HAS_MARKDOWN:
             html_content = self._render_markdown_with_source_map(text)
         else:
             html_content = self._basic_md_to_html(text)
@@ -959,10 +970,12 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
 
         html_content = self._resolve_local_images(html_content)
 
-        # 包裹折叠 section（编辑器的折叠状态同步到预览）
+        # 包裹折叠 section（编辑器的折叠状态同步到预览；产物仅依赖 text）
         html_content = self._wrap_fold_sections(html_content, text)
 
-        self._push_to_preview(html_content)
+        self._last_render_text = text
+        self._last_render_html = html_content
+        return html_content
 
     def _push_to_preview(self, html_content: str):
         """把渲染好的 HTML 推送到预览，供 _update_preview / _on_async_highlight_done 共用。

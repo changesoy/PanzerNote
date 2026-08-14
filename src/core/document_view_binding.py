@@ -34,18 +34,24 @@ class DocumentViewBinding(QObject):
         """登记一条连接（不立即建立）；attach 时才 connect。
 
         slot 必须是与信号兼容的普通可调用对象（禁止无人持有引用的裸 lambda）。
+        重复 bind 同一 (signal, slot) 直接忽略——否则 attach 后重复 connect 会
+        双重连接，detach 时 disconnect(slot) 只断一次，残留一条泄漏。
+        注：PyQt6 每次 getattr 返回新的 bound signal 对象，防重用 signal_name
+        （稳定字符串）而非 signal 对象的身份比较。
         """
         signal = getattr(self._document, signal_name)
+        if any(name == signal_name and sl is slot for name, _sig, sl in self._connections):
+            return self
         if self._attached:
             signal.connect(slot)
-        self._connections.append((signal, slot))
+        self._connections.append((signal_name, signal, slot))
         return self
 
     def attach(self) -> None:
         """建立全部登记连接。幂等：已 attach 时重复调用直接忽略。"""
         if self._attached:
             return
-        for signal, slot in self._connections:
+        for _name, signal, slot in self._connections:
             signal.connect(slot)
         self._attached = True
 
@@ -53,7 +59,7 @@ class DocumentViewBinding(QObject):
         """断开全部连接。幂等：未 attach 时重复调用直接忽略。"""
         if not self._attached:
             return
-        for signal, slot in self._connections:
+        for _name, signal, slot in self._connections:
             try:
                 signal.disconnect(slot)
             except (TypeError, RuntimeError):

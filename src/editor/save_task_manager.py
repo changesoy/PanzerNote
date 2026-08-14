@@ -57,6 +57,10 @@ class SaveTaskManager(QObject):
         self._providers: Dict[int, Callable[[], str]] = {}
         self._on_resave: Dict[int, Callable[[], None]] = {}
         self._last_states: Dict[int, SaveState] = {}
+        # 3.5.8 多 View（R3）：document_key → 正在保存该 Document 的 owner tab_id。
+        # 同一 Document 的多个 View（不同 tab_id）共享内容，保存任务按 Document
+        # 合并——同 Document 同时最多一个实际写盘任务，禁止并发写同一文件。
+        self._doc_owner: Dict[str, int] = {}
 
     # ═══════════════ 生命周期 ═══════════════
 
@@ -65,6 +69,10 @@ class SaveTaskManager(QObject):
         self._status[tab_id] = "idle"
 
     def unregister_tab(self, tab_id: int) -> None:
+        # 若该 tab 是某个 Document 的保存 owner，注销时释放 doc 级保存锁
+        for key, owner in list(self._doc_owner.items()):
+            if owner == tab_id:
+                del self._doc_owner[key]
         self._tasks.pop(tab_id, None)
         self._dirty.pop(tab_id, None)
         self._status.pop(tab_id, None)
@@ -115,20 +123,32 @@ class SaveTaskManager(QObject):
 
     def submit_task(self, tab_id: int, task, snapshot: Optional[str] = None,
                     provider: Optional[Callable[[], str]] = None,
-                    on_resave: Optional[Callable[[], None]] = None) -> bool:
+                    on_resave: Optional[Callable[[], None]] = None,
+                    document_key: Optional[str] = None) -> bool:
         """提交保存任务。
 
         snapshot：本次写盘的内容快照；provider：返回当前内容（成功时判定 dirty 用）。
         on_resave：保存成功但内容已变且保存期间有 pending 请求时，通知调用方补保存。
+        document_key：所属 Document 标识（3.5.8 多 View）。同一 Document 的多个 View
+        共享内容，传此参数后保存任务按 Document 合并——该 Document 已由其他 View
+        发起保存时不再并发提交，仅置 pending（单槽合并），返回 False。
         传 snapshot/provider 后成功判定走「当前 == 快照」，否则保持旧行为（直接 CLEAN）。
         已在 SAVING 中 → 不并发提交，仅置 pending（单槽合并），返回 False。
         """
+        if document_key is not None:
+            owner = self._doc_owner.get(document_key)
+            if owner is not None and self._status.get(owner) == "saving":
+                # 同一 Document 已有 View 在保存 → 合并到该 owner，不并发写同一文件
+                self._pending_save[owner] = True
+                return False
         if self._status.get(tab_id) == "saving":
             self._pending_save[tab_id] = True
             return False
 
         self._tasks[tab_id] = task
         self._status[tab_id] = "saving"
+        if document_key is not None:
+            self._doc_owner[document_key] = tab_id
         if snapshot is not None:
             self._snapshots[tab_id] = snapshot
         if provider is not None:
@@ -141,8 +161,16 @@ class SaveTaskManager(QObject):
         self._emit_if_changed(tab_id)
         return True
 
-    def request_resave(self, tab_id: int) -> bool:
-        """保存中再次收到显式保存请求 → 仅置 pending（单槽合并），返回 True。"""
+    def request_resave(self, tab_id: int, document_key: Optional[str] = None) -> bool:
+        """保存中再次收到显式保存请求 → 仅置 pending（单槽合并），返回 True。
+
+        document_key：同一 Document 已由其他 View 在保存时，请求合并到该 owner。
+        """
+        if document_key is not None:
+            owner = self._doc_owner.get(document_key)
+            if owner is not None and self._status.get(owner) == "saving":
+                self._pending_save[owner] = True
+                return True
         if self._status.get(tab_id) == "saving":
             self._pending_save[tab_id] = True
             return True
@@ -180,6 +208,10 @@ class SaveTaskManager(QObject):
         # 守卫：tab 已注销（unregister 后任务才完成）→ 忽略迟到回调，避免幽灵状态重建
         if tab_id not in self._status:
             return
+        # 该 tab 是某 Document 的保存 owner → 任务结束释放 doc 级保存锁
+        for key, owner in list(self._doc_owner.items()):
+            if owner == tab_id:
+                del self._doc_owner[key]
         self._tasks.pop(tab_id, None)
         snapshot = self._snapshots.pop(tab_id, None)
         provider = self._providers.pop(tab_id, None)

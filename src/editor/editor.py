@@ -968,7 +968,10 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
 
         新建的默认 QTextDocument 必须显式设置 QPlainTextDocumentLayout，
         否则 setDocument 静默不绑定（规格 2.3 契约：layout 不兼容会被 Qt 拒绝）。
+        未 attach 过时直接返回——否则会新建空文档清掉独立编辑中的内容。
         """
+        if self._shared_doc is None:
+            return
         self._shared_doc = None
         new_doc = QTextDocument(self)
         new_doc.setDocumentLayout(QPlainTextDocumentLayout(new_doc))

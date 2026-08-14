@@ -37,7 +37,7 @@ from ..core.shared_document import SharedDocument
 from .syntax_highlighter import get_highlighter_for_file
 from .editor_actions import EditorActionsMixin
 from .auto_pair_handler import AutoPairHandlerMixin
-from .virtual_scroll import LazyHighlightManager
+from .virtual_scroll import LazyHighlightManager, DocumentLazyHighlightCoordinator
 from .extra_selection_manager import ExtraSelectionManager
 from .indentation import get_indent_width, get_indent_unit
 from .completion import CompletionPopup, CompletionProvider
@@ -1012,6 +1012,19 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             shared_doc.bookmarksChanged.connect(self._repaint_bookmarks)
         except (TypeError, RuntimeError):
             pass
+        # E2：lazy 高亮 Document 级协调器（挂 shared_doc，惰性创建，同 _folding
+        # 模式）。分屏 View attach 后也注册上报可视区——补上「分屏 View 无 lazy
+        # 驱动」缺口：主面板打开激活 lazy 后，分屏 View 滚动区域也能被高亮。
+        coordinator = getattr(shared_doc, "_lazy_coordinator", None)
+        if coordinator is None:
+            coordinator = DocumentLazyHighlightCoordinator(
+                shared_doc.qdocument, parent=shared_doc
+            )
+            shared_doc._lazy_coordinator = coordinator
+        cast(DocumentLazyHighlightCoordinator, coordinator).register(self)
+        self._lazy_highlight.set_coordinator(
+            cast(DocumentLazyHighlightCoordinator, coordinator)
+        )
         self.invalidate_word_count()
 
     def detach_shared_document(self) -> None:
@@ -1033,6 +1046,13 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             self._shared_doc.bookmarksChanged.disconnect(self._repaint_bookmarks)
         except (TypeError, RuntimeError):
             pass
+        # E2：注销 lazy 协调器。coordinator 挂 shared_doc，其他 View 仍可继续上报；
+        # 解绑后本 View 回到 per-View 高亮（set_file_type 重建本地 highlighter 时
+        # 不再转发给 Document 级协调器）。
+        coordinator = getattr(self._shared_doc, "_lazy_coordinator", None)
+        if coordinator is not None:
+            cast(DocumentLazyHighlightCoordinator, coordinator).unregister(self)
+        self._lazy_highlight.set_coordinator(None)
         self._shared_doc = None
         new_doc = QTextDocument(self)
         new_doc.setDocumentLayout(QPlainTextDocumentLayout(new_doc))

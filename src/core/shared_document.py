@@ -106,6 +106,11 @@ class SharedDocument(QObject):
         # core 层不依赖 editor，由 editor 层首次 attach 时创建并写入（同 _highlighter 模式）。
         self._folding: Optional[object] = None
 
+        # lazy 高亮 Document 级协调器（Wave 4 E2）：分屏多 View 共享同一 Document 时，
+        # 各 View 可视区 union 增量高亮。core 层不依赖 editor，由 editor 层首次
+        # attach 时惰性创建并写入（同 _folding 模式），无大文件时不创建。
+        self._lazy_coordinator: Optional[object] = None
+
         # 书签（3.5.8 批次 5 收敛）：Document 级（规格 2.12）——两个 View 看同一份。
         self._bookmarks: Set[int] = set()
 

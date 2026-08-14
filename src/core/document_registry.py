@@ -176,6 +176,24 @@ class DocumentRegistry:
         if self._pending_path_index.get(key) == document_id:
             del self._pending_path_index[key]
 
+    def move_path(self, document: SharedDocument, filepath: str) -> bool:
+        """文件树移动文件后 re-key：path_index 换键 + Document 绑定新路径。
+
+        与 commit_path（Save As 语义）不同：无 pending 预留流程，仅换路径键。
+        目标路径被其它 Document 占用时拒绝（与 Save As 同规则，避免两个
+        Document 指向同一路径的非法形态）。成功后 bind_path 广播 pathChanged /
+        nameChanged，所有 View 的路径/标题随 Document 同步。
+        """
+        if self.is_path_owned_by_other(document.document_id, filepath):
+            return False
+        key = self.canonical(filepath)
+        old_key = self.canonical(document.filepath) if document.filepath else None
+        if old_key and self._path_index.get(old_key) == document.document_id:
+            del self._path_index[old_key]
+        self._path_index[key] = document.document_id
+        document.bind_path(filepath)
+        return True
+
     def unregister_path(self, document: SharedDocument) -> None:
         """移除 Document 当前路径的索引（关闭 / 换路径前）。"""
         if not document.filepath:

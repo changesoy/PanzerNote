@@ -671,8 +671,17 @@ class MainWindow(QMainWindow):
             return
 
         unsaved_infos = []
+        seen_docs = set()
         for p in panels:
-            unsaved_infos.extend(p.get_unsaved_tab_infos())
+            for info in p.get_unsaved_tab_infos():
+                # 3.5.8：共享 Document 在主面板与分屏各有一个 View，按 document_id
+                # 去重——退出确认框同一文件只列一次（保存/不保存对 Document 生效一次即可）
+                doc_id = info.get("document_id")
+                if doc_id is not None:
+                    if doc_id in seen_docs:
+                        continue
+                    seen_docs.add(doc_id)
+                unsaved_infos.append(info)
 
         if not unsaved_infos:
             self._finalize_close()

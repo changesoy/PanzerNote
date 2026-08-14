@@ -235,14 +235,14 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
                 color: {colors.text_primary};
             }}
         """)
-        # 更新高亮器的主题
+        # 更新高亮器的主题（3.5.8：两种高亮器均实现 set_dark_mode——Pygments
+        # 走 set_dark_mode 重建 formats，不经过 set_file_type，避免摘除共享高亮）
         if self._highlighter and self._filepath_or_ext:
             is_dark = self._theme_engine.get_active_theme().is_dark
             if hasattr(self._highlighter, 'set_dark_mode'):
-                # Markdown 高亮器
                 self._highlighter.set_dark_mode(is_dark)
             else:
-                # Pygments 高亮器：重新设置文件类型以切换主题
+                # 旧式高亮器回退：重新设置文件类型以切换主题
                 self.set_file_type(self._filepath_or_ext)
         self._highlight_current_line()
 

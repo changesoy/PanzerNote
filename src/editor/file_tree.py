@@ -176,7 +176,7 @@ class DroppableTreeView(QTreeView):
                 elif tab_id is not None:
                     # 未命名标签拖到文件树 = 落盘保存（源面板从拖拽发起者父级取）
                     source = event.source()
-                    source_tabs = getattr(source, 'parent', lambda: None)()
+                    source_tabs = source.parent() if source is not None else None
                     if source_tabs is not None:
                         self.untitled_save_requested.emit(source_tabs, tab_id, dest_folder)
 

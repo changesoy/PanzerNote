@@ -803,6 +803,7 @@ src/__init__.py (__version__ = "1.9.0")
 - **路径 re-key**（规格 2.2）：Save As 走 `reserve_path`（pending 预留）→ 成功后 `commit_path`（pending → path_index + `bind_path` 广播 pathChanged/nameChanged）；文件树移动走 `move_path`（直接换键，无 pending）；目标路径被其它 Document 占用一律拒绝
 - **保存竞态防护**（规格 2.4）：`SaveTaskManager` 按 `(tab_id × save_status)` 两维度管理（面板内）；`SharedDocument.request_save()`/`on_save_succeeded()`/`on_save_failed()` 接线为**跨面板唯一门闩**——主面板与分屏的 Manager 相互独立，`document_key` 合并仅面板内有效，门闩保证同一 Document 全局同时最多一个实际写盘任务（最新内容必然最后落盘），保存完成直接连 `SaveTask.signals.finished` 释放（标签已注销也不卡死）；`safe_write` 原子化（同目录临时文件 + os.replace），并发写目标始终是完整版本
 - **状态收敛 Document 级**：折叠（2.10）与书签（2.12）随 Document 共享；`dirty` 单一源在 Document，各 View 标题经 dirtyChanged 同步（`_on_view_dirty`）
+  > **Known limitation / Future research**：每 View 独立折叠未实现——`FoldingManager` 通过 `QTextBlock.setVisible` 落状态于共享 QTextDocument 的 QTextBlock 上，View 级边界在 Qt 当前实现下不成立（规格 2.10 已核查）。当前行为：View A 折叠 → View B 同步折叠。实现每 View 独立折叠需重写呈现机制（per-view layout / paint），留作未来独立增强。
 - **高亮**：两种高亮器（Markdown / Pygments）均实现 `set_dark_mode`，主题切换不经过 `set_file_type`（避免重建时摘除共享高亮）；关闭最后 View 前 `_detach_shared_from_widget` + release，杜绝悬垂引用（C++ deleted 崩溃）
 - **未保存聚合**：`get_unsaved_tab_infos` 返回含 `document_id`，`MainWindow.closeEvent` 按 document_id 跨面板去重（同一共享文件只列一次）；`save_all_for_close` 以 Document 侧 dirty 为准
 

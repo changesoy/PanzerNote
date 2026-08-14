@@ -81,6 +81,7 @@ class UnsavedFilesDialog(QDialog):
 
         # 显式接线：QDialogButtonBox 的 AcceptRole/DestructiveRole/RejectRole 按钮
         # 不会自动映射到 QDialog 的 accepted/rejected，逐按钮连接 clicked 保证语义确定。
+        assert save_btn is not None and discard_btn is not None  # addButton 返回值类型收窄
         save_btn.clicked.connect(self._on_save)
         discard_btn.clicked.connect(self._on_discard)
         if cancel_btn is not None:

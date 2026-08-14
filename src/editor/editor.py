@@ -33,6 +33,7 @@ from PyQt6.QtGui import (
 )
 
 from ..core.config import Config
+from ..core.shared_document import SharedDocument
 from .syntax_highlighter import get_highlighter_for_file
 from .editor_actions import EditorActionsMixin
 from .auto_pair_handler import AutoPairHandlerMixin
@@ -167,7 +168,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self._word_count_timer.setInterval(800)
         self._word_count_timer.timeout.connect(self._recompute_word_count)
         # 3.5.8 共享 Document：attach 后本 View 使用 Document 级统计/内容
-        self._shared_doc: Optional = None
+        self._shared_doc: Optional[SharedDocument] = None
 
         # 自动补全
         self.cursorPositionChanged.connect(self._trigger_completion)
@@ -925,7 +926,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         return int(max(0, doc.characterCount() - 1))
 
     def get_word_count(self) -> int:
-        shared = getattr(self, '_shared_doc', None)
+        shared = self._shared_doc
         if shared is not None:
             return shared.word_count  # Document 级单一统计（共享后只算一次）
         return count_mixed_words(self.toPlainText())
@@ -940,7 +941,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self._word_count_timer.start(800)
 
     def _recompute_word_count(self):
-        shared = getattr(self, '_shared_doc', None)
+        shared = self._shared_doc
         if shared is not None:
             self._cached_word_count = shared.word_count
         else:
@@ -950,7 +951,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
 
     # ═══════════════ 3.5.8 共享 Document attach/detach ═══════════════
 
-    def attach_shared_document(self, shared_doc) -> None:
+    def attach_shared_document(self, shared_doc: SharedDocument) -> None:
         """attach 外部共享 QTextDocument（3.5.8）。
 
         Editor 只 attach，不取得所有权（SharedDocument 拥有 qdocument）；
@@ -972,6 +973,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         new_doc = QTextDocument(self)
         new_doc.setDocumentLayout(QPlainTextDocumentLayout(new_doc))
         self.setDocument(new_doc)
+        self.invalidate_word_count()  # 清掉共享 Document 的缓存词数，下次按独立内容重算
 
     def get_current_line(self) -> int:
         return int(self.textCursor().blockNumber() + 1)

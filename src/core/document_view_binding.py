@@ -14,7 +14,7 @@ View ↔ Document 信号接线（3.5.8 规格 2.6）
 设计依据：3.5.8-共享文档多视图需求规格.md 2.6。
 """
 
-from typing import Callable, List, Tuple
+from typing import Callable, List, Optional, Tuple
 
 from PyQt6.QtCore import QObject
 
@@ -24,7 +24,7 @@ from .shared_document import SharedDocument
 class DocumentViewBinding(QObject):
     """Document 信号 → View 槽 的幂等接线器。"""
 
-    def __init__(self, document: SharedDocument, parent: QObject = None) -> None:
+    def __init__(self, document: SharedDocument, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         self._document = document
         self._connections: List[Tuple] = []

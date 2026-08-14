@@ -209,7 +209,7 @@ class ViewCoordinator:
         if split_tabs.save_manager.has_pending_tasks():
             # 异步保存完成后再真正关闭
             cb = lambda: self._finish_close_split(split_tabs)
-            split_tabs._close_split_callback = cb
+            setattr(split_tabs, "_close_split_callback", cb)
             split_tabs.save_manager.all_tasks_finished.connect(cb)
         else:
             self._finish_close_split(split_tabs)
@@ -222,7 +222,7 @@ class ViewCoordinator:
                 split_tabs.save_manager.all_tasks_finished.disconnect(cb)
             except (TypeError, RuntimeError):
                 pass
-            split_tabs._close_split_callback = None
+            setattr(split_tabs, "_close_split_callback", None)
 
         if split_tabs.save_manager.get_failed_tab_ids():
             # 保存失败 → 中止关闭，分屏保留

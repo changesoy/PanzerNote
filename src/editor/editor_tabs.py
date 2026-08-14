@@ -979,7 +979,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             tab_id, task,
             snapshot=content,
             provider=lambda: self._current_normalized_content(widget, target_eol),
-            on_resave=lambda tid=tab_id: self._on_resave_requested(tid),
+            on_resave=lambda: self._on_resave_requested(tab_id),
         )
         pool = QThreadPool.globalInstance()
         if pool is not None:
@@ -1757,7 +1757,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         `{"title": str, "filepath": Optional[str]}` 列表，供
         「未保存文件确认对话框」展示。
         """
-        infos = []
+        infos: List[Dict[str, Optional[str]]] = []
         for i in range(self.count()):
             widget = self.widget(i)
             tab_id = getattr(widget, 'tab_id', None)

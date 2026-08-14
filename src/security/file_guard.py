@@ -23,6 +23,7 @@
 """
 
 import os
+import tempfile
 import time
 from typing import Optional
 
@@ -225,7 +226,12 @@ class FileGuard:
         validate_path: bool = True,
         context: Optional[FileAccessContext] = None,
     ) -> None:
-        """安全写入文件内容
+        """安全写入文件内容（原子写入）
+
+        先写同目录临时文件再 os.replace 原子替换目标：
+        写入中途崩溃/断电时目标保持完整旧版本，不会半写损坏；
+        并发写同一文件时目标始终是某个完整版本（last-write-wins），
+        不会出现字节交错。临时文件前缀 .pn_tmp_ 便于识别残留。
 
         Args:
             filepath: 文件路径
@@ -249,11 +255,34 @@ class FileGuard:
                 f"写入内容大小超过限制 ({self._max_file_size} 字节)"
             )
 
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        with open(filepath, 'wb') as f:
-            f.write(encoded_content)
+        self._atomic_write(filepath, encoded_content)
 
-        self._logger.debug("安全写入文件: %s (%d 字节)", filepath, content_size)
+    def _atomic_write(self, filepath: str, data: bytes) -> None:
+        """原子写入：同目录临时文件 + os.replace 原子替换目标。
+
+        临时文件与目标同目录（同一文件系统）保证 os.replace 原子性；
+        失败时清理临时文件并重新抛出异常，不留下半写目标文件。
+        """
+        target_dir = os.path.dirname(os.path.abspath(filepath))
+        os.makedirs(target_dir, exist_ok=True)
+        fd, temp_path = tempfile.mkstemp(dir=target_dir, prefix=".pn_tmp_", suffix=".tmp")
+        try:
+            with os.fdopen(fd, 'wb') as f:
+                f.write(data)
+            # 保留原文件权限（mkstemp 默认 0600）：Unix 下避免替换后丢失 0644 等
+            try:
+                st = os.stat(filepath)
+                os.chmod(temp_path, st.st_mode)
+            except OSError:
+                pass
+            os.replace(temp_path, filepath)
+        except BaseException:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+            raise
+        self._logger.debug("原子写入文件: %s (%d 字节)", filepath, len(data))
 
     def safe_read_bytes(
         self,
@@ -307,7 +336,7 @@ class FileGuard:
         validate_path: bool = True,
         context: Optional[FileAccessContext] = None,
     ) -> None:
-        """安全写入二进制文件
+        """安全写入二进制文件（原子写入，见 _atomic_write）
 
         Args:
             filepath: 文件路径
@@ -323,8 +352,4 @@ class FileGuard:
                 f"写入数据大小超过限制 ({self._max_file_size} 字节)"
             )
 
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        with open(filepath, 'wb') as f:
-            f.write(data)
-
-        self._logger.debug("安全写入二进制文件: %s (%d 字节)", filepath, len(data))
+        self._atomic_write(filepath, data)

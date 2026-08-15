@@ -190,6 +190,9 @@ class PluginManagerDialog(ThemeAwareMixin, QDialog):
             name = info.get("name", "未知")
             version = info.get("version", "?")
             state = info.get("state", "UNLOADED")
+            # Batch 5（D14）：安全模式状态（上次启动启动阶段异常退出，需手动处理）
+            if state == "SAFE_MODE":
+                state = "安全模式"
             desc = info.get("description", "")
             caps = info.get("capabilities", [])
             item_text = f"{name} v{version} [{state}]"

@@ -598,6 +598,9 @@ class MainWindow(QMainWindow):
         else:
             self.show()
 
+        # Batch 5（D5）：窗口显示后延迟启动启用插件，插件不进启动关键路径
+        QTimer.singleShot(0, self._activate_enabled_plugins)
+
     def showEvent(self, event):
         super().showEvent(event)
 
@@ -1513,6 +1516,29 @@ class MainWindow(QMainWindow):
         self.secretary.show_message(f"已切换主题: {self.theme_engine.get_active_theme().name}")
 
     # === 插件管理 ===
+
+    def _activate_enabled_plugins(self) -> None:
+        """Batch 5（D5）：窗口显示后延迟启动启用插件。
+
+        session 恢复 + 窗口显示已完成，插件能看到恢复后的编辑器/会话状态；
+        插件代码不进入启动关键路径。安全模式插件（上次启动启动阶段异常退出）
+        会被跳过，仅记录日志，由用户在插件管理中手动处理。
+        """
+        manager = self.__dict__.get("plugin_manager")
+        if manager is None:
+            return
+        try:
+            activated = manager.activate_enabled_plugins()
+            if activated:
+                get_logger(__name__).info("已启动插件: %s", ", ".join(activated))
+            safe_mode = manager.get_safe_mode_plugins()
+            if safe_mode:
+                get_logger(__name__).warning(
+                    "插件处于安全模式（上次启动异常退出），已跳过: %s",
+                    ", ".join(safe_mode),
+                )
+        except Exception:
+            get_logger(__name__).exception("启用插件启动失败")
 
     def _register_plugin_capabilities(self):
         """将宿主能力注册到 CapabilityRegistry（Wave 5 Batch 1 保留能力）"""

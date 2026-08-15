@@ -186,7 +186,8 @@ PanzerNote/
 ├── docs/                           # 文档
 │   ├── architecture.md             # 本文件
 │   ├── roadmap.md                  # 未完成规划
-│   └── color_audit.md              # 硬编码颜色审计
+│   └── theme-design/               # 主题设计（color_audit.md、候选风格参考）
+│       └── color_audit.md          # 硬编码颜色审计
 │
 ├── data/                           # 数据 & 资源（程序目录）
 │   ├── assets/
@@ -476,7 +477,7 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 - **编辑器端**：`get_editor_formats(theme_engine)` → 从当前主题的 `ThemeColorScheme` 动态构建 `{Token: QTextCharFormat}`
 - **预览端**：`highlight_code_html(code, language, theme_engine)` → 从主题颜色生成 Pygments style class，输出内联样式 HTML
 - **预览 CSS**：`get_preview_css(theme_engine)` → 从主题颜色生成代码高亮 CSS 变量，注入 Markdown 预览
-- 切换主题时语法高亮颜色无需任何额外处理——`theme_changed` 信号触发所有订阅组件重新读取 `ThemeColorScheme`，颜色自动跟随（详见 [color_audit.md](color_audit.md)）
+- 切换主题时语法高亮颜色无需任何额外处理——`theme_changed` 信号触发所有订阅组件重新读取 `ThemeColorScheme`，颜色自动跟随（详见 [color_audit.md](theme-design/color_audit.md)）
 
 ### 4.7 小秘书 (`game/secretary_widget.py`)
 
@@ -1035,7 +1036,7 @@ pip install mypy>=1.20                         # 类型检查
 ### 主题约束
 
 22. **主题全局生效**：所有需要响应主题切换的 UI 组件应继承 `ThemeAwareMixin`，实现 `_apply_theme(theme)` 或 `_apply_theme_colors(colors)` 方法。`ThemeAwareMixin` 自动订阅 `theme_changed` 信号
-23. **硬编码颜色迁移**：编辑器、Markdown 预览、弹窗中残留的硬编码颜色应逐步迁移到主题 token 系统，迁移方向参考 [color_audit.md](color_audit.md)（VS Code Dark Modern / Dark+）
+23. **硬编码颜色迁移**：编辑器、Markdown 预览、弹窗中残留的硬编码颜色应逐步迁移到主题 token 系统，迁移方向参考 [color_audit.md](theme-design/color_audit.md)（VS Code Dark Modern / Dark+）
 
 ### 插件约束
 

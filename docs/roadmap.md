@@ -42,7 +42,7 @@
 
 ## 主题系统迁移
 
-将编辑器、Markdown 预览、弹窗中残留的硬编码颜色迁移到主题 token 系统，统一颜色语义。详细审计结果见 [color_audit.md](color_audit.md)。
+将编辑器、Markdown 预览、弹窗中残留的硬编码颜色迁移到主题 token 系统，统一颜色语义。详细审计结果见 [color_audit.md](theme-design/color_audit.md)。
 
 - 编辑器硬编码颜色 → 主题 token
 - Markdown 预览代码块配色 → 主题 token

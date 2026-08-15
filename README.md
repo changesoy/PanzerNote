@@ -50,7 +50,7 @@ python main.py
 - [更新日志](CHANGELOG.md) — 各版本变更记录
 - [路线图](docs/roadmap.md) — 未完成规划（建造/图鉴/车库/游戏设置）
 - [插件开发](plugins/plugin_api.md) — 插件生命周期、权限系统、API 参考
-- [颜色审计](docs/color_audit.md) — 硬编码颜色审计与主题迁移计划
+- [颜色审计](docs/theme-design/color_audit.md) — 硬编码颜色审计与主题迁移计划
 
 ## 当前状态
 

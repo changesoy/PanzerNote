@@ -45,7 +45,7 @@ PanzerNote 是一款以已停服二次元游戏《战车少女》（PanzerMaiden
 | 书签持久化           | ✅ 完成   | 书签保存到 workspace.json，关闭重开后恢复                                                                                                                    |
 | 设置系统             | ✅ 完成   | settings.json + workspace.json + savegame.json，首次运行对话框                                                                                               |
 | 安全防护体系         | ✅ 完成   | 路径验证/文件操作安全/输入验证/拖放白名单                                                                                                                    |
-| 插件系统             | ✅ 完成   | 生命周期/线程包装/12 种权限/热加载，2 个示例插件 + API 文档                                                                                                  |
+| 插件系统             | ✅ 完成   | 能力声明制（capabilities→权限映射）/命名空间式 PluginContext/主线程模型/数据与事件能力/热加载，2 个示例插件 + API 文档                                       |
 | 主题系统             | ✅ 完成   | JSON/YAML 外部主题/解析引擎/QSS 生成/预览/ThemeAwareMixin 全局生效/原生标题栏深色                                                                            |
 | 集中式版本管理       | ✅ 完成   | `src/__init__.py` 唯一真相源 + `verify_version.py` 一致性验证                                                                                                |
 | 建造系统             | 🔲 规划中 | 详见 [roadmap.md](roadmap.md)                                                                                                                                |
@@ -158,10 +158,11 @@ PanzerNote/
 │   │   └── input_validator.py      # 输入验证框架
 │   │
 │   ├── plugins/                    # ── 插件系统 ──
-│   │   ├── plugin_base.py          # 插件基类与元数据定义
-│   │   ├── plugin_api_views.py     # 插件 API 只读视图（ReadOnlyConfigView）
-│   │   ├── plugin_sandbox.py       # 插件包装器（线程隔离/超时/权限控制/PluginAPI）
-│   │   ├── plugin_manager.py       # 插件管理器
+│   │   ├── plugin_base.py          # 插件基类、PluginMeta、PluginPermission、状态枚举
+│   │   ├── capability_registry.py  # 能力注册/授权/调用（capabilities→权限两层结构）
+│   │   ├── plugin_context.py       # 命名空间式 PluginContext（ctx.app/settings/savegame/…）
+│   │   ├── plugin_event_bus.py     # 插件事件总线（白名单/节流/订阅上限）
+│   │   ├── plugin_manager.py       # 插件管理器（扫描/加载/激活/停用/卸载/热加载）
 │   │   └── plugin_manager_dialog.py # 插件管理对话框
 │   │
 │   ├── themes/                     # ── 主题系统 ──
@@ -625,16 +626,16 @@ ValidationError (基类)
 
 ### 4.12 插件系统 (`plugins/`)
 
-插件系统提供标准化的扩展机制，允许第三方开发者为应用添加功能。插件运行在独立线程中（非进程隔离沙箱），通过受限 API 与主程序交互。
+插件系统提供标准化的扩展机制，允许第三方开发者为应用添加功能。插件通过**能力声明（capabilities）** 与宿主交互：插件在 `plugin.json` 中声明所需能力，宿主按能力清单暴露受限 API。
 
-> **⚠️ 可信插件模型声明**：当前插件系统是可信插件模型。插件代码运行在主程序进程中，权限系统只限制 PanzerNote 暴露的 API，不是完整安全沙箱。请只安装可信来源的插件。详细开发文档见 [../plugins/plugin_api.md](../plugins/plugin_api.md)。
+> **⚠️ 可信插件模型声明**：当前插件系统是可信插件模型。插件代码运行在主程序进程中（GUI 线程），能力系统只限制 PanzerNote 暴露的 API 边界，不是完整安全沙箱。请只安装可信来源的插件。详细开发文档见 [../plugins/plugin_api.md](../plugins/plugin_api.md)。
 
 #### 4.12.1 插件基类 (`plugins/plugin_base.py`)
 
 - `PluginState` — 插件状态枚举（UNLOADED/LOADED/ACTIVATED/DEACTIVATED/ERROR）
-- `PluginPermission` — 权限枚举（12种：READ_SETTINGS/READ_SAVEGAME/READ_WORKSPACE/READ_FILE_TREE/ACCESS_EDITOR/ACCESS_UI/ACCESS_NETWORK/ACCESS_FILESYSTEM/OPEN_FILE/SHOW_MESSAGE/REGISTER_COMMAND/GET_CONFIG）
-- `PluginMeta` — 插件元数据（name/version/description/author/min_app_version/permissions/tags），`min_app_version` 默认值引用 `src.__version__`
-- `PluginBase` — 插件基类，定义四个生命周期方法：`on_load(api)`/`on_activate()`/`on_deactivate()`/`on_unload()`
+- `PluginPermission` — 内部权限枚举（READ_SETTINGS/READ_SAVEGAME/READ_WORKSPACE/READ_FILE_TREE/OPEN_FILE/SHOW_MESSAGE/REGISTER_COMMAND/EDITOR_READ/EDITOR_WRITE/UI_NOTIFY/REGISTER_MENU/EVENT_SUBSCRIBE）
+- `PluginMeta` — 插件元数据（name/version/description/author/min_app_version/**capabilities**/tags），`min_app_version` 默认值引用 `src.__version__`
+- `PluginBase` — 插件基类，定义四个生命周期方法：`on_load(ctx)`/`on_activate()`/`on_deactivate()`/`on_unload()`（所有钩子在 GUI 线程执行）
 
 **状态转换规则**：
 
@@ -646,43 +647,56 @@ LOADED → on_unload() → UNLOADED
 任意状态 → 异常 → ERROR
 ```
 
-#### 4.12.2 插件包装器 (`plugins/plugin_sandbox.py`)
+#### 4.12.2 能力注册中心 (`plugins/capability_registry.py`)
 
-- `PluginAPI` — 受限 API 对象，每次调用检查权限声明
-- `PluginSandbox` — 插件包装器，独立线程运行，最大超时30秒（非进程隔离沙箱）
-- `SandboxViolationError` — 权限违规异常
-- `SandboxTimeoutError` — 执行超时异常
+能力系统采用"声明 → 映射"两层结构（Wave 5 D6）：
 
-**MVP 限制**：`ACCESS_NETWORK` 和 `ACCESS_FILESYSTEM` 权限被禁止，所有插件仅限只读访问。`MVP_READ_ONLY` 为实例属性防止类级别篡改；`register_command()` 使用 `dict.setdefault()` 原子操作消除 TOCTOU 竞态；`get_config()` 返回 `ReadOnlyConfigView` 只读视图。
+- `CAPABILITY_PERMISSIONS` — 能力 id → 内部权限映射（如 `editor.read_text` → `EDITOR_READ`）；`None` 表示无需权限（`app.version`）
+- `BUILTIN_CAPABILITIES` — 内置能力（`data.read`/`data.write`），无需在 manifest 声明即可调用
+- `CapabilityRegistry.register(cap_id, permission, impl, copy_result, pass_plugin_id)` — 宿主（MainWindow 等）注册能力实现；`pass_plugin_id=True` 时调用方插件 id 作为 impl 第一个参数（命名空间类能力隔离用）
+- `CapabilityRegistry.authorize(plugin_id, capabilities)` — 插件加载时登记其声明的能力并换算权限
+- `CapabilityRegistry.invoke(cap_id, plugin_id, *args)` — 检查声明（内置能力豁免）+ 权限 + 调用实现 + 返回值深拷贝
+- 双层异常：`PluginCapabilityError`（能力不存在/未声明/事件白名单外/订阅超限）、`PluginPermissionError`（能力已知但授权不满足）
 
-**PluginAPI 接口**：
+已注册能力清单（17 项：15 项需声明 + `data.read`/`data.write` 内置）见 [../plugins/plugin_api.md](../plugins/plugin_api.md) 能力清单。
 
-| 方法                                  | 所需权限           | 说明               |
-| ------------------------------------- | ------------------ | ------------------ |
-| `get_setting(key, default)`           | `READ_SETTINGS`    | 读取设置           |
-| `get_editor_setting(key, default)`    | `READ_SETTINGS`    | 读取编辑器设置     |
-| `get_game_setting(key, default)`      | `READ_SETTINGS`    | 读取游戏设置       |
-| `get_secretary_setting(key, default)` | `READ_SETTINGS`    | 读取小秘书设置     |
-| `get_resources()`                     | `READ_SAVEGAME`    | 读取游戏资源       |
-| `get_savegame_field(key, default)`    | `READ_SAVEGAME`    | 读取存档字段       |
-| `get_recent_files()`                  | `READ_WORKSPACE`   | 读取最近文件       |
-| `get_notebooks_path()`                | `READ_FILE_TREE`   | 读取笔记库路径     |
-| `get_app_version()`                   | 无                 | 获取应用版本       |
-| `open_file(filepath)`                 | `OPEN_FILE`        | 打开文件到编辑器   |
-| `show_message(message)`               | `SHOW_MESSAGE`     | 通过小秘书显示消息 |
-| `register_command(name, callback)`    | `REGISTER_COMMAND` | 注册自定义命令     |
-| `get_config(key, default)`            | `GET_CONFIG`       | 获取只读配置视图   |
+#### 4.12.3 命名空间上下文 (`plugins/plugin_context.py`)
 
-#### 4.12.3 插件管理器 (`plugins/plugin_manager.py`)
+`on_load(ctx)` 接收的 `ctx` 是命名空间式 `PluginContext`（Wave 5 D4），插件**不直接持有** Config / SavegameManager / MainWindow 等内部对象：
 
-- `scan_plugins()` — 从 `plugins/` 目录递归扫描插件包
-- `load_plugin(name)` — 加载插件（验证清单完整性、版本兼容性、创建沙箱API）
-- `activate_plugin(name)` — 激活插件
-- `deactivate_plugin(name)` — 停用插件
-- `unload_plugin(name)` — 卸载插件
-- `reload_plugin(name)` — 热加载插件（停用→卸载→清除缓存→重新加载→恢复状态）
+- `ctx.app` — 应用信息（`app.version`）
+- `ctx.settings` — 设置读取（`settings.read`：get/get_editor/get_game/get_secretary）
+- `ctx.savegame` — 存档读取（`savegame.read`：resources/field）
+- `ctx.workspace` — 工作区（`workspace.recent_files` / `workspace.open_file`）
+- `ctx.file_tree` — 笔记库（`file_tree.read`：notebooks_path）
+- `ctx.editor` — 编辑器（`editor.read_text`/`editor.selection.*`/`editor.read_path`）
+- `ctx.ui` — UI 扩展（`ui.notify`/`ui.show_message`/`ui.register_command`/`ui.register_menu_item`）
+- `ctx.data` — 插件私有数据（内置 `data.read`/`data.write`）
+- `ctx.events` — 事件订阅（`event.subscribe`）
 
-**插件清单 (`plugin.json`) 必需字段**：`name`/`version`/`entry`
+每次调用经 `CapabilityRegistry.invoke` 完成权限检查与深拷贝保护。
+
+#### 4.12.4 插件事件总线 (`plugins/plugin_event_bus.py`)
+
+`PluginEventBus`（Wave 5 Batch 4）承载插件事件订阅，复用 Qt 事件循环实现节流：
+
+- 事件白名单 7 个：`document.opened`/`document.saved`/`document.closed`/`cursor.changed`/`content.changed`/`theme.changed`/`file_tree.changed`
+- 高频事件（`cursor.changed`/`content.changed`）合并到 100ms 窗口派发，仅保留最新 payload（无状态节流，不做异常频发降级）
+- 单插件单事件订阅数上限 5，超限抛 `PluginCapabilityError`
+- 回调异常 → 仅 log，不自动禁插件
+- 插件卸载/重载自动解绑全部订阅（`PluginManager` 持有总线引用）
+
+宿主接线（MainWindow）：EditorTabWidget 的 `document_opened`/`document_closed`/`cursor_position_changed`、`_on_content_modified`、`_on_file_saved`、ThemeEngine 的 `theme_changed`、FileTreeWidget 的 `tree_changed`、move/copy 成功路径。
+
+#### 4.12.5 插件管理器 (`plugins/plugin_manager.py`)
+
+- `scan_plugins()` — 从 `plugins/` 目录递归扫描插件包（仅填 manifest 清单，启动阶段不加载）
+- `load_plugin(name)` — 加载插件（验证清单、版本兼容、`authorize(capabilities)`、装配 PluginContext、`on_load(ctx)`）
+- `activate_plugin(name)` / `deactivate_plugin(name)` — 激活/停用
+- `unload_plugin(name)` — 卸载（`on_unload()` + 自动解绑事件订阅 + 撤销授权）
+- `reload_plugin(name)` — 热加载（停用→卸载→清除模块缓存→重新加载→恢复状态）
+
+**插件清单 (`plugin.json`) 必需字段**：`name`/`version`/`entry`；能力声明用 `capabilities` 数组。
 
 ### 4.13 主题系统 (`themes/`)
 
@@ -763,7 +777,6 @@ src/__init__.py (__version__ = "1.9.0")
   ├─→ src/main_window.py         (from . import __version__)
   ├─→ src/plugins/plugin_base.py (from .. import __version__ as _app_version)
   │     └─→ PluginMeta.min_app_version 默认值
-  ├─→ src/plugins/plugin_sandbox.py (from .. import __version__)
   ├─→ plugins/hello_panzer/main.py  (from src import __version__ as _app_version)
   ├─→ plugins/word_counter/main.py  (from src import __version__ as _app_version)
   └─→ pyproject.toml            (dynamic = ["version"] + attr = "src.__version__")
@@ -1023,10 +1036,10 @@ pip install mypy>=1.20                         # 类型检查
 
 ### 插件约束
 
-24. **可信插件模型**：插件代码运行在主程序进程中，权限系统只限制 PanzerNote 暴露的 API，不是完整安全沙箱。请只安装可信来源的插件
-25. **插件 API 边界**：`get_config()` 返回 `ReadOnlyConfigView` 只读视图；`open_file` 走 `FileOpenService.PLUGIN` 路径校验；超时文案诚实说明无法强制终止线程
-26. **命令注册原子性**：`PluginAPI.register_command()` 使用 `dict.setdefault()` 原子操作，消除 TOCTOU 竞态条件
-27. **MVP_READ_ONLY 实例属性**：`PluginAPI._mvp_read_only` 为实例属性，不可通过类级别篡改
+24. **可信插件模型**：插件代码运行在主程序进程中（GUI 线程），能力系统只限制 PanzerNote 暴露的 API 边界，不是完整安全沙箱。请只安装可信来源的插件
+25. **能力声明两层结构**：manifest 声明 `capabilities` → `CAPABILITY_PERMISSIONS` 映射内部权限；调用未声明/不存在的能力抛 `PluginCapabilityError`。命名空间类能力（`data.read`/`data.write`）用 `pass_plugin_id` 将调用者插件 id 传入 impl，天然隔离命名空间
+26. **文件安全入口**：`ctx.workspace.open_file()` 走 `FileOpenService.PLUGIN` 路径校验；`ctx.data` 数据目录由宿主从插件 id 派生（`data/plugin_data/{id}/data.json`），插件不可指定路径，写盘走 `FileGuard.safe_write`（原子写 + 1MB 上限）
+27. **主线程 + 异常隔离**：所有生命周期钩子与回调在 GUI 线程执行，无插件线程与超时；生命周期异常 → `ERROR`（可重载），回调（命令/菜单/事件）异常 → 仅 log 不自动禁插件；事件订阅走白名单 + 100ms 节流 + 单插件单事件上限 5，卸载自动解绑
 
 ### 性能约束
 

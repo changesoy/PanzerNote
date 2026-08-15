@@ -46,6 +46,7 @@ CAPABILITY_PERMISSIONS: Dict[str, Optional[PluginPermission]] = {
     "ui.show_message": PluginPermission.SHOW_MESSAGE,
     "ui.register_command": PluginPermission.REGISTER_COMMAND,
     "ui.register_menu_item": PluginPermission.REGISTER_MENU,
+    "event.subscribe": PluginPermission.EVENT_SUBSCRIBE,
 }
 
 

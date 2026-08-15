@@ -47,6 +47,7 @@ from .security.file_guard import FileGuard, FileSizeExceededError
 from .plugins.plugin_manager import PluginManager
 from .plugins.plugin_base import PluginPermission
 from .plugins.capability_registry import PluginCapabilityError
+from .plugins.plugin_event_bus import PluginEventBus
 from .themes.theme_engine import ThemeEngine
 from .themes.theme_preview import ThemePreviewDialog
 from .ui.command_palette import CommandPalette
@@ -125,7 +126,9 @@ class MainWindow(QMainWindow):
         )
         self._presented = False
 
-        self.plugin_manager = PluginManager(self.config)
+        # Batch 4：插件事件总线（白名单 + 节流 + 订阅上限；卸载自动解绑）
+        self._plugin_event_bus = PluginEventBus(self)
+        self.plugin_manager = PluginManager(self.config, event_bus=self._plugin_event_bus)
         self.plugin_manager.scan_plugins()
         self._register_plugin_capabilities()
 
@@ -254,6 +257,13 @@ class MainWindow(QMainWindow):
         self.outline_panel.heading_clicked.connect(self._on_outline_heading_clicked)
         self.find_in_files_panel.result_clicked.connect(self._on_find_in_files_result)
         self.shortcut_panel.set_edit_callback(self._on_shortcut_edited)
+        # Batch 4：主题切换 / 文件树变化 → 插件事件
+        self.theme_engine.theme_changed.connect(
+            lambda theme_id: self._plugin_event_bus.emit("theme.changed", theme_id)
+        )
+        self.file_tree.tree_changed.connect(
+            lambda: self._plugin_event_bus.emit("file_tree.changed")
+        )
         self._connect_editor_tabs_signals(self.editor_tabs)
 
     def _connect_editor_tabs_signals(self, tabs: EditorTabWidget):
@@ -265,6 +275,16 @@ class MainWindow(QMainWindow):
         tabs.cursor_position_changed.connect(self._update_stats)
         tabs.word_count_updated.connect(self._update_stats)
         tabs.file_saved.connect(self._on_file_saved)
+        # Batch 4：文档打开/关闭/光标移动 → 插件事件（高频事件由总线节流）
+        tabs.document_opened.connect(
+            lambda fp: self._plugin_event_bus.emit("document.opened", fp)
+        )
+        tabs.document_closed.connect(
+            lambda fp: self._plugin_event_bus.emit("document.closed", fp)
+        )
+        tabs.cursor_position_changed.connect(
+            lambda: self._plugin_event_bus.emit("cursor.changed")
+        )
 
     def _init_menubar(self):
         """初始化菜单栏"""
@@ -1187,9 +1207,21 @@ class MainWindow(QMainWindow):
         """显示图鉴完成度"""
         QMessageBox.information(self, "提示", "该功能尚在开发中")
 
+    def _emit_plugin_event(self, event_name: str, payload: Any = None) -> None:
+        """派发插件事件；总线未装配（如 __new__ 构造的测试窗口）时安全跳过。
+
+        用 __dict__ 直接读取而非 getattr：__new__ 构造的 PyQt 对象上访问
+        未设置属性会抛 RuntimeError（C++ 部分未初始化），而非返回默认值。
+        """
+        bus = self.__dict__.get("_plugin_event_bus")
+        if bus is not None:
+            bus.emit(event_name, payload)
+
     def _on_file_saved(self):
         """文件保存成功后防抖通知（由 SaveState.CLEAN 回调触发）"""
         self._save_notify_timer.start(300)
+        # Batch 4：文档保存事件（低频率，直接派发）
+        self._emit_plugin_event("document.saved")
 
     def _do_save_notify(self):
         """防抖到期后执行保存通知"""
@@ -1217,6 +1249,8 @@ class MainWindow(QMainWindow):
             self.secretary.show_message(
                 f"已将 {os.path.basename(src_filepath)} 移动到 {os.path.basename(dest_folder)}/"
             )
+            # Batch 4：移动成功 → 文件树变化事件
+            self._emit_plugin_event("file_tree.changed")
 
     def _on_file_copy_from_tree(self, src_filepath: str, dest_folder: str):
         """文件树请求复制文件（标签拖拽到文件夹）"""
@@ -1225,6 +1259,8 @@ class MainWindow(QMainWindow):
             self.secretary.show_message(
                 f"已将 {os.path.basename(src_filepath)} 复制到 {os.path.basename(dest_folder)}/"
             )
+            # Batch 4：复制成功 → 文件树变化事件
+            self._emit_plugin_event("file_tree.changed")
 
     def _on_file_deleted(self, path: str, is_dir: bool):
         """文件树删除文件/文件夹后，同步关闭所有（含分屏）已打开的对应标签页"""
@@ -1408,6 +1444,8 @@ class MainWindow(QMainWindow):
     def _on_content_modified(self):
         """内容修改"""
         self._update_stats()
+        # Batch 4：内容变更事件（高频，由总线 100ms 窗口合并节流）
+        self._emit_plugin_event("content.changed")
 
     def _on_eol_toggled(self, new_eol: str):
         """状态栏 EOL 标签点击切换"""
@@ -1566,6 +1604,16 @@ class MainWindow(QMainWindow):
             None,
             lambda plugin_id, key, value: self._plugin_data_impl(
                 "write", plugin_id, key, value
+            ),
+            copy_result=False,
+            pass_plugin_id=True,
+        )
+        # event.subscribe：事件订阅（EVENT_SUBSCRIBE，白名单 + 节流由总线控制）
+        registry.register(
+            "event.subscribe",
+            PluginPermission.EVENT_SUBSCRIBE,
+            lambda plugin_id, name, handler: self._plugin_event_bus.subscribe(
+                plugin_id, name, handler
             ),
             copy_result=False,
             pass_plugin_id=True,

@@ -3,12 +3,11 @@
 命名空间式 PluginContext（Wave 5 Batch 1）
 
 插件通过 PluginContext 的子命名空间访问能力（能力边界 = API 边界）：
-ctx.app / ctx.settings / ctx.savegame / ctx.workspace / ctx.file_tree / ctx.ui / ctx.data。
+ctx.app / ctx.settings / ctx.savegame / ctx.workspace / ctx.file_tree /
+ctx.ui / ctx.data / ctx.events。
 
 每个命名空间方法内部经 CapabilityRegistry.invoke 完成权限检查与深拷贝保护，
 插件永远不直接持有 Config / SavegameManager / MainWindow 等内部对象。
-
-后续批次扩展：ctx.events（Batch 4）。
 """
 
 from typing import Any, Callable, Dict, List, Optional, cast
@@ -139,6 +138,21 @@ class DataAPI(_NamespaceAPI):
         self._registry.invoke("data.write", self._plugin_id, key, value)
 
 
+class EventsAPI(_NamespaceAPI):
+    """事件订阅（event.subscribe，EVENT_SUBSCRIBE）
+
+    事件白名单与节流由宿主 PluginEventBus 控制；卸载自动解绑。
+    """
+
+    def subscribe(self, name: str, handler: Callable[[Any], Any]) -> None:
+        """订阅事件，handler 接收 payload（可为 None）
+
+        Raises:
+            PluginCapabilityError: 事件不在白名单 / 订阅数超上限
+        """
+        self._registry.invoke("event.subscribe", self._plugin_id, name, handler)
+
+
 class PluginContext:
     """宿主给当前插件的运行上下文（原 PluginAPI 更名而来，D4）"""
 
@@ -158,4 +172,4 @@ class PluginContext:
         self.editor = EditorAPI(registry, plugin_id)
         self.ui = UIAPI(registry, plugin_id)
         self.data = DataAPI(registry, plugin_id)
-        # Batch 4: self.events
+        self.events = EventsAPI(registry, plugin_id)

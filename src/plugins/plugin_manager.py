@@ -37,12 +37,14 @@ class PluginManager:
     PLUGIN_ENTRY_CLASS = "Plugin"
     REQUIRED_MANIFEST_FIELDS = {"name", "version", "entry"}
 
-    def __init__(self, config, plugins_dir: Optional[str] = None):
+    def __init__(self, config, plugins_dir: Optional[str] = None, event_bus=None):
         self._config = config
         self._plugins_dir = plugins_dir or os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
             "plugins"
         )
+        # Batch 4：事件订阅总线（卸载自动解绑；测试可传 None）
+        self._event_bus = event_bus
         self._plugins: Dict[str, PluginBase] = {}
         self._manifests: Dict[str, Dict] = {}
         self._disabled_plugins: set = set()
@@ -157,6 +159,9 @@ class PluginManager:
         except Exception as e:
             self._logger.exception("卸载插件 %s 失败: %s", plugin_id, e)
         finally:
+            if self._event_bus is not None:
+                # Batch 4：卸载自动解绑事件订阅（D9）
+                self._event_bus.unsubscribe_all(plugin_id)
             self._registry.revoke(plugin_id)
             del self._plugins[plugin_id]
             self._logger.info("插件已卸载: %s", plugin_id)

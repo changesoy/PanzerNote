@@ -45,6 +45,7 @@ class PluginPermission(Enum):
     EDITOR_WRITE = "editor_write"
     UI_NOTIFY = "ui_notify"
     REGISTER_MENU = "register_menu"
+    EVENT_SUBSCRIBE = "event_subscribe"
 
 
 @dataclass

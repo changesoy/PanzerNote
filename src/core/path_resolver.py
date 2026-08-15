@@ -139,6 +139,12 @@ class PathResolver:
             return os.path.join(self._base_path, "data", "gamedata")
         return os.path.join(self._app_dir, "data", "gamedata")
 
+    def get_plugin_data_dir(self) -> str:
+        """插件私有数据根目录（Wave 5 Batch 3）：plugin_data/{plugin_id}/"""
+        if self._base_path:
+            return os.path.join(self._base_path, "data", "plugin_data")
+        return os.path.join(self._app_dir, "data", "plugin_data")
+
     def get_notebooks_path(self) -> str:
         return os.path.join(self.get_base_path(), "notebooks")
 
@@ -159,5 +165,5 @@ class PathResolver:
         base = self.get_base_path()
         for subdir in ["notebooks/工作", "notebooks/回忆", "notebooks/日记",
                         "data/config", "data/gamedata", "data/logs",
-                        "temp/autosave"]:
+                        "data/plugin_data", "temp/autosave"]:
             os.makedirs(os.path.join(base, subdir), exist_ok=True)

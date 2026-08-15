@@ -3,12 +3,12 @@
 命名空间式 PluginContext（Wave 5 Batch 1）
 
 插件通过 PluginContext 的子命名空间访问能力（能力边界 = API 边界）：
-ctx.app / ctx.settings / ctx.savegame / ctx.workspace / ctx.file_tree / ctx.ui。
+ctx.app / ctx.settings / ctx.savegame / ctx.workspace / ctx.file_tree / ctx.ui / ctx.data。
 
 每个命名空间方法内部经 CapabilityRegistry.invoke 完成权限检查与深拷贝保护，
 插件永远不直接持有 Config / SavegameManager / MainWindow 等内部对象。
 
-后续批次扩展：ctx.editor（Batch 2）、ctx.data（Batch 3）、ctx.events（Batch 4）。
+后续批次扩展：ctx.events（Batch 4）。
 """
 
 from typing import Any, Callable, Dict, List, Optional, cast
@@ -123,6 +123,22 @@ class UIAPI(_NamespaceAPI):
         self._registry.invoke("ui.register_menu_item", self._plugin_id, label, handler)
 
 
+class DataAPI(_NamespaceAPI):
+    """插件私有数据（data.read / data.write，内置能力无需声明）
+
+    数据存于用户数据目录 plugin_data/{plugin_id}/data.json（单 JSON 文件，
+    1MB 上限，写盘走 FileGuard.safe_write）；仅限本插件命名空间。
+    """
+
+    def read(self, key: str) -> Any:
+        """读取本插件数据，key 不存在返回 None"""
+        return self._registry.invoke("data.read", self._plugin_id, key)
+
+    def write(self, key: str, value: Any) -> None:
+        """写入本插件数据（值需可 JSON 序列化，超过 1MB 拒绝写入）"""
+        self._registry.invoke("data.write", self._plugin_id, key, value)
+
+
 class PluginContext:
     """宿主给当前插件的运行上下文（原 PluginAPI 更名而来，D4）"""
 
@@ -141,4 +157,5 @@ class PluginContext:
         self.file_tree = FileTreeAPI(registry, plugin_id)
         self.editor = EditorAPI(registry, plugin_id)
         self.ui = UIAPI(registry, plugin_id)
-        # Batch 3: self.data / Batch 4: self.events
+        self.data = DataAPI(registry, plugin_id)
+        # Batch 4: self.events

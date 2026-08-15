@@ -24,9 +24,15 @@ class PluginPermissionError(Exception):
     """capability 已知，但授权不满足"""
 
 
+# 内置能力：无需在 manifest 中声明（权限 None + 跳过声明检查）。
+# 当前仅 data.read / data.write（插件私有数据命名空间天然隔离，无越权面）。
+BUILTIN_CAPABILITIES: Set[str] = {"data.read", "data.write"}
+
 # 能力 id → 内部权限（实现细节，可自由重构）。None 表示无需权限。
 CAPABILITY_PERMISSIONS: Dict[str, Optional[PluginPermission]] = {
     "app.version": None,
+    "data.read": None,
+    "data.write": None,
     "settings.read": PluginPermission.READ_SETTINGS,
     "savegame.read": PluginPermission.READ_SAVEGAME,
     "workspace.recent_files": PluginPermission.READ_WORKSPACE,
@@ -46,17 +52,19 @@ CAPABILITY_PERMISSIONS: Dict[str, Optional[PluginPermission]] = {
 class _Capability:
     """单个能力的注册信息"""
 
-    __slots__ = ("permission", "impl", "copy_result")
+    __slots__ = ("permission", "impl", "copy_result", "pass_plugin_id")
 
     def __init__(
         self,
         permission: Optional[PluginPermission],
         impl: Callable,
         copy_result: bool,
+        pass_plugin_id: bool,
     ) -> None:
         self.permission = permission
         self.impl = impl
         self.copy_result = copy_result
+        self.pass_plugin_id = pass_plugin_id
 
 
 class CapabilityRegistry:
@@ -77,9 +85,14 @@ class CapabilityRegistry:
         permission: Optional[PluginPermission],
         impl: Callable,
         copy_result: bool = True,
+        pass_plugin_id: bool = False,
     ) -> None:
-        """注册能力实现（由主程序 / 编辑器等宿主注入）"""
-        self._capabilities[cap_id] = _Capability(permission, impl, copy_result)
+        """注册能力实现（由主程序 / 编辑器等宿主注入）
+
+        pass_plugin_id=True 时，调用方插件 id 会作为 impl 第一个位置参数传入
+        （命名空间类能力如 data.read/write 需要知道调用者以隔离数据）。
+        """
+        self._capabilities[cap_id] = _Capability(permission, impl, copy_result, pass_plugin_id)
 
     def has(self, cap_id: str) -> bool:
         return cap_id in self._capabilities
@@ -104,8 +117,10 @@ class CapabilityRegistry:
     def invoke(self, cap_id: str, plugin_id: str, *args: Any, **kwargs: Any) -> Any:
         """权限检查 + 调用实现 + 深拷贝保护
 
+        内置能力（BUILTIN_CAPABILITIES）无需在 manifest 声明，跳过声明检查。
+
         Raises:
-            PluginCapabilityError: 能力不存在，或插件清单未声明该能力
+            PluginCapabilityError: 能力不存在，或插件清单未声明该能力（非内置）
             PluginPermissionError: 能力已知，但内部权限换算不通过
         """
         cap = self._capabilities.get(cap_id)
@@ -113,7 +128,7 @@ class CapabilityRegistry:
             raise PluginCapabilityError(f"能力不存在或未注册: {cap_id}")
 
         declared, perms = self._auth.get(plugin_id, (set(), set()))
-        if cap_id not in declared:
+        if cap_id not in declared and cap_id not in BUILTIN_CAPABILITIES:
             raise PluginCapabilityError(f"插件 {plugin_id} 未声明能力: {cap_id}")
         if cap.permission is not None and cap.permission not in perms:
             raise PluginPermissionError(
@@ -121,7 +136,10 @@ class CapabilityRegistry:
                 f"插件 {plugin_id} 授权不满足"
             )
 
-        result = cap.impl(*args, **kwargs)
+        if cap.pass_plugin_id:
+            result = cap.impl(plugin_id, *args, **kwargs)
+        else:
+            result = cap.impl(*args, **kwargs)
         if cap.copy_result:
             from copy import deepcopy
             return deepcopy(result)

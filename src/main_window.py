@@ -33,6 +33,7 @@ from .core.timer_manager import TimerManager
 from .core.event_bus import EventBus
 from .core.menu_builder import MenuBuilder
 from .core.shortcut_manager import ShortcutManager
+from .core.path_resolver import load_json, save_json
 from .game.game_engine import GameEngine
 from .editor.editor_tabs import EditorTabWidget
 from .editor.webengine_runtime import WebEngineRuntime
@@ -42,6 +43,7 @@ from .editor.file_action_controller import FileActionController
 from .editor.export_action_controller import ExportActionController
 from .editor.edit_action_controller import EditActionController
 from .editor.settings_action_controller import SettingsActionController
+from .security.file_guard import FileGuard, FileSizeExceededError
 from .plugins.plugin_manager import PluginManager
 from .plugins.plugin_base import PluginPermission
 from .plugins.capability_registry import PluginCapabilityError
@@ -65,6 +67,9 @@ from .ui.unsaved_files_dialog import UnsavedChoice, UnsavedFilesDialog
 class MainWindow(QMainWindow):
     """主窗口"""
 
+    # 插件私有数据单文件大小上限（Wave 5 Batch 3，设计 §3.5）
+    PLUGIN_DATA_MAX_SIZE = 1 * 1024 * 1024
+
     def __init__(self, app_context: AppContext, parent=None):
         super().__init__(parent)
         self.app_context = app_context
@@ -76,6 +81,11 @@ class MainWindow(QMainWindow):
         self._wrap_limit_action: QAction
         # 插件注册的菜单项容器（首次注册时惰性创建）
         self._plugin_menu: Optional[QMenu] = None
+        # 插件数据专用 FileGuard（1MB 上限，不污染全局 50MB 配置）
+        self._plugin_data_guard = FileGuard(
+            self.config.get_path_validator(),
+            max_file_size=self.PLUGIN_DATA_MAX_SIZE,
+        )
         # 保存引用，避免事件过滤器被 GC
         self._selection_clear_filter: Optional[SelectionClearFilter] = None
         self._file_open_service = FileOpenService(
@@ -1542,6 +1552,24 @@ class MainWindow(QMainWindow):
             self._plugin_register_menu_item,
             copy_result=False,
         )
+        # data.read / data.write：内置能力（无需声明），单 JSON 文件 + 1MB 上限
+        # pass_plugin_id：impl 需按调用者插件 id 隔离数据命名空间
+        registry.register(
+            "data.read",
+            None,
+            lambda plugin_id, key: self._plugin_data_impl("read", plugin_id, key),
+            copy_result=False,
+            pass_plugin_id=True,
+        )
+        registry.register(
+            "data.write",
+            None,
+            lambda plugin_id, key, value: self._plugin_data_impl(
+                "write", plugin_id, key, value
+            ),
+            copy_result=False,
+            pass_plugin_id=True,
+        )
 
     def _plugin_settings_impl(self, action: str, key: str, default: Any = None):
         if action == "get":
@@ -1560,6 +1588,34 @@ class MainWindow(QMainWindow):
         if action == "field":
             return self.config.get_savegame_field(cast(str, key), default)
         raise PluginCapabilityError(f"未知存档读取类型: {action}")
+
+    def _plugin_data_impl(self, action: str, plugin_id: str, key: str, value: Any = None):
+        """data.read / data.write 实现：plugin_data/{plugin_id}/data.json
+
+        - 仅限本插件命名空间（目录由宿主从 plugin_id 派生，插件不可指定路径）
+        - 单 JSON 文件，写盘走 FileGuard.safe_write（原子写）
+        - 1MB 上限；不可 JSON 序列化的值拒绝写入
+        """
+        if not isinstance(key, str) or not key.strip():
+            raise PluginCapabilityError("数据 key 必须为非空字符串")
+        data_dir = os.path.join(
+            self.app_context.path_resolver.get_plugin_data_dir(), plugin_id
+        )
+        data_file = os.path.join(data_dir, "data.json")
+        guard = self._plugin_data_guard
+        if action == "read":
+            return load_json(guard, data_file, {}).get(key)
+        if action == "write":
+            data = load_json(guard, data_file, {})
+            data[key] = value
+            try:
+                save_json(guard, data_file, data)
+            except TypeError as e:
+                raise PluginCapabilityError(f"插件数据无法 JSON 序列化: {e}") from e
+            except FileSizeExceededError as e:
+                raise PluginCapabilityError(f"插件数据超过 1MB 上限: {e}") from e
+            return None
+        raise PluginCapabilityError(f"未知数据操作: {action}")
 
     def _plugin_open_file(self, filepath: str) -> bool:
         try:

@@ -191,7 +191,10 @@ class PluginManagerDialog(ThemeAwareMixin, QDialog):
             version = info.get("version", "?")
             state = info.get("state", "UNLOADED")
             desc = info.get("description", "")
+            caps = info.get("capabilities", [])
             item_text = f"{name} v{version} [{state}]"
+            if caps:
+                item_text += f" 能力: {', '.join(caps)}"
             if desc:
                 item_text += f" - {desc}"
             item = QListWidgetItem(item_text)

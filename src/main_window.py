@@ -74,6 +74,8 @@ class MainWindow(QMainWindow):
         self.recent_menu: QMenu
         self._wrap_no_wrap_action: QAction
         self._wrap_limit_action: QAction
+        # 插件注册的菜单项容器（首次注册时惰性创建）
+        self._plugin_menu: Optional[QMenu] = None
         # 保存引用，避免事件过滤器被 GC
         self._selection_clear_filter: Optional[SelectionClearFilter] = None
         self._file_open_service = FileOpenService(
@@ -1507,6 +1509,39 @@ class MainWindow(QMainWindow):
             self._plugin_register_command,
             copy_result=False,
         )
+        registry.register(
+            "editor.read_text",
+            PluginPermission.EDITOR_READ,
+            self._plugin_editor_read_text,
+        )
+        registry.register(
+            "editor.selection.read",
+            PluginPermission.EDITOR_READ,
+            self._plugin_editor_selection_read,
+        )
+        registry.register(
+            "editor.selection.replace",
+            PluginPermission.EDITOR_WRITE,
+            self._plugin_editor_replace,
+            copy_result=False,
+        )
+        registry.register(
+            "editor.read_path",
+            PluginPermission.EDITOR_READ,
+            self._plugin_editor_read_path,
+        )
+        registry.register(
+            "ui.notify",
+            PluginPermission.UI_NOTIFY,
+            self._plugin_notify,
+            copy_result=False,
+        )
+        registry.register(
+            "ui.register_menu_item",
+            PluginPermission.REGISTER_MENU,
+            self._plugin_register_menu_item,
+            copy_result=False,
+        )
 
     def _plugin_settings_impl(self, action: str, key: str, default: Any = None):
         if action == "get":
@@ -1546,6 +1581,62 @@ class MainWindow(QMainWindow):
 
     def _plugin_register_command(self, command_id: str, handler) -> None:
         get_logger(__name__).info("插件注册命令: %s", command_id)
+
+    def _plugin_editor_read_text(self) -> str:
+        editor = self.editor_tabs.current_editor()
+        return editor.toPlainText() if editor is not None else ""
+
+    def _plugin_editor_selection_read(self) -> str:
+        editor = self.editor_tabs.current_editor()
+        if editor is None:
+            return ""
+        return editor.textCursor().selectedText()
+
+    def _plugin_editor_replace(self, text: str) -> None:
+        editor = self.editor_tabs.current_editor()
+        if editor is None:
+            return
+        cursor = editor.textCursor()
+        cursor.insertText(text)
+        editor.setTextCursor(cursor)
+
+    def _plugin_editor_read_path(self) -> Optional[str]:
+        widget = self.editor_tabs.currentWidget()
+        if widget is None:
+            return None
+        shared_doc = getattr(widget, "shared_doc", None)
+        if shared_doc is None:
+            return None
+        filepath = shared_doc.filepath
+        return str(filepath) if filepath else None
+
+    def _plugin_notify(self, message: str, level: str = "info") -> None:
+        prefix = {"warning": "⚠ ", "error": "✕ "}.get(level, "")
+        status_bar = self.statusBar()
+        if status_bar is not None:
+            status_bar.showMessage(prefix + message, 3000)
+
+    def _plugin_register_menu_item(self, label: str, handler) -> None:
+        mb = self.menuBar()
+        if mb is None:
+            return
+        if self._plugin_menu is None:
+            plugin_menu = mb.addMenu("插件")
+            if plugin_menu is None:
+                return
+            self._plugin_menu = plugin_menu
+        action = QAction(label, self)
+        action.triggered.connect(
+            lambda checked=False, h=handler: self._safe_plugin_callback(label, h)
+        )
+        self._plugin_menu.addAction(action)
+
+    def _safe_plugin_callback(self, label: str, handler) -> None:
+        """命令/菜单/事件回调异常 → 仅 log，插件保持 ACTIVE（D7）"""
+        try:
+            handler()
+        except Exception:
+            get_logger(__name__).exception("插件回调异常: %s", label)
 
     def _show_plugin_manager(self):
         from .plugins.plugin_manager_dialog import PluginManagerDialog

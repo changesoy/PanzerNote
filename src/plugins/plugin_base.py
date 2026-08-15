@@ -41,6 +41,10 @@ class PluginPermission(Enum):
     OPEN_FILE = "open_file"
     SHOW_MESSAGE = "show_message"
     REGISTER_COMMAND = "register_command"
+    EDITOR_READ = "editor_read"
+    EDITOR_WRITE = "editor_write"
+    UI_NOTIFY = "ui_notify"
+    REGISTER_MENU = "register_menu"
 
 
 @dataclass

@@ -32,8 +32,14 @@ CAPABILITY_PERMISSIONS: Dict[str, Optional[PluginPermission]] = {
     "workspace.recent_files": PluginPermission.READ_WORKSPACE,
     "workspace.open_file": PluginPermission.OPEN_FILE,
     "file_tree.read": PluginPermission.READ_FILE_TREE,
+    "editor.read_text": PluginPermission.EDITOR_READ,
+    "editor.selection.read": PluginPermission.EDITOR_READ,
+    "editor.selection.replace": PluginPermission.EDITOR_WRITE,
+    "editor.read_path": PluginPermission.EDITOR_READ,
+    "ui.notify": PluginPermission.UI_NOTIFY,
     "ui.show_message": PluginPermission.SHOW_MESSAGE,
     "ui.register_command": PluginPermission.REGISTER_COMMAND,
+    "ui.register_menu_item": PluginPermission.REGISTER_MENU,
 }
 
 

@@ -5,6 +5,6 @@
   "author": "PanzerNote Team",
   "entry": "main.py",
   "min_app_version": "1.6.4",
-  "permissions": ["read_settings", "access_editor", "access_ui"],
+  "capabilities": ["editor.read_text"],
   "tags": ["demo", "ui", "editor"]
 }

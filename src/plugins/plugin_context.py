@@ -75,8 +75,40 @@ class FileTreeAPI(_NamespaceAPI):
         return cast(str, self._registry.invoke("file_tree.read", self._plugin_id))
 
 
+class EditorAPI(_NamespaceAPI):
+    """编辑器能力（editor.read_text / selection / read_path）"""
+
+    def __init__(self, registry: CapabilityRegistry, plugin_id: str) -> None:
+        super().__init__(registry, plugin_id)
+        self.selection = EditorSelectionAPI(registry, plugin_id)
+
+    def get_text(self) -> str:
+        """读取当前文档全文"""
+        return cast(str, self._registry.invoke("editor.read_text", self._plugin_id))
+
+    def get_current_path(self) -> Optional[str]:
+        """获取当前文件路径（未保存的新文件返回 None）"""
+        return cast(Optional[str], self._registry.invoke("editor.read_path", self._plugin_id))
+
+    def replace_text(self, text: str) -> None:
+        """用给定文本替换当前选区"""
+        self._registry.invoke("editor.selection.replace", self._plugin_id, text)
+
+
+class EditorSelectionAPI(_NamespaceAPI):
+    """编辑器选区读取（editor.selection.read）"""
+
+    def get_text(self) -> str:
+        """读取当前选区文本（无选区返回空串）"""
+        return cast(str, self._registry.invoke("editor.selection.read", self._plugin_id))
+
+
 class UIAPI(_NamespaceAPI):
-    """UI 能力（ui.show_message / ui.register_command）"""
+    """UI 能力（ui.notify / show_message / register_command / register_menu_item）"""
+
+    def notify(self, message: str, level: str = "info") -> None:
+        """状态栏轻提示（level: info / warning / error）"""
+        self._registry.invoke("ui.notify", self._plugin_id, message, level)
 
     def show_message(self, message: str) -> None:
         """通过小秘书显示消息"""
@@ -85,6 +117,10 @@ class UIAPI(_NamespaceAPI):
     def register_command(self, command_id: str, handler: Callable) -> None:
         """注册命令到命令面板（command_id 建议格式 plugin_name:action）"""
         self._registry.invoke("ui.register_command", self._plugin_id, command_id, handler)
+
+    def register_menu_item(self, label: str, handler: Callable) -> None:
+        """注册菜单项到插件菜单"""
+        self._registry.invoke("ui.register_menu_item", self._plugin_id, label, handler)
 
 
 class PluginContext:
@@ -103,5 +139,6 @@ class PluginContext:
         self.savegame = SavegameAPI(registry, plugin_id)
         self.workspace = WorkspaceAPI(registry, plugin_id)
         self.file_tree = FileTreeAPI(registry, plugin_id)
+        self.editor = EditorAPI(registry, plugin_id)
         self.ui = UIAPI(registry, plugin_id)
-        # Batch 2+: self.editor / self.data / self.events
+        # Batch 3: self.data / Batch 4: self.events

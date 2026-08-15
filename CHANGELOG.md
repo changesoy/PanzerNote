@@ -2,6 +2,22 @@
 
 本文件记录 PanzerNote 各版本的变更。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
 
+## v2.0.0
+
+**Wave 5 插件能力接口（破坏性变更）**
+
+- **能力声明制（capabilities）**：manifest 由 `permissions` 改为 `capabilities`（17 项能力：15 项需声明 + `data.read`/`data.write` 内置）；内部 `CAPABILITY_PERMISSIONS` 负责能力 → 权限映射，插件清单不再出现权限字段
+- **命名空间式 PluginContext**：`PluginAPI` 更名 `PluginContext`，九大命名空间 `ctx.app/settings/savegame/workspace/file_tree/editor/ui/data/events`；插件不再直接持有 Config / SavegameManager / MainWindow 等内部对象
+- **统一主线程模型**：全部生命周期钩子与命令/事件回调在 GUI 线程执行；移除 `PluginSandbox` 线程包装 / 30s 超时 / `SandboxTimeoutError` / `execute_safe`
+- **异常两层命名**：`PluginCapabilityError`（能力未声明/不存在）+ `PluginPermissionError`（能力已知但授权不满足）
+- **插件数据存储**：`ctx.data.read/write`（单 JSON + FileGuard.safe_write + 1MB 上限；卸载默认保留数据）
+- **事件订阅**：`ctx.events.subscribe`（白名单 7 事件 + 高频 100ms 节流 + 单插件单事件上限 5 + 卸载自动解绑）
+- **启动延迟加载 + 启动恢复 marker**：窗口显示后 `QTimer.singleShot(0, ...)` 激活启用插件；`on_load` 前写入 marker、`on_activate` 成功后清除；残留 marker → 安全模式跳过（需手动处理）
+- **示例插件迁移**：hello_panzer / word_counter 改写为新 API；`plugins/plugin_api.md` 重写
+- **移除项**：`ReadOnlyConfigView` / `get_config()` / 回调注入（3 个）
+
+> ⚠️ **破坏性变更**：插件 API 不兼容 v1.9.x（无兼容层）。第三方插件需按 `plugins/plugin_api.md` 迁移。
+
 ## v1.9.0
 
 **分屏功能修复（3.5.1~3.5.12）**

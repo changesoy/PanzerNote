@@ -92,7 +92,9 @@ def check_python_hardcoded():
                     stripped = line.strip()
                     if stripped.startswith("#"):
                         continue
-                    if "version=" in stripped and not any(
+                    # 跳过 version 赋值（kwarg 或 dict 键），如插件 manifest / 测试 fixture 数据，
+                    # 这些不是对应用版本号的引用；min_app_version 等特殊键仍会检查
+                    if re.search(r'["\']?version["\']?\s*[=:]', stripped) and not any(
                         k in stripped for k in ("min_app_version", "app_version", "__version__")
                     ):
                         continue

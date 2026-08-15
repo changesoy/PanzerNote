@@ -51,7 +51,7 @@ plugins/
   "description": "我的自定义插件",
   "author": "开发者名称",
   "entry": "main.py",
-  "min_app_version": "1.9.0",
+  "min_app_version": "2.0.0",
   "capabilities": ["settings.read", "savegame.read"],
   "tags": ["utility"]
 }

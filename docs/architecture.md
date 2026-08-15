@@ -775,7 +775,7 @@ LOADED → on_unload() → UNLOADED
 **版本传播链路**：
 
 ```
-src/__init__.py (__version__ = "1.9.0")
+src/__init__.py (__version__ = "2.0.0")
   ├─→ main.py                    (from src import __version__)
   ├─→ src/main_window.py         (from . import __version__)
   ├─→ src/plugins/plugin_base.py (from .. import __version__ as _app_version)
@@ -1075,4 +1075,4 @@ pip install mypy>=1.20                         # 类型检查
 
 ---
 
-_本文档基于 PanzerNote v1.9.0 源码整理。版本变更见 [../CHANGELOG.md](../CHANGELOG.md)，未完成规划见 [roadmap.md](roadmap.md)。_
+_本文档基于 PanzerNote v2.0.0 源码整理。版本变更见 [../CHANGELOG.md](../CHANGELOG.md)，未完成规划见 [roadmap.md](roadmap.md)。_

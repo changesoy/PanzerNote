@@ -59,7 +59,7 @@ plugins/
 
 **必需字段：**
 
-- `name` (string): 插件唯一标识符，仅允许字母、数字和下划线
+- `name` (string): 插件唯一标识符，仅允许字母、数字、下划线和连字符（插件名用作文件系统路径，禁止路径分隔符等危险字符）
 - `version` (string): 语义化版本号
 - `entry` (string): 入口模块文件名
 
@@ -198,7 +198,7 @@ class Plugin(PluginBase):
 | --------------------------------------- | ------------------------ | -------------------------------------- |
 | `notify(message, level="info")`         | `ui.notify`              | 状态栏轻提示（level: info/warning/error） |
 | `show_message(message)`                 | `ui.show_message`        | 通过小秘书显示消息                     |
-| `register_command(command_id, handler)` | `ui.register_command`    | 注册命令面板命令（id 建议 `插件名:动作`） |
+| `register_command(command_id, handler)` | `ui.register_command`    | 注册命令面板命令（id 建议 `插件名:动作`；命令显示于命令面板，插件卸载时自动移除） |
 | `register_menu_item(label, handler)`    | `ui.register_menu_item`  | 注册插件菜单项                         |
 
 ### ctx.data — 插件私有数据（内置能力）

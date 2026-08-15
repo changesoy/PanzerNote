@@ -21,8 +21,9 @@ import importlib
 import importlib.util
 import json
 import os
+import re
 import sys
-from typing import Any, Dict, List, Optional, Type, cast
+from typing import Any, Callable, Dict, List, Optional, Type, cast
 
 from ..utils.logger import get_logger
 from .capability_registry import CapabilityRegistry
@@ -60,6 +61,8 @@ class PluginManager:
         self._manifests: Dict[str, Dict] = {}
         self._disabled_plugins: set = set()
         self._registry = CapabilityRegistry()
+        # 卸载钩子：宿主清理插件注册的宿主侧资源（如命令面板命令）
+        self._unload_hooks: List[Callable[[str], None]] = []
         self._logger = get_logger(__name__)
 
     def _default_startup_markers_dir(self) -> str:
@@ -262,8 +265,20 @@ class PluginManager:
                 # Batch 4：卸载自动解绑事件订阅（D9）
                 self._event_bus.unsubscribe_all(plugin_id)
             self._registry.revoke(plugin_id)
+            self._notify_unloaded(plugin_id)
             del self._plugins[plugin_id]
             self._logger.info("插件已卸载: %s", plugin_id)
+
+    def add_unload_hook(self, hook: Callable[[str], None]) -> None:
+        """注册插件卸载钩子，宿主在插件卸载后清理其注册的宿主侧资源。"""
+        self._unload_hooks.append(hook)
+
+    def _notify_unloaded(self, plugin_id: str) -> None:
+        for hook in self._unload_hooks:
+            try:
+                hook(plugin_id)
+            except Exception:
+                self._logger.exception("插件卸载钩子异常: %s", plugin_id)
 
     def reload_plugin(self, plugin_id: str) -> PluginBase:
         was_activated = (
@@ -325,6 +340,12 @@ class PluginManager:
         name = manifest["name"]
         if not isinstance(name, str) or not name.strip():
             raise PluginValidationError("插件名称无效")
+        # 插件名用作文件系统路径（data/plugin_data/{name}、启动 marker {name}.marker），
+        # 限制为安全字符集，防止路径分隔符 / 相对路径污染数据目录
+        if not re.fullmatch(r"[A-Za-z0-9_\-]+", name):
+            raise PluginValidationError(
+                f"插件名称仅允许字母/数字/下划线/连字符: {name!r}"
+            )
 
         version = manifest["version"]
         if not isinstance(version, str) or not version.strip():

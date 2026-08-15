@@ -693,7 +693,7 @@ LOADED → on_unload() → UNLOADED
 - `scan_plugins()` — 从 `plugins/` 目录递归扫描插件包（仅填 manifest 清单，启动阶段不加载）；检测残留启动 marker → 插件进入安全模式
 - `load_plugin(name)` — 加载插件（导入入口类、构造 PluginMeta、`authorize(capabilities)`、装配 PluginContext、`on_load(ctx)`；on_load 前写入启动 marker；manifest 校验在扫描阶段完成）
 - `activate_plugin(name)` / `deactivate_plugin(name)` — 激活/停用（on_activate 成功后清除启动 marker）
-- `unload_plugin(name)` — 卸载（`on_unload()` + 自动解绑事件订阅 + 撤销授权）
+- `unload_plugin(name)` — 卸载（`on_unload()` + 自动解绑事件订阅 + 撤销授权 + 经 `add_unload_hook` 通知宿主清理插件注册的命令面板命令）
 - `reload_plugin(name)` — 热加载（停用→卸载→清除模块缓存→重新加载→恢复状态）
 - `activate_enabled_plugins()` — **启动延迟加载（Wave 5 D5）**：窗口显示后由 MainWindow 经 `QTimer.singleShot(0, ...)` 调用，自动加载并激活 `enabled=true` 且非安全模式的插件，单个失败不影响其余
 

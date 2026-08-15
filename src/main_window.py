@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer, QEvent, pyqtSignal, QPoint, QRect
 from PyQt6.QtGui import QIcon, QCloseEvent, QAction
-from typing import Any, Optional, cast
+from typing import Any, Callable, Dict, Optional, Tuple, cast
 
 from . import __version__
 from .core.document_registry import DocumentRegistry
@@ -107,6 +107,8 @@ class MainWindow(QMainWindow):
         self.event_bus = EventBus(self.config, self)
         self.shortcut_manager = ShortcutManager(self.config)
         self._cmd_palette: Optional[CommandPalette] = None
+        # 插件注册的命令：action_id -> (plugin_id, command_id, handler)，随插件卸载清理
+        self._plugin_commands: Dict[str, Tuple[str, str, Callable]] = {}
         self.editor_tabs: EditorTabWidget  # 在 _init_ui 中初始化
         self.theme_engine = ThemeEngine(self.config)
         self.theme_engine.load_external_themes()
@@ -130,6 +132,8 @@ class MainWindow(QMainWindow):
         self._plugin_event_bus = PluginEventBus(self)
         self.plugin_manager = PluginManager(self.config, event_bus=self._plugin_event_bus)
         self.plugin_manager.scan_plugins()
+        # 插件卸载后清理其注册的命令（防止 handler 引用泄漏）
+        self.plugin_manager.add_unload_hook(self._on_plugin_unloaded)
         self._register_plugin_capabilities()
 
         self._save_notify_timer = QTimer(self)
@@ -1138,6 +1142,10 @@ class MainWindow(QMainWindow):
         for _category, cmds in all_shortcuts.items():
             for action_id, info in cmds.items():
                 commands.append((info["name"], info["shortcut"], action_id))
+        # 插件命令（无快捷键；显示插件提供的 command_id）
+        for action_id, (plugin_id, command_id, _handler) in self._plugin_commands.items():
+            if self.plugin_manager.get_plugin(plugin_id) is not None:
+                commands.append((command_id, "", action_id))
 
         actual_shortcut = self.shortcut_manager.get_shortcut("command_palette") or "Ctrl+Shift+P"
 
@@ -1163,6 +1171,16 @@ class MainWindow(QMainWindow):
 
     def _dispatch_command(self, action_id: str) -> None:
         """执行命令面板选中的命令。"""
+        entry = self._plugin_commands.get(action_id)
+        if entry is not None:
+            plugin_id, command_id, handler = entry
+            if self.plugin_manager.get_plugin(plugin_id) is None:
+                get_logger(__name__).warning(
+                    "插件命令所属插件已卸载: %s", command_id
+                )
+                return
+            self._safe_plugin_callback(command_id, handler)
+            return
         action = self.shortcut_manager.get_action(action_id)
         if action:
             action.trigger()
@@ -1582,6 +1600,7 @@ class MainWindow(QMainWindow):
             PluginPermission.REGISTER_COMMAND,
             self._plugin_register_command,
             copy_result=False,
+            pass_plugin_id=True,
         )
         registry.register(
             "editor.read_text",
@@ -1709,8 +1728,32 @@ class MainWindow(QMainWindow):
     def _plugin_show_message(self, message: str) -> None:
         self.secretary.show_message(message)
 
-    def _plugin_register_command(self, command_id: str, handler) -> None:
-        get_logger(__name__).info("插件注册命令: %s", command_id)
+    def _plugin_register_command(self, plugin_id: str, command_id: str, handler) -> None:
+        """将插件命令接入命令面板。
+
+        - action_id 使用 plugin:{plugin_id}:{command_id} 前缀避免与内置命令冲突
+        - 命令面板显示插件提供的 command_id（建议格式 插件名:动作）
+        - 插件卸载时经 _on_plugin_unloaded 清理，防止 handler 引用泄漏
+        """
+        if not isinstance(command_id, str) or not command_id.strip():
+            raise PluginCapabilityError("命令 id 必须为非空字符串")
+        action_id = f"plugin:{plugin_id}:{command_id}"
+        self._plugin_commands[action_id] = (plugin_id, command_id, handler)
+        get_logger(__name__).info("插件注册命令: %s -> %s", command_id, action_id)
+
+    def _on_plugin_unloaded(self, plugin_id: str) -> None:
+        """插件卸载后清理其注册的命令（unload hook，见 PluginManager.add_unload_hook）。"""
+        removed = [
+            aid
+            for aid, (pid, _cid, _handler) in self._plugin_commands.items()
+            if pid == plugin_id
+        ]
+        for action_id in removed:
+            del self._plugin_commands[action_id]
+        if removed:
+            get_logger(__name__).info(
+                "插件 %s 卸载，清理 %d 个命令", plugin_id, len(removed)
+            )
 
     def _plugin_editor_read_text(self) -> str:
         editor = self.editor_tabs.current_editor()

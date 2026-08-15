@@ -966,7 +966,7 @@ DraggableTabBar.mouseMoveEvent (鼠标离开标签栏)
 ### 运行依赖
 
 ```bash
-pip install PyQt6>=6.8 PyQt6-WebEngine>=6.8 Pygments>=2.19 markdown>=3.8 Pillow>=12.2.0 send2trash>=2.1.0 markdown-it-py>=3.0.0
+pip install PyQt6>=6.8 PyQt6-WebEngine>=6.8 shiboken6>=6.8 Pygments>=2.19 markdown>=3.8 Pillow>=12.2.0 send2trash>=2.1.0 markdown-it-py>=3.0.0
 python main.py
 ```
 

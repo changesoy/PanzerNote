@@ -2,11 +2,14 @@
 """
 Hello Panzer - 生命周期 + 只读资源 API 示例插件
 
-展示插件生命周期管理和只读配置/资源 API 使用。
+展示插件生命周期管理和命名空间式只读 API（Wave 5）使用。
 """
 
-from src.plugins.plugin_base import PluginBase, PluginMeta, PluginPermission
+from src.plugins.plugin_base import PluginBase, PluginMeta
+from src.utils.logger import get_logger
 from src import __version__ as _app_version
+
+logger = get_logger("plugins.hello_panzer")
 
 
 class Plugin(PluginBase):
@@ -18,32 +21,35 @@ class Plugin(PluginBase):
             description="生命周期 + 只读资源 API 示例插件",
             author="PanzerNote Team",
             min_app_version=_app_version,
-            permissions=[PluginPermission.READ_SETTINGS, PluginPermission.READ_SAVEGAME],
+            capabilities=["app.version", "settings.read", "savegame.read"],
             tags=["demo", "basic"],
         )
 
-    def on_load(self, api) -> None:
-        super().on_load(api)
-        version = api.get_app_version()
-        print(f"[HelloPanzer] 插件已加载 (应用版本: {version})")
+    def on_load(self, ctx) -> None:
+        super().on_load(ctx)
+        version = ctx.app.version()
+        logger.info("插件已加载 (应用版本: %s)", version)
 
     def on_activate(self) -> None:
         super().on_activate()
-        if self._api:
+        if self._ctx:
             try:
-                resources = self._api.get_resources()
-                print(f"[HelloPanzer] 当前资源: 燃料={resources.get('fuel', 0)}, "
-                      f"弹药={resources.get('ammo', 0)}, "
-                      f"钢材={resources.get('steel', 0)}, "
-                      f"铝材={resources.get('bauxite', 0)}")
+                resources = self._ctx.savegame.resources()
+                logger.info(
+                    "当前资源: 燃料=%s, 弹药=%s, 钢材=%s, 铝材=%s",
+                    resources.get("fuel", 0),
+                    resources.get("ammo", 0),
+                    resources.get("steel", 0),
+                    resources.get("bauxite", 0),
+                )
             except Exception as e:
-                print(f"[HelloPanzer] 读取资源失败: {e}")
-        print("[HelloPanzer] 插件已激活！指挥官好！")
+                logger.warning("读取资源失败: %s", e)
+        logger.info("插件已激活！指挥官好！")
 
     def on_deactivate(self) -> None:
         super().on_deactivate()
-        print("[HelloPanzer] 插件已停用，再见！")
+        logger.info("插件已停用，再见！")
 
     def on_unload(self) -> None:
-        print("[HelloPanzer] 插件已卸载")
+        logger.info("插件已卸载")
         super().on_unload()

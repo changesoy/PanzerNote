@@ -2,18 +2,20 @@
 
 ## 概述
 
-PanzerNote 插件系统提供了一套标准化的扩展机制，允许第三方开发者为应用添加功能。插件运行在沙箱环境中，通过受限 API 与主程序交互。
+PanzerNote 插件系统提供了一套标准化的扩展机制，允许第三方开发者为应用添加功能。插件通过**能力声明（capabilities）** 与宿主交互：插件在 `plugin.json` 中声明所需能力，宿主按能力清单暴露受限 API。
+
+> **⚠️ 可信插件模型**：插件运行在主程序进程中（GUI 线程），不是安全沙箱。能力系统只限制 PanzerNote 暴露的 API 边界，无法阻止恶意插件读取进程内其它数据。请只安装可信来源的插件。
 
 ## 插件生命周期
 
 插件有四个核心生命周期阶段：
 
-| 阶段 | 方法              | 状态          | 说明                            |
-| ---- | ----------------- | ------------- | ------------------------------- |
-| 加载 | `on_load(api)`    | `LOADED`      | 插件被加载到内存，接收 API 对象 |
-| 激活 | `on_activate()`   | `ACTIVATED`   | 插件开始运行，可执行业务逻辑    |
-| 停用 | `on_deactivate()` | `DEACTIVATED` | 插件暂停运行，释放运行时资源    |
-| 卸载 | `on_unload()`     | `UNLOADED`    | 插件从内存中移除，释放所有资源  |
+| 阶段 | 方法              | 状态          | 说明                              |
+| ---- | ----------------- | ------------- | --------------------------------- |
+| 加载 | `on_load(ctx)`    | `LOADED`      | 插件被加载到内存，接收上下文对象  |
+| 激活 | `on_activate()`   | `ACTIVATED`   | 插件开始运行，可执行业务逻辑      |
+| 停用 | `on_deactivate()` | `DEACTIVATED` | 插件暂停运行，释放运行时资源      |
+| 卸载 | `on_unload()`     | `UNLOADED`    | 插件从内存中移除，释放所有资源    |
 
 ### 状态转换规则
 
@@ -24,6 +26,8 @@ ACTIVATED → on_deactivate() → DEACTIVATED → on_unload() → UNLOADED
 LOADED → on_unload() → UNLOADED
 任意状态 → 异常 → ERROR
 ```
+
+所有生命周期钩子在 GUI 线程执行；插件应避免在钩子中执行长时间阻塞操作。
 
 ## 插件开发指南
 
@@ -47,15 +51,15 @@ plugins/
   "description": "我的自定义插件",
   "author": "开发者名称",
   "entry": "main.py",
-  "min_app_version": "X.Y.Z",
-  "permissions": ["read_settings", "read_savegame"],
+  "min_app_version": "2.0.0",
+  "capabilities": ["settings.read", "savegame.read"],
   "tags": ["utility"]
 }
 ```
 
 **必需字段：**
 
-- `name` (string): 插件唯一标识符，仅允许字母、数字和下划线
+- `name` (string): 插件唯一标识符，仅允许字母、数字、下划线和连字符（插件名用作文件系统路径，禁止路径分隔符等危险字符）
 - `version` (string): 语义化版本号
 - `entry` (string): 入口模块文件名
 
@@ -65,15 +69,18 @@ plugins/
 - `author` (string): 作者名称
 - `homepage` (string): 项目主页 URL
 - `min_app_version` (string): 最低兼容应用版本，默认为当前应用版本（通过 `src.__version__` 获取）
-- `permissions` (string[]): 权限声明列表
+- `capabilities` (string[]): **能力声明列表**，决定插件可调用的 API
+- `enabled` (boolean): 是否在应用启动时自动加载并激活，默认 `true`
 - `tags` (string[]): 标签列表
+
+> 能力声明只需列出实际用到的能力。`data.read` / `data.write` 为内置能力，无需声明。
 
 ### 3. 编写入口模块
 
 入口模块必须定义 `Plugin` 类，继承 `PluginBase`：
 
 ```python
-from src.plugins.plugin_base import PluginBase, PluginMeta, PluginPermission
+from src.plugins.plugin_base import PluginBase, PluginMeta
 
 class Plugin(PluginBase):
     def get_meta(self) -> PluginMeta:
@@ -81,11 +88,12 @@ class Plugin(PluginBase):
             name="my_plugin",
             version="1.0.0",
             description="我的自定义插件",
-            permissions=[PluginPermission.READ_SETTINGS],
+            capabilities=["settings.read"],
         )
 
-    def on_load(self, api) -> None:
-        super().on_load(api)
+    def on_load(self, ctx) -> None:
+        super().on_load(ctx)
+        # 保存 ctx 供后续使用（self._ctx 已在基类中保存）
         # 初始化插件资源
 
     def on_activate(self) -> None:
@@ -101,104 +109,169 @@ class Plugin(PluginBase):
         super().on_unload()
 ```
 
-## 权限系统
+## 能力系统
 
-### 权限分类
+### 两层结构
 
-| 权限         | 标识                | 说明                             | MVP 可用    |
-| ------------ | ------------------- | -------------------------------- | ----------- |
-| 读取设置     | `read_settings`     | 读取编辑器、游戏、小秘书等设置   | ✅          |
-| 读取存档     | `read_savegame`     | 读取游戏存档数据（资源、核心等） | ✅          |
-| 读取工作区   | `read_workspace`    | 读取工作区状态（最近文件等）     | ✅          |
-| 读取文件树   | `read_file_tree`    | 读取笔记库目录结构               | ✅          |
-| 访问编辑器   | `access_editor`     | 与编辑器交互                     | ✅          |
-| 访问 UI      | `access_ui`         | 扩展界面元素                     | ✅          |
-| 访问网络     | `access_network`    | 网络请求权限                     | ❌ MVP 禁止 |
-| 访问文件系统 | `access_filesystem` | 文件系统写入权限                 | ❌ MVP 禁止 |
+能力系统采用"声明 → 映射"两层结构：
 
-### 权限申请格式
+1. **manifest 声明**：插件在 `plugin.json` 的 `capabilities` 中声明所需能力（如 `"editor.read_text"`）
+2. **权限映射**：宿主将能力 id 映射为内部权限枚举（`PluginPermission`），未声明的能力无法调用
 
-在 `plugin.json` 的 `permissions` 数组中声明：
+### 能力清单
 
-```json
-{
-  "permissions": ["read_settings", "read_savegame", "access_ui"]
-}
-```
+| 能力 id                    | 内部权限            | 说明                                     |
+| -------------------------- | ------------------- | ---------------------------------------- |
+| `app.version`              | 无                  | 获取应用版本                             |
+| `settings.read`            | `READ_SETTINGS`     | 读取设置                                 |
+| `savegame.read`            | `READ_SAVEGAME`     | 读取游戏存档（资源、字段）               |
+| `workspace.recent_files`   | `READ_WORKSPACE`    | 读取最近文件列表                         |
+| `workspace.open_file`      | `OPEN_FILE`         | 打开文件到编辑器                         |
+| `file_tree.read`           | `READ_FILE_TREE`    | 读取笔记库路径                           |
+| `editor.read_text`         | `EDITOR_READ`       | 读取当前文档全文                         |
+| `editor.read_path`         | `EDITOR_READ`       | 读取当前文件路径                         |
+| `editor.selection.read`    | `EDITOR_READ`       | 读取当前选区文本                         |
+| `editor.selection.replace` | `EDITOR_WRITE`      | 替换当前选区                             |
+| `ui.notify`                | `UI_NOTIFY`         | 状态栏轻提示                             |
+| `ui.show_message`          | `SHOW_MESSAGE`      | 通过小秘书显示消息                       |
+| `ui.register_command`      | `REGISTER_COMMAND`  | 注册命令面板命令                         |
+| `ui.register_menu_item`    | `REGISTER_MENU`     | 注册插件菜单项                           |
+| `event.subscribe`          | `EVENT_SUBSCRIBE`   | 订阅宿主事件                             |
+| `data.read` / `data.write` | 内置（无需声明）    | 读写插件私有数据（`plugin_data/{id}/`）  |
 
-### MVP 限制
+### 权限不足的行为
 
-当前 MVP 阶段遵循"先收紧再放开"策略：
+- 调用**未声明**或**不存在**的能力 → 抛出 `PluginCapabilityError`
+- 能力存在但内部权限换算不通过（宿主内部不一致）→ 抛出 `PluginPermissionError`
 
-- 所有插件仅限只读访问
-- `access_network` 和 `access_filesystem` 权限被禁止
-- 未声明权限的 API 调用将抛出 `SandboxViolationError`
+## PluginContext 接口参考
 
-## 沙箱隔离
+`on_load(ctx)` 接收的 `ctx` 是命名空间式上下文对象。插件**不直接持有** Config / SavegameManager / MainWindow 等内部对象，只通过命名空间方法访问能力。每次调用都会经过权限检查，返回值做深拷贝保护。
 
-### 资源访问控制
+### ctx.app — 应用信息
 
-- 插件通过 `PluginAPI` 对象访问主程序数据
-- 每次调用都检查权限声明
-- 未授权访问抛出 `SandboxViolationError`
+| 方法             | 所需能力      | 说明             |
+| ---------------- | ------------- | ---------------- |
+| `version() -> str` | `app.version` | 获取应用版本     |
 
-### API 调用限制
+### ctx.settings — 设置读取
 
-- 插件运行在独立线程中
-- 最大执行超时时间：30 秒
-- 超时后抛出 `SandboxTimeoutError`
+| 方法                                  | 所需能力      | 说明                     |
+| ------------------------------------- | ------------- | ------------------------ |
+| `get(key, default=None) -> Any`       | `settings.read` | 读取通用设置           |
+| `get_editor(key, default=None) -> Any` | `settings.read` | 读取编辑器设置         |
+| `get_game(key, default=None) -> Any`   | `settings.read` | 读取游戏设置           |
+| `get_secretary(key, default=None) -> Any` | `settings.read` | 读取小秘书设置       |
 
-### 异常隔离
+### ctx.savegame — 存档读取
 
-- 插件异常不会影响主进程
-- 插件进入 `ERROR` 状态后可被重新加载
-- 沙箱捕获所有插件异常并记录日志
+| 方法                            | 所需能力      | 说明                   |
+| ------------------------------- | ------------- | ---------------------- |
+| `resources() -> Dict[str, int]` | `savegame.read` | 读取游戏资源         |
+| `field(key, default=None) -> Any` | `savegame.read` | 读取存档字段         |
 
-## PluginAPI 接口参考
+### ctx.workspace — 工作区
 
-### 读取设置
+| 方法                          | 所需能力               | 说明                 |
+| ----------------------------- | ---------------------- | -------------------- |
+| `recent_files() -> List[str]` | `workspace.recent_files` | 读取最近文件列表   |
+| `open_file(filepath) -> bool` | `workspace.open_file`   | 打开文件到编辑器（经宿主安全校验） |
 
-```python
-api.get_setting(key, default=None) -> Any
-api.get_editor_setting(key, default=None) -> Any
-api.get_game_setting(key, default=None) -> Any
-api.get_secretary_setting(key, default=None) -> Any
-```
+### ctx.file_tree — 笔记库
 
-**所需权限：** `read_settings`
+| 方法                        | 所需能力      | 说明           |
+| --------------------------- | ------------- | -------------- |
+| `notebooks_path() -> str`   | `file_tree.read` | 读取笔记库路径 |
 
-### 读取存档
+### ctx.editor — 编辑器
 
-```python
-api.get_resources() -> Dict[str, int]
-api.get_savegame_field(key, default=None) -> Any
-```
+| 方法                            | 所需能力                 | 说明                                     |
+| ------------------------------- | ------------------------ | ---------------------------------------- |
+| `get_text() -> str`             | `editor.read_text`       | 读取当前文档全文                         |
+| `get_current_path() -> Optional[str]` | `editor.read_path` | 获取当前文件路径（未保存的新文件返回 None） |
+| `replace_text(text)`            | `editor.selection.replace` | 用给定文本替换当前选区                 |
+| `selection.get_text() -> str`   | `editor.selection.read`    | 读取当前选区文本（无选区返回空串）     |
 
-**所需权限：** `read_savegame`
+### ctx.ui — UI 扩展
 
-### 读取工作区
+| 方法                                    | 所需能力                 | 说明                                   |
+| --------------------------------------- | ------------------------ | -------------------------------------- |
+| `notify(message, level="info")`         | `ui.notify`              | 状态栏轻提示（level: info/warning/error） |
+| `show_message(message)`                 | `ui.show_message`        | 通过小秘书显示消息                     |
+| `register_command(command_id, handler)` | `ui.register_command`    | 注册命令面板命令（id 建议 `插件名:动作`；命令显示于命令面板，插件卸载时自动移除） |
+| `register_menu_item(label, handler)`    | `ui.register_menu_item`  | 注册插件菜单项                         |
 
-```python
-api.get_recent_files() -> List[str]
-```
+### ctx.data — 插件私有数据（内置能力）
 
-**所需权限：** `read_workspace`
+| 方法                    | 说明                                                                 |
+| ----------------------- | -------------------------------------------------------------------- |
+| `read(key) -> Any`      | 读取本插件数据，key 不存在返回 None                                  |
+| `write(key, value)`     | 写入本插件数据（值需可 JSON 序列化，超过 1MB 拒绝写入）              |
 
-### 读取文件树
+数据存于用户数据目录 `data/plugin_data/{plugin_id}/data.json`（单 JSON 文件），写盘走 `FileGuard.safe_write`（原子写），**仅限本插件命名空间**。卸载插件默认保留数据，需显式操作删除。
 
-```python
-api.get_notebooks_path() -> str
-```
+### ctx.events — 事件订阅
 
-**所需权限：** `read_file_tree`
+| 方法                            | 所需能力       | 说明                          |
+| ------------------------------- | -------------- | ----------------------------- |
+| `subscribe(name, handler)`      | `event.subscribe` | 订阅事件，handler 接收 payload（可为 None） |
 
-### 应用信息
+**事件白名单（7 个）：**
 
-```python
-api.get_app_version() -> str
-```
+| 事件名             | 说明                 | 节流     |
+| ------------------ | -------------------- | -------- |
+| `document.opened`  | 文档打开（带 filepath） | 否     |
+| `document.saved`   | 文档保存             | 否       |
+| `document.closed`  | 文档关闭（带 filepath） | 否     |
+| `cursor.changed`   | 光标移动             | 100ms 合并 |
+| `content.changed`  | 内容变更             | 100ms 合并 |
+| `theme.changed`    | 主题切换（带主题 id）  | 否     |
+| `file_tree.changed`| 文件树变化           | 否       |
 
-**所需权限：** 无
+防护规则：
+
+- 高频事件（`cursor.changed` / `content.changed`）合并到 100ms 窗口后派发，仅保留最新 payload
+- 单插件单事件订阅数上限 5，超限抛出 `PluginCapabilityError`
+- 订阅回调异常仅记录日志，不自动禁用插件
+- 插件卸载/重载时自动解绑全部订阅
+
+## 主线程模型
+
+- 所有生命周期钩子与命令回调在 **GUI 线程**执行，无独立插件线程
+- 无执行超时机制；插件自行将长任务卸载（如异步处理）
+- 插件回调应快速返回，避免阻塞界面
+
+## 启动时序与启动恢复
+
+### 启动时序（延迟加载）
+
+插件**不进入应用启动关键路径**：
+
+1. 启动阶段仅扫描 `plugin.json`（名称/版本/capabilities/enabled），**不执行**插件代码
+2. session 恢复 + 主窗口显示后，经 `QTimer.singleShot(0, ...)` 自动加载并激活 `enabled=true` 的插件
+3. 插件启动时能看到已恢复完成的编辑器/会话状态；代价是窗口刚出现的一小段时间内插件命令尚未注册
+
+### 启动恢复机制（安全模式）
+
+为防止插件在启动阶段（`on_load` / `on_activate`）死循环或崩溃导致应用永久无法再次启动，宿主使用启动恢复 marker：
+
+- `on_load` 开始前写入「正在启动插件 X」marker，`on_activate` 成功完成后清除
+- 若上次启动在启动阶段异常退出（检测到残留 marker），本次启动跳过该插件（**安全模式**），插件管理对话框中显示 `[安全模式]`，需手动加载处理后恢复
+- 普通异常（被宿主隔离捕获、程序未崩溃）会清除 marker，下次启动仍可重试；仅进程级崩溃（死循环/硬崩溃）会残留 marker
+
+## 异常与错误处理
+
+| 异常类型                | 触发时机                                   |
+| ----------------------- | ------------------------------------------ |
+| `PluginLoadError`       | 插件加载失败（模块导入、类缺失等）         |
+| `PluginValidationError` | 插件清单验证失败（必需字段缺失等）         |
+| `PluginCapabilityError` | 调用未声明/不存在的能力、事件不在白名单、订阅超限 |
+| `PluginPermissionError` | 能力已知但内部授权不满足                   |
+
+异常隔离规则：
+
+- 生命周期钩子异常 → 插件进入 `ERROR` 状态（可重新加载）
+- 回调（命令/菜单/事件订阅）异常 → 仅记录日志，插件保持运行
 
 ## 热加载
 
@@ -210,7 +283,7 @@ manager.reload_plugin("my_plugin")
 
 热加载流程：
 
-1. 停用并卸载当前插件
+1. 停用并卸载当前插件（自动解绑事件订阅）
 2. 清除模块缓存
 3. 重新加载插件模块
 4. 恢复之前的激活状态
@@ -219,56 +292,64 @@ manager.reload_plugin("my_plugin")
 
 ### 基础功能插件 (hello_panzer)
 
-展示插件生命周期和只读 API 使用：
+展示生命周期和只读命名空间 API 使用：
 
 ```python
+from src.plugins.plugin_base import PluginBase, PluginMeta
+from src import __version__ as _app_version
+
 class Plugin(PluginBase):
     def get_meta(self) -> PluginMeta:
         return PluginMeta(
             name="hello_panzer",
             version="1.0.0",
-            description="基础功能示例插件",
-            permissions=[PluginPermission.READ_SETTINGS, PluginPermission.READ_SAVEGAME],
+            description="生命周期 + 只读资源 API 示例插件",
+            author="PanzerNote Team",
+            min_app_version=_app_version,
+            capabilities=["app.version", "settings.read", "savegame.read"],
         )
+
+    def on_load(self, ctx) -> None:
+        super().on_load(ctx)
+        version = ctx.app.version()
+        print(f"[HelloPanzer] 插件已加载 (应用版本: {version})")
 
     def on_activate(self) -> None:
         super().on_activate()
-        if self._api:
-            resources = self._api.get_resources()
-            print(f"当前资源: {resources}")
+        if self._ctx:
+            resources = self._ctx.savegame.resources()
+            print(f"[HelloPanzer] 当前资源: 燃料={resources.get('fuel', 0)}")
 ```
 
 ### UI 扩展插件 (word_counter)
 
-展示 UI 扩展和编辑器交互：
+展示编辑器读取能力：
 
 ```python
+from src.plugins.plugin_base import PluginBase, PluginMeta
+from src import __version__ as _app_version
+
 class Plugin(PluginBase):
     def get_meta(self) -> PluginMeta:
         return PluginMeta(
             name="word_counter",
             version="1.0.0",
-            description="文档字数统计",
-            permissions=[
-                PluginPermission.READ_SETTINGS,
-                PluginPermission.ACCESS_EDITOR,
-                PluginPermission.ACCESS_UI,
-            ],
+            description="字数统计能力示例插件",
+            author="PanzerNote Team",
+            min_app_version=_app_version,
+            capabilities=["editor.read_text"],
         )
 
     def count_text(self, text: str) -> dict:
+        if not text:
+            return {"words": 0, "chars": 0, "chars_no_spaces": 0, "lines": 0}
+        lines = text.split('\n')
         return {
             "words": len(text.split()),
             "chars": len(text),
-            "lines": len(text.split('\n')),
+            "chars_no_spaces": len(text.replace(' ', '').replace('\t', '').replace('\n', '')),
+            "lines": len(lines),
         }
 ```
 
-## 错误处理
-
-| 异常类型                | 说明             |
-| ----------------------- | ---------------- |
-| `PluginLoadError`       | 插件加载失败     |
-| `PluginValidationError` | 插件清单验证失败 |
-| `SandboxViolationError` | 权限违规         |
-| `SandboxTimeoutError`   | 执行超时         |
+> 完整示例见 `plugins/hello_panzer/` 与 `plugins/word_counter/`。

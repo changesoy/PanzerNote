@@ -2,11 +2,14 @@
 """
 Word Counter - 字数统计能力示例插件
 
-展示编辑器交互权限，提供文档字数统计功能接口。
+展示编辑器读取能力（editor.read_text），提供文档字数统计功能接口。
 """
 
-from src.plugins.plugin_base import PluginBase, PluginMeta, PluginPermission
+from src.plugins.plugin_base import PluginBase, PluginMeta
+from src.utils.logger import get_logger
 from src import __version__ as _app_version
+
+logger = get_logger("plugins.word_counter")
 
 
 class Plugin(PluginBase):
@@ -18,30 +21,26 @@ class Plugin(PluginBase):
             description="字数统计能力示例插件",
             author="PanzerNote Team",
             min_app_version=_app_version,
-            permissions=[
-                PluginPermission.READ_SETTINGS,
-                PluginPermission.ACCESS_EDITOR,
-                PluginPermission.ACCESS_UI,
-            ],
+            capabilities=["editor.read_text"],
             tags=["demo", "ui", "editor"],
         )
 
-    def on_load(self, api) -> None:
-        super().on_load(api)
+    def on_load(self, ctx) -> None:
+        super().on_load(ctx)
         self._word_count = 0
         self._char_count = 0
-        print("[WordCounter] 插件已加载")
+        logger.info("插件已加载")
 
     def on_activate(self) -> None:
         super().on_activate()
-        print("[WordCounter] 插件已激活 - 字数统计功能可用")
+        logger.info("插件已激活 - 字数统计功能可用")
 
     def on_deactivate(self) -> None:
         super().on_deactivate()
-        print("[WordCounter] 插件已停用")
+        logger.info("插件已停用")
 
     def on_unload(self) -> None:
-        print("[WordCounter] 插件已卸载")
+        logger.info("插件已卸载")
         super().on_unload()
 
     def count_text(self, text: str) -> dict:

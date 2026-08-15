@@ -1,0 +1,175 @@
+# -*- coding: utf-8 -*-
+"""
+命名空间式 PluginContext（Wave 5 Batch 1）
+
+插件通过 PluginContext 的子命名空间访问能力（能力边界 = API 边界）：
+ctx.app / ctx.settings / ctx.savegame / ctx.workspace / ctx.file_tree /
+ctx.ui / ctx.data / ctx.events。
+
+每个命名空间方法内部经 CapabilityRegistry.invoke 完成权限检查与深拷贝保护，
+插件永远不直接持有 Config / SavegameManager / MainWindow 等内部对象。
+"""
+
+from typing import Any, Callable, Dict, List, Optional, cast
+
+from .capability_registry import CapabilityRegistry
+
+
+class _NamespaceAPI:
+    """命名空间基类：持有 registry 与当前插件 id"""
+
+    def __init__(self, registry: CapabilityRegistry, plugin_id: str) -> None:
+        self._registry = registry
+        self._plugin_id = plugin_id
+
+
+class AppAPI(_NamespaceAPI):
+    """应用信息（app.version）"""
+
+    def version(self) -> str:
+        return cast(str, self._registry.invoke("app.version", self._plugin_id))
+
+
+class SettingsAPI(_NamespaceAPI):
+    """设置读取（settings.read）"""
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self._registry.invoke("settings.read", self._plugin_id, "get", key, default)
+
+    def get_editor(self, key: str, default: Any = None) -> Any:
+        return self._registry.invoke("settings.read", self._plugin_id, "editor", key, default)
+
+    def get_game(self, key: str, default: Any = None) -> Any:
+        return self._registry.invoke("settings.read", self._plugin_id, "game", key, default)
+
+    def get_secretary(self, key: str, default: Any = None) -> Any:
+        return self._registry.invoke("settings.read", self._plugin_id, "secretary", key, default)
+
+
+class SavegameAPI(_NamespaceAPI):
+    """存档读取（savegame.read）"""
+
+    def resources(self) -> Dict[str, int]:
+        return cast(Dict[str, int], self._registry.invoke("savegame.read", self._plugin_id, "resources"))
+
+    def field(self, key: str, default: Any = None) -> Any:
+        return self._registry.invoke("savegame.read", self._plugin_id, "field", key, default)
+
+
+class WorkspaceAPI(_NamespaceAPI):
+    """工作区（workspace.recent_files / workspace.open_file）"""
+
+    def recent_files(self) -> List[str]:
+        return cast(List[str], self._registry.invoke("workspace.recent_files", self._plugin_id))
+
+    def open_file(self, filepath: str) -> bool:
+        """打开文件到编辑器（经宿主安全校验）"""
+        return cast(bool, self._registry.invoke("workspace.open_file", self._plugin_id, filepath))
+
+
+class FileTreeAPI(_NamespaceAPI):
+    """笔记库（file_tree.read）"""
+
+    def notebooks_path(self) -> str:
+        return cast(str, self._registry.invoke("file_tree.read", self._plugin_id))
+
+
+class EditorAPI(_NamespaceAPI):
+    """编辑器能力（editor.read_text / selection / read_path）"""
+
+    def __init__(self, registry: CapabilityRegistry, plugin_id: str) -> None:
+        super().__init__(registry, plugin_id)
+        self.selection = EditorSelectionAPI(registry, plugin_id)
+
+    def get_text(self) -> str:
+        """读取当前文档全文"""
+        return cast(str, self._registry.invoke("editor.read_text", self._plugin_id))
+
+    def get_current_path(self) -> Optional[str]:
+        """获取当前文件路径（未保存的新文件返回 None）"""
+        return cast(Optional[str], self._registry.invoke("editor.read_path", self._plugin_id))
+
+    def replace_text(self, text: str) -> None:
+        """用给定文本替换当前选区"""
+        self._registry.invoke("editor.selection.replace", self._plugin_id, text)
+
+
+class EditorSelectionAPI(_NamespaceAPI):
+    """编辑器选区读取（editor.selection.read）"""
+
+    def get_text(self) -> str:
+        """读取当前选区文本（无选区返回空串）"""
+        return cast(str, self._registry.invoke("editor.selection.read", self._plugin_id))
+
+
+class UIAPI(_NamespaceAPI):
+    """UI 能力（ui.notify / show_message / register_command / register_menu_item）"""
+
+    def notify(self, message: str, level: str = "info") -> None:
+        """状态栏轻提示（level: info / warning / error）"""
+        self._registry.invoke("ui.notify", self._plugin_id, message, level)
+
+    def show_message(self, message: str) -> None:
+        """通过小秘书显示消息"""
+        self._registry.invoke("ui.show_message", self._plugin_id, message)
+
+    def register_command(self, command_id: str, handler: Callable) -> None:
+        """注册命令到命令面板（command_id 建议格式 plugin_name:action）"""
+        self._registry.invoke("ui.register_command", self._plugin_id, command_id, handler)
+
+    def register_menu_item(self, label: str, handler: Callable) -> None:
+        """注册菜单项到插件菜单"""
+        self._registry.invoke("ui.register_menu_item", self._plugin_id, label, handler)
+
+
+class DataAPI(_NamespaceAPI):
+    """插件私有数据（data.read / data.write，内置能力无需声明）
+
+    数据存于用户数据目录 plugin_data/{plugin_id}/data.json（单 JSON 文件，
+    1MB 上限，写盘走 FileGuard.safe_write）；仅限本插件命名空间。
+    """
+
+    def read(self, key: str) -> Any:
+        """读取本插件数据，key 不存在返回 None"""
+        return self._registry.invoke("data.read", self._plugin_id, key)
+
+    def write(self, key: str, value: Any) -> None:
+        """写入本插件数据（值需可 JSON 序列化，超过 1MB 拒绝写入）"""
+        self._registry.invoke("data.write", self._plugin_id, key, value)
+
+
+class EventsAPI(_NamespaceAPI):
+    """事件订阅（event.subscribe，EVENT_SUBSCRIBE）
+
+    事件白名单与节流由宿主 PluginEventBus 控制；卸载自动解绑。
+    """
+
+    def subscribe(self, name: str, handler: Callable[[Any], Any]) -> None:
+        """订阅事件，handler 接收 payload（可为 None）
+
+        Raises:
+            PluginCapabilityError: 事件不在白名单 / 订阅数超上限
+        """
+        self._registry.invoke("event.subscribe", self._plugin_id, name, handler)
+
+
+class PluginContext:
+    """宿主给当前插件的运行上下文（原 PluginAPI 更名而来，D4）"""
+
+    def __init__(
+        self,
+        plugin_id: str,
+        plugin_version: str,
+        registry: CapabilityRegistry,
+    ) -> None:
+        self.plugin_id = plugin_id
+        self.plugin_version = plugin_version
+        self.app = AppAPI(registry, plugin_id)
+        self.settings = SettingsAPI(registry, plugin_id)
+        self.savegame = SavegameAPI(registry, plugin_id)
+        self.workspace = WorkspaceAPI(registry, plugin_id)
+        self.file_tree = FileTreeAPI(registry, plugin_id)
+        self.editor = EditorAPI(registry, plugin_id)
+        self.ui = UIAPI(registry, plugin_id)
+        self.data = DataAPI(registry, plugin_id)
+        self.events = EventsAPI(registry, plugin_id)

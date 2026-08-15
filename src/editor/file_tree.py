@@ -194,6 +194,8 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
     file_deleted = pyqtSignal(str, bool)
     # 3.5.11：(source_tabs, tab_id, dest_folder) 未命名标签落盘保存
     untitled_save_requested = pyqtSignal(object, int, str)
+    # Batch 4：文件树变化（刷新/移动/复制/删除成功后触发）
+    tree_changed = pyqtSignal()
 
     def __init__(self, config: Config, theme_engine, parent=None):
         super().__init__(parent)
@@ -493,6 +495,8 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
             else:
                 # 删除成功后再通知外部（同步关闭已打开的标签页）
                 self.file_deleted.emit(os.path.normpath(filepath), is_dir)
+                # Batch 4：删除成功 → 文件树变化事件
+                self.tree_changed.emit()
 
     def refresh_external_files(self):
         external_files = self.config.get_external_files()
@@ -515,3 +519,5 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
                 self.external_list_layout.addWidget(label)
         else:
             self.external_container.hide()
+        # Batch 4：外部文件列表刷新 → 文件树变化事件
+        self.tree_changed.emit()

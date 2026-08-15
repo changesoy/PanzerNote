@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer, QEvent, pyqtSignal, QPoint, QRect
 from PyQt6.QtGui import QIcon, QCloseEvent, QAction
-from typing import Optional, cast
+from typing import Any, Callable, Dict, Optional, Tuple, cast
 
 from . import __version__
 from .core.document_registry import DocumentRegistry
@@ -33,6 +33,7 @@ from .core.timer_manager import TimerManager
 from .core.event_bus import EventBus
 from .core.menu_builder import MenuBuilder
 from .core.shortcut_manager import ShortcutManager
+from .core.path_resolver import load_json, save_json
 from .game.game_engine import GameEngine
 from .editor.editor_tabs import EditorTabWidget
 from .editor.webengine_runtime import WebEngineRuntime
@@ -42,7 +43,11 @@ from .editor.file_action_controller import FileActionController
 from .editor.export_action_controller import ExportActionController
 from .editor.edit_action_controller import EditActionController
 from .editor.settings_action_controller import SettingsActionController
+from .security.file_guard import FileGuard, FileSizeExceededError
 from .plugins.plugin_manager import PluginManager
+from .plugins.plugin_base import PluginPermission
+from .plugins.capability_registry import PluginCapabilityError
+from .plugins.plugin_event_bus import PluginEventBus
 from .themes.theme_engine import ThemeEngine
 from .themes.theme_preview import ThemePreviewDialog
 from .ui.command_palette import CommandPalette
@@ -63,6 +68,9 @@ from .ui.unsaved_files_dialog import UnsavedChoice, UnsavedFilesDialog
 class MainWindow(QMainWindow):
     """主窗口"""
 
+    # 插件私有数据单文件大小上限（Wave 5 Batch 3，设计 §3.5）
+    PLUGIN_DATA_MAX_SIZE = 1 * 1024 * 1024
+
     def __init__(self, app_context: AppContext, parent=None):
         super().__init__(parent)
         self.app_context = app_context
@@ -72,6 +80,13 @@ class MainWindow(QMainWindow):
         self.recent_menu: QMenu
         self._wrap_no_wrap_action: QAction
         self._wrap_limit_action: QAction
+        # 插件注册的菜单项容器（首次注册时惰性创建）
+        self._plugin_menu: Optional[QMenu] = None
+        # 插件数据专用 FileGuard（1MB 上限，不污染全局 50MB 配置）
+        self._plugin_data_guard = FileGuard(
+            self.config.get_path_validator(),
+            max_file_size=self.PLUGIN_DATA_MAX_SIZE,
+        )
         # 保存引用，避免事件过滤器被 GC
         self._selection_clear_filter: Optional[SelectionClearFilter] = None
         self._file_open_service = FileOpenService(
@@ -92,6 +107,8 @@ class MainWindow(QMainWindow):
         self.event_bus = EventBus(self.config, self)
         self.shortcut_manager = ShortcutManager(self.config)
         self._cmd_palette: Optional[CommandPalette] = None
+        # 插件注册的命令：action_id -> (plugin_id, command_id, handler)，随插件卸载清理
+        self._plugin_commands: Dict[str, Tuple[str, str, Callable]] = {}
         self.editor_tabs: EditorTabWidget  # 在 _init_ui 中初始化
         self.theme_engine = ThemeEngine(self.config)
         self.theme_engine.load_external_themes()
@@ -111,9 +128,13 @@ class MainWindow(QMainWindow):
         )
         self._presented = False
 
-        self.plugin_manager = PluginManager(self.config)
+        # Batch 4：插件事件总线（白名单 + 节流 + 订阅上限；卸载自动解绑）
+        self._plugin_event_bus = PluginEventBus(self)
+        self.plugin_manager = PluginManager(self.config, event_bus=self._plugin_event_bus)
         self.plugin_manager.scan_plugins()
-        self._register_plugin_callbacks()
+        # 插件卸载后清理其注册的命令（防止 handler 引用泄漏）
+        self.plugin_manager.add_unload_hook(self._on_plugin_unloaded)
+        self._register_plugin_capabilities()
 
         self._save_notify_timer = QTimer(self)
         self._save_notify_timer.setSingleShot(True)
@@ -240,6 +261,13 @@ class MainWindow(QMainWindow):
         self.outline_panel.heading_clicked.connect(self._on_outline_heading_clicked)
         self.find_in_files_panel.result_clicked.connect(self._on_find_in_files_result)
         self.shortcut_panel.set_edit_callback(self._on_shortcut_edited)
+        # Batch 4：主题切换 / 文件树变化 → 插件事件
+        self.theme_engine.theme_changed.connect(
+            lambda theme_id: self._plugin_event_bus.emit("theme.changed", theme_id)
+        )
+        self.file_tree.tree_changed.connect(
+            lambda: self._plugin_event_bus.emit("file_tree.changed")
+        )
         self._connect_editor_tabs_signals(self.editor_tabs)
 
     def _connect_editor_tabs_signals(self, tabs: EditorTabWidget):
@@ -251,6 +279,16 @@ class MainWindow(QMainWindow):
         tabs.cursor_position_changed.connect(self._update_stats)
         tabs.word_count_updated.connect(self._update_stats)
         tabs.file_saved.connect(self._on_file_saved)
+        # Batch 4：文档打开/关闭/光标移动 → 插件事件（高频事件由总线节流）
+        tabs.document_opened.connect(
+            lambda fp: self._plugin_event_bus.emit("document.opened", fp)
+        )
+        tabs.document_closed.connect(
+            lambda fp: self._plugin_event_bus.emit("document.closed", fp)
+        )
+        tabs.cursor_position_changed.connect(
+            lambda: self._plugin_event_bus.emit("cursor.changed")
+        )
 
     def _init_menubar(self):
         """初始化菜单栏"""
@@ -563,6 +601,9 @@ class MainWindow(QMainWindow):
             self.showMaximized()
         else:
             self.show()
+
+        # Batch 5（D5）：窗口显示后延迟启动启用插件，插件不进启动关键路径
+        QTimer.singleShot(0, self._activate_enabled_plugins)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -1101,6 +1142,10 @@ class MainWindow(QMainWindow):
         for _category, cmds in all_shortcuts.items():
             for action_id, info in cmds.items():
                 commands.append((info["name"], info["shortcut"], action_id))
+        # 插件命令（无快捷键；显示插件提供的 command_id）
+        for action_id, (plugin_id, command_id, _handler) in self._plugin_commands.items():
+            if self.plugin_manager.get_plugin(plugin_id) is not None:
+                commands.append((command_id, "", action_id))
 
         actual_shortcut = self.shortcut_manager.get_shortcut("command_palette") or "Ctrl+Shift+P"
 
@@ -1126,6 +1171,16 @@ class MainWindow(QMainWindow):
 
     def _dispatch_command(self, action_id: str) -> None:
         """执行命令面板选中的命令。"""
+        entry = self._plugin_commands.get(action_id)
+        if entry is not None:
+            plugin_id, command_id, handler = entry
+            if self.plugin_manager.get_plugin(plugin_id) is None:
+                get_logger(__name__).warning(
+                    "插件命令所属插件已卸载: %s", command_id
+                )
+                return
+            self._safe_plugin_callback(command_id, handler)
+            return
         action = self.shortcut_manager.get_action(action_id)
         if action:
             action.trigger()
@@ -1173,9 +1228,21 @@ class MainWindow(QMainWindow):
         """显示图鉴完成度"""
         QMessageBox.information(self, "提示", "该功能尚在开发中")
 
+    def _emit_plugin_event(self, event_name: str, payload: Any = None) -> None:
+        """派发插件事件；总线未装配（如 __new__ 构造的测试窗口）时安全跳过。
+
+        用 __dict__ 直接读取而非 getattr：__new__ 构造的 PyQt 对象上访问
+        未设置属性会抛 RuntimeError（C++ 部分未初始化），而非返回默认值。
+        """
+        bus = self.__dict__.get("_plugin_event_bus")
+        if bus is not None:
+            bus.emit(event_name, payload)
+
     def _on_file_saved(self):
         """文件保存成功后防抖通知（由 SaveState.CLEAN 回调触发）"""
         self._save_notify_timer.start(300)
+        # Batch 4：文档保存事件（低频率，直接派发）
+        self._emit_plugin_event("document.saved")
 
     def _do_save_notify(self):
         """防抖到期后执行保存通知"""
@@ -1203,6 +1270,8 @@ class MainWindow(QMainWindow):
             self.secretary.show_message(
                 f"已将 {os.path.basename(src_filepath)} 移动到 {os.path.basename(dest_folder)}/"
             )
+            # Batch 4：移动成功 → 文件树变化事件
+            self._emit_plugin_event("file_tree.changed")
 
     def _on_file_copy_from_tree(self, src_filepath: str, dest_folder: str):
         """文件树请求复制文件（标签拖拽到文件夹）"""
@@ -1211,6 +1280,8 @@ class MainWindow(QMainWindow):
             self.secretary.show_message(
                 f"已将 {os.path.basename(src_filepath)} 复制到 {os.path.basename(dest_folder)}/"
             )
+            # Batch 4：复制成功 → 文件树变化事件
+            self._emit_plugin_event("file_tree.changed")
 
     def _on_file_deleted(self, path: str, is_dir: bool):
         """文件树删除文件/文件夹后，同步关闭所有（含分屏）已打开的对应标签页"""
@@ -1394,6 +1465,8 @@ class MainWindow(QMainWindow):
     def _on_content_modified(self):
         """内容修改"""
         self._update_stats()
+        # Batch 4：内容变更事件（高频，由总线 100ms 窗口合并节流）
+        self._emit_plugin_event("content.changed")
 
     def _on_eol_toggled(self, new_eol: str):
         """状态栏 EOL 标签点击切换"""
@@ -1462,11 +1535,180 @@ class MainWindow(QMainWindow):
 
     # === 插件管理 ===
 
-    def _register_plugin_callbacks(self):
-        sandbox = self.plugin_manager._sandbox
-        sandbox.set_open_file_callback(self._plugin_open_file)
-        sandbox.set_show_message_callback(self._plugin_show_message)
-        sandbox.set_register_command_callback(self._plugin_register_command)
+    def _activate_enabled_plugins(self) -> None:
+        """Batch 5（D5）：窗口显示后延迟启动启用插件。
+
+        session 恢复 + 窗口显示已完成，插件能看到恢复后的编辑器/会话状态；
+        插件代码不进入启动关键路径。安全模式插件（上次启动启动阶段异常退出）
+        会被跳过，仅记录日志，由用户在插件管理中手动处理。
+        """
+        manager = self.__dict__.get("plugin_manager")
+        if manager is None:
+            return
+        try:
+            activated = manager.activate_enabled_plugins()
+            if activated:
+                get_logger(__name__).info("已启动插件: %s", ", ".join(activated))
+            safe_mode = manager.get_safe_mode_plugins()
+            if safe_mode:
+                get_logger(__name__).warning(
+                    "插件处于安全模式（上次启动异常退出），已跳过: %s",
+                    ", ".join(safe_mode),
+                )
+        except Exception:
+            get_logger(__name__).exception("启用插件启动失败")
+
+    def _register_plugin_capabilities(self):
+        """将宿主能力注册到 CapabilityRegistry（Wave 5 Batch 1 保留能力）"""
+        registry = self.plugin_manager.registry
+
+        registry.register("app.version", None, lambda: __version__)
+        registry.register(
+            "settings.read",
+            PluginPermission.READ_SETTINGS,
+            self._plugin_settings_impl,
+        )
+        registry.register(
+            "savegame.read",
+            PluginPermission.READ_SAVEGAME,
+            self._plugin_savegame_impl,
+        )
+        registry.register(
+            "workspace.recent_files",
+            PluginPermission.READ_WORKSPACE,
+            lambda: self.config.get_recent_files(),
+        )
+        registry.register(
+            "workspace.open_file",
+            PluginPermission.OPEN_FILE,
+            self._plugin_open_file,
+            copy_result=False,
+        )
+        registry.register(
+            "file_tree.read",
+            PluginPermission.READ_FILE_TREE,
+            lambda: self.config.get_notebooks_path(),
+        )
+        registry.register(
+            "ui.show_message",
+            PluginPermission.SHOW_MESSAGE,
+            self._plugin_show_message,
+            copy_result=False,
+        )
+        registry.register(
+            "ui.register_command",
+            PluginPermission.REGISTER_COMMAND,
+            self._plugin_register_command,
+            copy_result=False,
+            pass_plugin_id=True,
+        )
+        registry.register(
+            "editor.read_text",
+            PluginPermission.EDITOR_READ,
+            self._plugin_editor_read_text,
+        )
+        registry.register(
+            "editor.selection.read",
+            PluginPermission.EDITOR_READ,
+            self._plugin_editor_selection_read,
+        )
+        registry.register(
+            "editor.selection.replace",
+            PluginPermission.EDITOR_WRITE,
+            self._plugin_editor_replace,
+            copy_result=False,
+        )
+        registry.register(
+            "editor.read_path",
+            PluginPermission.EDITOR_READ,
+            self._plugin_editor_read_path,
+        )
+        registry.register(
+            "ui.notify",
+            PluginPermission.UI_NOTIFY,
+            self._plugin_notify,
+            copy_result=False,
+        )
+        registry.register(
+            "ui.register_menu_item",
+            PluginPermission.REGISTER_MENU,
+            self._plugin_register_menu_item,
+            copy_result=False,
+        )
+        # data.read / data.write：内置能力（无需声明），单 JSON 文件 + 1MB 上限
+        # pass_plugin_id：impl 需按调用者插件 id 隔离数据命名空间
+        registry.register(
+            "data.read",
+            None,
+            lambda plugin_id, key: self._plugin_data_impl("read", plugin_id, key),
+            copy_result=False,
+            pass_plugin_id=True,
+        )
+        registry.register(
+            "data.write",
+            None,
+            lambda plugin_id, key, value: self._plugin_data_impl(
+                "write", plugin_id, key, value
+            ),
+            copy_result=False,
+            pass_plugin_id=True,
+        )
+        # event.subscribe：事件订阅（EVENT_SUBSCRIBE，白名单 + 节流由总线控制）
+        registry.register(
+            "event.subscribe",
+            PluginPermission.EVENT_SUBSCRIBE,
+            lambda plugin_id, name, handler: self._plugin_event_bus.subscribe(
+                plugin_id, name, handler
+            ),
+            copy_result=False,
+            pass_plugin_id=True,
+        )
+
+    def _plugin_settings_impl(self, action: str, key: str, default: Any = None):
+        if action == "get":
+            return self.config.get_setting(key, default)
+        if action == "editor":
+            return self.config.get_editor_setting(key, default)
+        if action == "game":
+            return self.config.get_game_setting(key, default)
+        if action == "secretary":
+            return self.config.get_secretary_setting(key, default)
+        raise PluginCapabilityError(f"未知设置读取类型: {action}")
+
+    def _plugin_savegame_impl(self, action: str, key: Optional[str] = None, default: Any = None):
+        if action == "resources":
+            return self.config.get_resources()
+        if action == "field":
+            return self.config.get_savegame_field(cast(str, key), default)
+        raise PluginCapabilityError(f"未知存档读取类型: {action}")
+
+    def _plugin_data_impl(self, action: str, plugin_id: str, key: str, value: Any = None):
+        """data.read / data.write 实现：plugin_data/{plugin_id}/data.json
+
+        - 仅限本插件命名空间（目录由宿主从 plugin_id 派生，插件不可指定路径）
+        - 单 JSON 文件，写盘走 FileGuard.safe_write（原子写）
+        - 1MB 上限；不可 JSON 序列化的值拒绝写入
+        """
+        if not isinstance(key, str) or not key.strip():
+            raise PluginCapabilityError("数据 key 必须为非空字符串")
+        data_dir = os.path.join(
+            self.app_context.path_resolver.get_plugin_data_dir(), plugin_id
+        )
+        data_file = os.path.join(data_dir, "data.json")
+        guard = self._plugin_data_guard
+        if action == "read":
+            return load_json(guard, data_file, {}).get(key)
+        if action == "write":
+            data = load_json(guard, data_file, {})
+            data[key] = value
+            try:
+                save_json(guard, data_file, data)
+            except TypeError as e:
+                raise PluginCapabilityError(f"插件数据无法 JSON 序列化: {e}") from e
+            except FileSizeExceededError as e:
+                raise PluginCapabilityError(f"插件数据超过 1MB 上限: {e}") from e
+            return None
+        raise PluginCapabilityError(f"未知数据操作: {action}")
 
     def _plugin_open_file(self, filepath: str) -> bool:
         try:
@@ -1486,8 +1728,88 @@ class MainWindow(QMainWindow):
     def _plugin_show_message(self, message: str) -> None:
         self.secretary.show_message(message)
 
-    def _plugin_register_command(self, command_id: str, handler) -> None:
-        get_logger(__name__).info("插件注册命令: %s", command_id)
+    def _plugin_register_command(self, plugin_id: str, command_id: str, handler) -> None:
+        """将插件命令接入命令面板。
+
+        - action_id 使用 plugin:{plugin_id}:{command_id} 前缀避免与内置命令冲突
+        - 命令面板显示插件提供的 command_id（建议格式 插件名:动作）
+        - 插件卸载时经 _on_plugin_unloaded 清理，防止 handler 引用泄漏
+        """
+        if not isinstance(command_id, str) or not command_id.strip():
+            raise PluginCapabilityError("命令 id 必须为非空字符串")
+        action_id = f"plugin:{plugin_id}:{command_id}"
+        self._plugin_commands[action_id] = (plugin_id, command_id, handler)
+        get_logger(__name__).info("插件注册命令: %s -> %s", command_id, action_id)
+
+    def _on_plugin_unloaded(self, plugin_id: str) -> None:
+        """插件卸载后清理其注册的命令（unload hook，见 PluginManager.add_unload_hook）。"""
+        removed = [
+            aid
+            for aid, (pid, _cid, _handler) in self._plugin_commands.items()
+            if pid == plugin_id
+        ]
+        for action_id in removed:
+            del self._plugin_commands[action_id]
+        if removed:
+            get_logger(__name__).info(
+                "插件 %s 卸载，清理 %d 个命令", plugin_id, len(removed)
+            )
+
+    def _plugin_editor_read_text(self) -> str:
+        editor = self.editor_tabs.current_editor()
+        return editor.toPlainText() if editor is not None else ""
+
+    def _plugin_editor_selection_read(self) -> str:
+        editor = self.editor_tabs.current_editor()
+        if editor is None:
+            return ""
+        return editor.textCursor().selectedText()
+
+    def _plugin_editor_replace(self, text: str) -> None:
+        editor = self.editor_tabs.current_editor()
+        if editor is None:
+            return
+        cursor = editor.textCursor()
+        cursor.insertText(text)
+        editor.setTextCursor(cursor)
+
+    def _plugin_editor_read_path(self) -> Optional[str]:
+        widget = self.editor_tabs.currentWidget()
+        if widget is None:
+            return None
+        shared_doc = getattr(widget, "shared_doc", None)
+        if shared_doc is None:
+            return None
+        filepath = shared_doc.filepath
+        return str(filepath) if filepath else None
+
+    def _plugin_notify(self, message: str, level: str = "info") -> None:
+        prefix = {"warning": "⚠ ", "error": "✕ "}.get(level, "")
+        status_bar = self.statusBar()
+        if status_bar is not None:
+            status_bar.showMessage(prefix + message, 3000)
+
+    def _plugin_register_menu_item(self, label: str, handler) -> None:
+        mb = self.menuBar()
+        if mb is None:
+            return
+        if self._plugin_menu is None:
+            plugin_menu = mb.addMenu("插件")
+            if plugin_menu is None:
+                return
+            self._plugin_menu = plugin_menu
+        action = QAction(label, self)
+        action.triggered.connect(
+            lambda checked=False, h=handler: self._safe_plugin_callback(label, h)
+        )
+        self._plugin_menu.addAction(action)
+
+    def _safe_plugin_callback(self, label: str, handler) -> None:
+        """命令/菜单/事件回调异常 → 仅 log，插件保持 ACTIVE（D7）"""
+        try:
+            handler()
+        except Exception:
+            get_logger(__name__).exception("插件回调异常: %s", label)
 
     def _show_plugin_manager(self):
         from .plugins.plugin_manager_dialog import PluginManagerDialog

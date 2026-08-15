@@ -296,6 +296,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     cursor_position_changed = pyqtSignal()
     word_count_updated = pyqtSignal()
     file_saved = pyqtSignal()
+    # Batch 4：文档打开/关闭事件（filepath；未命名文档不触发）
+    document_opened = pyqtSignal(str)
+    document_closed = pyqtSignal(str)
 
     def __init__(
         self,
@@ -760,6 +763,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             self.setCurrentIndex(index)
         self.tab_count_changed.emit(self.count())
         self._update_tab_tooltip(index)
+        # Batch 4：文档打开事件（仅带路径文档）
+        self.document_opened.emit(filepath)
 
         # 恢复书签
         saved_bookmarks = self.config.get_bookmarks(filepath)
@@ -860,6 +865,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             self.setCurrentIndex(index)
         self.tab_count_changed.emit(self.count())
         self._update_tab_tooltip(index)
+        # Batch 4：跨面板共享视图打开同一文档也视为 document.opened
+        if shared_doc.filepath:
+            self.document_opened.emit(shared_doc.filepath)
         return int(index)
 
     def save_current(self) -> Tuple[bool, int]:
@@ -1760,6 +1768,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self._save_manager.unregister_tab(tab_id)
         self.removeTab(index)
         self.tab_count_changed.emit(self.count())
+        # Batch 4：最后一个 View 关闭 → document.closed（未命名文档不触发）
+        if shared_doc.filepath:
+            self.document_closed.emit(shared_doc.filepath)
         # 3.5.8（批次 4c）：最后一个 View 关闭 → 销毁 Document
         # 批次 5 修复：最后 View 关闭前断开 Document 依赖，防高亮悬垂
         self._detach_shared_from_widget(widget)

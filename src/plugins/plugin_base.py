@@ -4,15 +4,25 @@
 
 定义插件生命周期接口、元数据规范和权限枚举。
 所有插件必须继承 PluginBase 并实现生命周期方法。
+
+Wave 5（Batch 1）变更：
+- manifest 权限字段由 permissions 改为 capabilities（能力 id 列表，D6）；
+  插件清单不再出现 permissions 字段。
+- PluginPermission 重组为保留能力所需的最小集（GET_CONFIG / ACCESS_* 移除，
+  ACCESS_* 细化在 Batch 2 以 EDITOR_READ 等替代）。
+- PluginBase 暴露 ctx（PluginContext），原 PluginAPI 命名废弃（D4）。
 """
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from .. import __version__ as _app_version
 from ..utils.logger import get_logger
+
+if TYPE_CHECKING:
+    from .plugin_context import PluginContext
 
 
 class PluginState(Enum):
@@ -28,14 +38,9 @@ class PluginPermission(Enum):
     READ_SAVEGAME = "read_savegame"
     READ_WORKSPACE = "read_workspace"
     READ_FILE_TREE = "read_file_tree"
-    ACCESS_EDITOR = "access_editor"
-    ACCESS_UI = "access_ui"
-    ACCESS_NETWORK = "access_network"
-    ACCESS_FILESYSTEM = "access_filesystem"
     OPEN_FILE = "open_file"
     SHOW_MESSAGE = "show_message"
     REGISTER_COMMAND = "register_command"
-    GET_CONFIG = "get_config"
 
 
 @dataclass
@@ -46,7 +51,7 @@ class PluginMeta:
     author: str = ""
     homepage: str = ""
     min_app_version: str = field(default_factory=lambda: _app_version)
-    permissions: List[PluginPermission] = field(default_factory=list)
+    capabilities: List[str] = field(default_factory=list)
     tags: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -57,18 +62,15 @@ class PluginMeta:
             "author": self.author,
             "homepage": self.homepage,
             "min_app_version": self.min_app_version,
-            "permissions": [p.value for p in self.permissions],
+            "capabilities": list(self.capabilities),
             "tags": self.tags,
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "PluginMeta":
-        perms = []
-        for p in data.get("permissions", []):
-            try:
-                perms.append(PluginPermission(p))
-            except ValueError:
-                get_logger(__name__).debug("忽略无效插件权限: %s", p)
+        capabilities = data.get("capabilities", [])
+        if not isinstance(capabilities, list):
+            capabilities = []
         return cls(
             name=data["name"],
             version=data["version"],
@@ -76,7 +78,7 @@ class PluginMeta:
             author=data.get("author", ""),
             homepage=data.get("homepage", ""),
             min_app_version=data.get("min_app_version", _app_version),
-            permissions=perms,
+            capabilities=[str(c) for c in capabilities],
             tags=data.get("tags", []),
         )
 
@@ -84,7 +86,7 @@ class PluginMeta:
 class PluginBase(ABC):
     def __init__(self):
         self._state: PluginState = PluginState.UNLOADED
-        self._api: Optional[Any] = None
+        self._ctx: Optional["PluginContext"] = None
         self._meta: Optional[PluginMeta] = None
 
     @property
@@ -96,12 +98,12 @@ class PluginBase(ABC):
         self._state = value
 
     @property
-    def api(self) -> Any:
-        return self._api
+    def ctx(self) -> Optional["PluginContext"]:
+        return self._ctx
 
-    @api.setter
-    def api(self, value: Any):
-        self._api = value
+    @ctx.setter
+    def ctx(self, value: Optional["PluginContext"]):
+        self._ctx = value
 
     @property
     def meta(self) -> Optional[PluginMeta]:
@@ -115,8 +117,8 @@ class PluginBase(ABC):
     def get_meta(self) -> PluginMeta:
         raise NotImplementedError
 
-    def on_load(self, api: Any) -> None:
-        self._api = api
+    def on_load(self, ctx: "PluginContext") -> None:
+        self._ctx = ctx
         self._meta = self.get_meta()
         self._state = PluginState.LOADED
 
@@ -128,4 +130,4 @@ class PluginBase(ABC):
 
     def on_unload(self) -> None:
         self._state = PluginState.UNLOADED
-        self._api = None
+        self._ctx = None

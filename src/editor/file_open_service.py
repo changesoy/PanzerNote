@@ -4,7 +4,7 @@
 统一文件打开入口，所有用户打开、拖放、插件、会话恢复、设置导入
 文件访问都走本服务，不再由各调用方各自绕开安全逻辑。
 
-创建者：MainWindow / PluginAPI / FileTree / EditorTabWidget
+创建者：MainWindow / PluginContext / FileTree / EditorTabWidget
 持有者：MainWindow（单例生命周期）
 完成通知：同步返回
 失败通知：抛出 FileOpenSecurityError / 返回 False

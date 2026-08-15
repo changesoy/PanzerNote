@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer, QEvent, pyqtSignal, QPoint, QRect
 from PyQt6.QtGui import QIcon, QCloseEvent, QAction
-from typing import Optional, cast
+from typing import Any, Optional, cast
 
 from . import __version__
 from .core.document_registry import DocumentRegistry
@@ -43,6 +43,8 @@ from .editor.export_action_controller import ExportActionController
 from .editor.edit_action_controller import EditActionController
 from .editor.settings_action_controller import SettingsActionController
 from .plugins.plugin_manager import PluginManager
+from .plugins.plugin_base import PluginPermission
+from .plugins.capability_registry import PluginCapabilityError
 from .themes.theme_engine import ThemeEngine
 from .themes.theme_preview import ThemePreviewDialog
 from .ui.command_palette import CommandPalette
@@ -113,7 +115,7 @@ class MainWindow(QMainWindow):
 
         self.plugin_manager = PluginManager(self.config)
         self.plugin_manager.scan_plugins()
-        self._register_plugin_callbacks()
+        self._register_plugin_capabilities()
 
         self._save_notify_timer = QTimer(self)
         self._save_notify_timer.setSingleShot(True)
@@ -1462,11 +1464,67 @@ class MainWindow(QMainWindow):
 
     # === 插件管理 ===
 
-    def _register_plugin_callbacks(self):
-        sandbox = self.plugin_manager._sandbox
-        sandbox.set_open_file_callback(self._plugin_open_file)
-        sandbox.set_show_message_callback(self._plugin_show_message)
-        sandbox.set_register_command_callback(self._plugin_register_command)
+    def _register_plugin_capabilities(self):
+        """将宿主能力注册到 CapabilityRegistry（Wave 5 Batch 1 保留能力）"""
+        registry = self.plugin_manager.registry
+
+        registry.register("app.version", None, lambda: __version__)
+        registry.register(
+            "settings.read",
+            PluginPermission.READ_SETTINGS,
+            self._plugin_settings_impl,
+        )
+        registry.register(
+            "savegame.read",
+            PluginPermission.READ_SAVEGAME,
+            self._plugin_savegame_impl,
+        )
+        registry.register(
+            "workspace.recent_files",
+            PluginPermission.READ_WORKSPACE,
+            lambda: self.config.get_recent_files(),
+        )
+        registry.register(
+            "workspace.open_file",
+            PluginPermission.OPEN_FILE,
+            self._plugin_open_file,
+            copy_result=False,
+        )
+        registry.register(
+            "file_tree.read",
+            PluginPermission.READ_FILE_TREE,
+            lambda: self.config.get_notebooks_path(),
+        )
+        registry.register(
+            "ui.show_message",
+            PluginPermission.SHOW_MESSAGE,
+            self._plugin_show_message,
+            copy_result=False,
+        )
+        registry.register(
+            "ui.register_command",
+            PluginPermission.REGISTER_COMMAND,
+            self._plugin_register_command,
+            copy_result=False,
+        )
+
+    def _plugin_settings_impl(self, action: str, key: str, default: Any = None):
+        if action == "get":
+            return self.config.get_setting(key, default)
+        if action == "editor":
+            return self.config.get_editor_setting(key, default)
+        if action == "game":
+            return self.config.get_game_setting(key, default)
+        if action == "secretary":
+            return self.config.get_secretary_setting(key, default)
+        raise PluginCapabilityError(f"未知设置读取类型: {action}")
+
+    def _plugin_savegame_impl(self, action: str, key: Optional[str] = None, default: Any = None):
+        if action == "resources":
+            return self.config.get_resources()
+        if action == "field":
+            return self.config.get_savegame_field(cast(str, key), default)
+        raise PluginCapabilityError(f"未知存档读取类型: {action}")
 
     def _plugin_open_file(self, filepath: str) -> bool:
         try:

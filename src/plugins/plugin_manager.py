@@ -3,8 +3,12 @@
 插件管理器
 
 负责插件的扫描、加载、激活、停用和卸载。
-支持从 plugins/ 目录递归扫描插件包，验证完整性，
-提供热加载机制。
+支持从 plugins/ 目录递归扫描插件包，验证完整性，提供热加载机制。
+
+Wave 5（Batch 1）变更：
+- 移除 PluginSandbox 线程包装 / 30s 超时（D3），lifecycle 全部在主线程直调。
+- 装配命名空间式 PluginContext（D4），manifest 权限字段改为 capabilities（D6）。
+- 异常隔离两层规则（D7）：生命周期异常 → ERROR；回调异常 → 仅 log（不自动禁插件，D8）。
 """
 
 import importlib
@@ -15,8 +19,9 @@ import sys
 from typing import Any, Dict, List, Optional, Type, cast
 
 from ..utils.logger import get_logger
+from .capability_registry import CapabilityRegistry
 from .plugin_base import PluginBase, PluginMeta, PluginPermission, PluginState
-from .plugin_sandbox import PluginAPI, PluginSandbox, SandboxTimeoutError, SandboxViolationError
+from .plugin_context import PluginContext
 
 
 class PluginLoadError(Exception):
@@ -41,8 +46,12 @@ class PluginManager:
         self._plugins: Dict[str, PluginBase] = {}
         self._manifests: Dict[str, Dict] = {}
         self._disabled_plugins: set = set()
-        self._sandbox = PluginSandbox(config, timeout=30)
+        self._registry = CapabilityRegistry()
         self._logger = get_logger(__name__)
+
+    @property
+    def registry(self) -> CapabilityRegistry:
+        return self._registry
 
     @property
     def plugins_dir(self) -> str:
@@ -91,31 +100,25 @@ class PluginManager:
             plugin = plugin_class()
             plugin.meta = plugin.get_meta()
 
-            api = self._sandbox.create_api(plugin)
-            self._sandbox.safe_load(plugin, api)
+            self._registry.authorize(plugin_id, manifest.get("capabilities", []))
+            ctx = PluginContext(plugin_id, manifest["version"], self._registry)
+            plugin.on_load(ctx)
 
             self._plugins[plugin_id] = plugin
             self._disabled_plugins.discard(plugin_id)
             self._logger.info("插件已加载: %s", plugin_id)
             return plugin
 
-        except SandboxTimeoutError as e:
-            self._disabled_plugins.add(plugin_id)
-            self._logger.warning(
-                "插件 %s 加载超时，已禁用后续调用，建议重启应用: %s",
-                plugin_id, e,
-            )
-            raise PluginLoadError(
-                f"加载插件 {plugin_id} 超时，已禁用该插件后续调用。建议重启应用以清理残留线程。"
-            ) from e
         except Exception as e:
+            if plugin_id in self._plugins:
+                self._plugins[plugin_id].state = PluginState.ERROR
             raise PluginLoadError(f"加载插件 {plugin_id} 失败: {e}") from e
 
     def activate_plugin(self, plugin_id: str) -> None:
         plugin = self._get_plugin(plugin_id)
         if plugin_id in self._disabled_plugins:
             raise PluginLoadError(
-                f"插件 {plugin_id} 因超时已被禁用，请重启应用后再试"
+                f"插件 {plugin_id} 处于安全模式（上次启动异常），请先在插件管理中处理"
             )
         if plugin.state == PluginState.ACTIVATED:
             self._logger.info("插件已激活: %s", plugin_id)
@@ -125,20 +128,11 @@ class PluginManager:
                 f"插件 {plugin_id} 状态为 {plugin.state.name}，无法激活"
             )
         try:
-            self._sandbox.safe_activate(plugin)
+            plugin.on_activate()
             self._logger.info("插件已激活: %s", plugin_id)
-        except SandboxTimeoutError as e:
-            plugin.state = PluginState.ERROR
-            self._disabled_plugins.add(plugin_id)
-            self._logger.warning(
-                "插件 %s 激活超时，已禁用后续调用，建议重启应用: %s",
-                plugin_id, e,
-            )
-            raise PluginLoadError(
-                f"激活插件 {plugin_id} 超时，已禁用该插件后续调用。建议重启应用以清理残留线程。"
-            ) from e
         except Exception as e:
             plugin.state = PluginState.ERROR
+            self._logger.exception("激活插件 %s 失败: %s", plugin_id, e)
             raise PluginLoadError(f"激活插件 {plugin_id} 失败: {e}") from e
 
     def deactivate_plugin(self, plugin_id: str) -> None:
@@ -146,18 +140,11 @@ class PluginManager:
         if plugin.state != PluginState.ACTIVATED:
             return
         try:
-            self._sandbox.safe_deactivate(plugin)
+            plugin.on_deactivate()
             self._logger.info("插件已停用: %s", plugin_id)
-        except SandboxTimeoutError as e:
-            plugin.state = PluginState.ERROR
-            self._disabled_plugins.add(plugin_id)
-            self._logger.warning(
-                "插件 %s 停用超时，已禁用后续调用，建议重启应用: %s",
-                plugin_id, e,
-            )
         except Exception as e:
             plugin.state = PluginState.ERROR
-            self._logger.warning("停用插件 %s 失败: %s", plugin_id, e)
+            self._logger.exception("停用插件 %s 失败: %s", plugin_id, e)
 
     def unload_plugin(self, plugin_id: str) -> None:
         if plugin_id not in self._plugins:
@@ -166,10 +153,11 @@ class PluginManager:
         if plugin.state == PluginState.ACTIVATED:
             self.deactivate_plugin(plugin_id)
         try:
-            self._sandbox.safe_unload(plugin)
-        except (SandboxTimeoutError, Exception) as e:
-            self._logger.warning("卸载插件 %s 失败: %s", plugin_id, e)
+            plugin.on_unload()
+        except Exception as e:
+            self._logger.exception("卸载插件 %s 失败: %s", plugin_id, e)
         finally:
+            self._registry.revoke(plugin_id)
             del self._plugins[plugin_id]
             self._logger.info("插件已卸载: %s", plugin_id)
 
@@ -241,14 +229,12 @@ class PluginManager:
         if not isinstance(entry, str) or not entry.strip():
             raise PluginValidationError("插件入口无效")
 
-        perms = manifest.get("permissions", [])
-        if not isinstance(perms, list):
-            raise PluginValidationError("permissions 必须为列表")
-        for p in perms:
-            try:
-                PluginPermission(p)
-            except ValueError:
-                raise PluginValidationError(f"无效权限: {p}")
+        caps = manifest.get("capabilities", [])
+        if not isinstance(caps, list):
+            raise PluginValidationError("capabilities 必须为列表")
+        for cap in caps:
+            if not isinstance(cap, str) or not cap.strip():
+                raise PluginValidationError(f"无效能力声明: {cap}")
 
     def _find_plugin_path(self, plugin_id: str) -> str:
         return os.path.join(self._plugins_dir, self._find_plugin_dir(plugin_id))

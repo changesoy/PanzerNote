@@ -691,7 +691,7 @@ LOADED → on_unload() → UNLOADED
 #### 4.12.5 插件管理器 (`plugins/plugin_manager.py`)
 
 - `scan_plugins()` — 从 `plugins/` 目录递归扫描插件包（仅填 manifest 清单，启动阶段不加载）；检测残留启动 marker → 插件进入安全模式
-- `load_plugin(name)` — 加载插件（验证清单、版本兼容、`authorize(capabilities)`、装配 PluginContext、`on_load(ctx)`；on_load 前写入启动 marker）
+- `load_plugin(name)` — 加载插件（导入入口类、构造 PluginMeta、`authorize(capabilities)`、装配 PluginContext、`on_load(ctx)`；on_load 前写入启动 marker；manifest 校验在扫描阶段完成）
 - `activate_plugin(name)` / `deactivate_plugin(name)` — 激活/停用（on_activate 成功后清除启动 marker）
 - `unload_plugin(name)` — 卸载（`on_unload()` + 自动解绑事件订阅 + 撤销授权）
 - `reload_plugin(name)` — 热加载（停用→卸载→清除模块缓存→重新加载→恢复状态）

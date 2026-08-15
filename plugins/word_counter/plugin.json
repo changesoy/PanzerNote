@@ -4,7 +4,7 @@
   "description": "字数统计能力示例插件 - 展示编辑器交互权限，提供文档字数统计功能接口",
   "author": "PanzerNote Team",
   "entry": "main.py",
-  "min_app_version": "1.6.4",
+  "min_app_version": "2.0.0",
   "capabilities": ["editor.read_text"],
   "tags": ["demo", "ui", "editor"]
 }

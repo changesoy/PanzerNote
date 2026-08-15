@@ -5,6 +5,6 @@
   "author": "PanzerNote Team",
   "entry": "main.py",
   "min_app_version": "1.6.4",
-  "permissions": ["read_settings", "read_savegame"],
+  "capabilities": ["app.version", "settings.read", "savegame.read"],
   "tags": ["demo", "basic"]
 }

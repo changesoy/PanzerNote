@@ -11,6 +11,7 @@ v1.5.4 改动：
 
 import os
 import html as html_module
+import gc
 from functools import partial
 import shiboken6  # type: ignore[import-not-found]  # 显式依赖（requirements.txt），mypy 无 stub
 from PyQt6.QtWidgets import (
@@ -909,7 +910,6 @@ class MainWindow(QMainWindow):
     def _release_memory(self):
         """释放占用内存"""
         self.editor_tabs.release_memory()
-        import gc
         gc.collect()
         self.secretary.show_message("已释放内存占用")
 
@@ -1198,7 +1198,6 @@ class MainWindow(QMainWindow):
 
     def _on_file_move_from_tree(self, src_filepath: str, dest_folder: str):
         """文件树请求移动文件（标签拖拽到文件夹）"""
-        import os
         success = self.editor_tabs.move_file_to_folder(src_filepath, dest_folder)
         if success:
             self.secretary.show_message(
@@ -1207,7 +1206,6 @@ class MainWindow(QMainWindow):
 
     def _on_file_copy_from_tree(self, src_filepath: str, dest_folder: str):
         """文件树请求复制文件（标签拖拽到文件夹）"""
-        import os
         success = self.editor_tabs.copy_file_to_folder(src_filepath, dest_folder)
         if success:
             self.secretary.show_message(

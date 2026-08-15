@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import os
-from typing import Callable, Optional
+from typing import Any, Callable, Dict, Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont
@@ -57,6 +57,7 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
         self._get_open_files = get_open_files or (lambda: [])
         self._get_recent_files = get_recent_files or (lambda: [])
         self._worker: Optional[FindInFilesWorker] = None
+        self._retiring_workers: set[FindInFilesWorker] = set()
         self._debounce = QTimer(self)
         self._debounce.setSingleShot(True)
         self._debounce.setInterval(300)
@@ -115,6 +116,30 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
 
         layout.addLayout(opts_layout)
 
+        # --- 文件过滤行（include / exclude glob） ---
+        filters_layout = QHBoxLayout()
+        filters_layout.setSpacing(4)
+
+        include_label = QLabel("包含:")
+        include_label.setStyleSheet("font-size: 11px; color: #888;")
+        filters_layout.addWidget(include_label)
+        self._include_input = QLineEdit()
+        self._include_input.setPlaceholderText("如 *.py, src/**")
+        self._include_input.setToolTip("只搜索匹配的文件（逗号分隔 glob，留空不限）")
+        self._include_input.textChanged.connect(self._on_option_changed)
+        filters_layout.addWidget(self._include_input, 1)
+
+        exclude_label = QLabel("排除:")
+        exclude_label.setStyleSheet("font-size: 11px; color: #888;")
+        filters_layout.addWidget(exclude_label)
+        self._exclude_input = QLineEdit()
+        self._exclude_input.setPlaceholderText("如 *.min.js, dist")
+        self._exclude_input.setToolTip("排除匹配的文件/目录（逗号分隔 glob，留空不排除）")
+        self._exclude_input.textChanged.connect(self._on_option_changed)
+        filters_layout.addWidget(self._exclude_input, 1)
+
+        layout.addLayout(filters_layout)
+
         # --- 结果树 ---
         self._tree = QTreeWidget()
         self._tree.setHeaderHidden(True)
@@ -161,6 +186,17 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
         if self._search_input.text():
             self._debounce.start()
 
+    def _search_kwargs(self) -> Dict[str, Any]:
+        """构建 worker 公共搜索选项（含文件过滤与超时保护）。"""
+        return {
+            "case_sensitive": self._case_cb.isChecked(),
+            "whole_word": self._word_cb.isChecked(),
+            "use_regex": self._regex_cb.isChecked(),
+            "include": self._include_input.text(),
+            "exclude": self._exclude_input.text(),
+            "timeout": 60.0,
+        }
+
     def _do_search(self) -> None:
         query = self._search_input.text()
         if not query:
@@ -179,10 +215,8 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
             root_dir = self._get_workspace_root()
             self._worker = FindInFilesWorker(
                 root_dir, query,
-                case_sensitive=self._case_cb.isChecked(),
-                whole_word=self._word_cb.isChecked(),
-                use_regex=self._regex_cb.isChecked(),
                 file_list=file_list,
+                **self._search_kwargs(),
             )
         elif scope == self.SCOPE_RECENT:
             file_list = self._get_recent_files()
@@ -192,10 +226,8 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
             root_dir = self._get_workspace_root()
             self._worker = FindInFilesWorker(
                 root_dir, query,
-                case_sensitive=self._case_cb.isChecked(),
-                whole_word=self._word_cb.isChecked(),
-                use_regex=self._regex_cb.isChecked(),
                 file_list=file_list,
+                **self._search_kwargs(),
             )
         else:
             root_dir = self._get_workspace_root()
@@ -204,9 +236,7 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
                 return
             self._worker = FindInFilesWorker(
                 root_dir, query,
-                case_sensitive=self._case_cb.isChecked(),
-                whole_word=self._word_cb.isChecked(),
-                use_regex=self._regex_cb.isChecked(),
+                **self._search_kwargs(),
             )
 
         self._worker.result_found.connect(self._add_result)
@@ -216,16 +246,44 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
         self._cancel_btn.setVisible(True)
         self._status_label.setText("搜索中…")
 
-    def _cancel_search(self) -> None:
-        if self._worker is not None and self._worker.isRunning():
-            self._worker.cancel()
-            self._worker.wait(2000)
+    def _cancel_search(self, wait: bool = False) -> None:
+        """取消当前搜索。默认不阻塞主线程；wait=True 时等待线程结束（仅窗口关闭场景）。
+
+        被取消的 worker 转入 _retiring_workers 持有引用，等其自然结束后清理，
+        避免 QThread 在运行中被销毁。
+        """
+        worker = self._worker
         self._worker = None
         self._cancel_btn.setVisible(False)
+        if worker is not None:
+            self._status_label.setText("已取消")
+        if worker is not None and worker.isRunning():
+            worker.cancel()
+            self._retiring_workers.add(worker)
+            worker.finished.connect(lambda w=worker: self._on_retiring_finished(w))
+            if wait:
+                worker.wait()
+        if wait:
+            for w in list(self._retiring_workers):
+                w.wait()
+
+    def _on_retiring_finished(self, worker: FindInFilesWorker) -> None:
+        """已淘汰 worker 线程结束后释放。"""
+        self._retiring_workers.discard(worker)
+        worker.deleteLater()
 
     def _on_search_done(self, total: int) -> None:
+        sender = self.sender()
+        if sender is not self._worker:
+            # 已淘汰 worker 的迟到完成信号，忽略（清理由 finished 信号处理）
+            return
         self._cancel_btn.setVisible(False)
+        timed_out = bool(sender is not None and sender.timed_out)
         self._worker = None
+        if timed_out:
+            self._status_label.setText("搜索超时，已自动停止（显示部分结果）")
+            self._tree.expandAll()
+            return
         if total == 0:
             self._status_label.setText("未找到匹配项")
         else:
@@ -239,6 +297,9 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
     # ------------------------------------------------------------------
 
     def _add_result(self, filepath: str, line_num: int, col: int, line_text: str) -> None:
+        # 忽略已淘汰 worker 的迟到结果（当前搜索启动后到达的旧信号）
+        if self._worker is None or self.sender() is not self._worker:
+            return
         # 找到或创建文件分组节点
         file_node = self._find_file_node(filepath)
         if file_node is None:
@@ -300,5 +361,6 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
         self._search_input.selectAll()
 
     def closeEvent(self, event) -> None:
-        self._cancel_search()
+        # 窗口关闭属于低频操作，等待线程结束再析构，避免运行中销毁 QThread
+        self._cancel_search(wait=True)
         super().closeEvent(event)

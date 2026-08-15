@@ -21,9 +21,12 @@ _FLAGS: Dict[str, bool] = {
     "lazy_highlight": False,
     "minimap_block_cache": True,
     "async_highlight": False,
-    "markdown_incremental": False,
+    "markdown_incremental": True,
     "lazy_loading": False,
     "signal_driven_stats": True,
+    # Wave 4 E3：大文件模式（达 LARGE_FILE_THRESHOLD 行自动降级补全/折叠/
+    # Minimap/预览）。行为开关，默认关闭；可配置可回退（设置对话框「大文件」）。
+    "large_file_mode": False,
 }
 
 _FLAG_ALIASES: Dict[str, str] = {}

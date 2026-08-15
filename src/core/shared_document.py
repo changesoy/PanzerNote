@@ -35,7 +35,6 @@ class SaveSnapshot:
     """保存开始时捕获的快照（写盘的是这个版本的内容）"""
 
     content: str
-    content_version: int
     filepath: Optional[str]
     encoding: str
 
@@ -106,6 +105,11 @@ class SharedDocument(QObject):
         # core 层不依赖 editor，由 editor 层首次 attach 时创建并写入（同 _highlighter 模式）。
         self._folding: Optional[object] = None
 
+        # lazy 高亮 Document 级协调器（Wave 4 E2）：分屏多 View 共享同一 Document 时，
+        # 各 View 可视区 union 增量高亮。core 层不依赖 editor，由 editor 层首次
+        # attach 时惰性创建并写入（同 _folding 模式），无大文件时不创建。
+        self._lazy_coordinator: Optional[object] = None
+
         # 书签（3.5.8 批次 5 收敛）：Document 级（规格 2.12）——两个 View 看同一份。
         self._bookmarks: Set[int] = set()
 
@@ -122,8 +126,12 @@ class SharedDocument(QObject):
         self._dirty: bool = False
         self._save_status: SaveStatus = SaveStatus.IDLE
         self.pending_save: bool = False
-        self.last_saved_snapshot: Optional[SaveSnapshot] = None
-        self.content_version: int = 0
+
+        # 保存统计（D3a：迁移至 Document 级——内容共享，字数增量 / 新字数
+        # 按 Document 粒度统计，避免跨 View 漏计/重计）。
+        # 初始值 = 创建时内容长度（对应构造时的 last_saved_chars）。
+        self.last_saved_chars: int = len(content)
+        self.last_text_length: int = len(content)
 
         # 信号源：只监听共享 QTextDocument 一次（不监听各 View）
         self.qdocument.contentsChanged.connect(self._on_contents_changed)
@@ -151,21 +159,12 @@ class SharedDocument(QObject):
         self._word_count_dirty = True
 
     @property
-    def folding(self) -> Optional[object]:
-        """Document 级折叠管理器（规格 2.10）。
-
-        editor 层首次 attach 时创建并写入 _folding（core 不依赖 editor）；未创建
-        返回 None，调用方（View）需回退到本地折叠管理器。
-        """
-        return self._folding
-
-    @property
     def bookmarks(self) -> "set[int]":
         """Document 级书签（规格 2.12）：两个 View 看同一份书签。"""
         return self._bookmarks
 
     def set_content(self, content: str) -> None:
-        """程序化设置内容（打开文件 / 外部 reload），复位修改状态与版本。
+        """程序化设置内容（打开文件 / 外部 reload），复位修改状态。
 
         blockSignals 防止 setPlainText（置 modified=True）与复位产生
         中间 dirtyChanged(True) 闪烁信号（reload 时 View 会短暂误标脏）。
@@ -177,7 +176,8 @@ class SharedDocument(QObject):
         finally:
             self.qdocument.blockSignals(False)
         self._dirty = False
-        self.content_version = 0
+        self.last_saved_chars = len(content)
+        self.last_text_length = len(content)
         self._invalidate_word_count()
         self.contentChanged.emit()
         self.dirtyChanged.emit(False)  # reload 后订阅方需收到"变干净"通知
@@ -185,7 +185,6 @@ class SharedDocument(QObject):
     # ═══════════════ 信号槽（QTextDocument → SharedDocument） ═══════════════
 
     def _on_contents_changed(self) -> None:
-        self.content_version += 1
         self._invalidate_word_count()
         self.contentChanged.emit()
 
@@ -221,7 +220,6 @@ class SharedDocument(QObject):
         self._set_save_status(SaveStatus.SAVING)
         return SaveSnapshot(
             content=self.to_plain_text(),
-            content_version=self.content_version,
             filepath=self.filepath,
             encoding=self.encoding,
         )
@@ -232,7 +230,9 @@ class SharedDocument(QObject):
         dirty 最终 authority = saved snapshot：
         current == snapshot → clean；否则保持 dirty（保存成功 ≠ 当前 clean）。
         """
-        self.last_saved_snapshot = snapshot
+        # D3a：保存统计随成功保存更新（对应 mark_saved 语义）
+        self.last_saved_chars = len(snapshot.content)
+        self.last_text_length = len(snapshot.content)
         retry = False
         if self.to_plain_text() == snapshot.content:
             # 先复位 _dirty 再 setModified(False)：槽内 `_dirty != modified` 为 False，
@@ -254,15 +254,6 @@ class SharedDocument(QObject):
         self._dirty = True
         self.dirtyChanged.emit(True)
         self._set_save_status(SaveStatus.FAILED)
-
-    def reset_save_state(self) -> None:
-        """强制回到 IDLE 且 clean（未命名空标签直接关闭等场景）。"""
-        self.pending_save = False
-        self._dirty = False
-        self.qdocument.setModified(False)
-        self.last_saved_snapshot = None
-        self._set_save_status(SaveStatus.IDLE)
-        self.dirtyChanged.emit(False)
 
     # ═══════════════ 路径 / 名称 ═══════════════
 

@@ -21,6 +21,7 @@ v1.6.2 改动：
 import os
 import re
 import time
+import json
 import html as html_module
 from typing import Optional, Union
 
@@ -90,6 +91,7 @@ from .secure_markdown_renderer import (
     MARKDOWN_LAYOUT_CSS as _MARKDOWN_LAYOUT_CSS,
     strip_dangerous_html as _strip_dangerous_html,
 )
+from .document_render_cache import _DOC_RENDER_CACHE, clear_document_render_cache
 
 
 def _extract_language_from_code_attrs(attrs: str) -> str:
@@ -489,6 +491,16 @@ window.updateFoldVisibility = function(collapsedLinesJson) {{
 
 (function() {{
     document.addEventListener('click', function(e) {{
+        // 链接点击 → 外部浏览器打开（经 document.title 桥回传，阻止 WebEngine 内部导航）
+        var a = e.target.closest('a');
+        if (a) {{
+            var href = a.getAttribute('href');
+            if (href != null && href.charAt(0) !== '#') {{
+                e.preventDefault();
+                document.title = '__pnopen__:' + href;
+                return;
+            }}
+        }}
         var btn = e.target.closest('.code-copy-btn');
         if (!btn) return;
         e.stopPropagation();
@@ -765,11 +777,11 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self._base_path = ""
         self._async_renderer = None
         self._pending_async_task: Optional[str] = None
-        self._render_cache = None
+        self._last_render_text: str = ""
+        self._last_render_html: str = ""
         self._md_parser = self._create_md_parser()
         self._html_template_loaded = False
         self._preview_dirty = True
-        self._initial_preview_rendered = False
         self._last_sync_frac: float = 1.0
         self._last_at_top: bool = True
         self._last_at_bottom: bool = False
@@ -786,13 +798,6 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         if is_enabled("async_highlight"):
             from .async_highlight import AsyncHighlightRenderer
             self._async_renderer = AsyncHighlightRenderer(self)
-            self._async_renderer.result_ready.connect(self._on_async_highlight_ready)
-
-        if is_enabled("markdown_incremental"):
-            from .incremental_renderer import RenderCache
-            self._render_cache = RenderCache(
-                self._render_markdown_with_source_map, cache_size=50
-            )
 
         self._init_ui()
         self._connect_signals()
@@ -885,6 +890,8 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
     def _apply_theme_colors(self, colors):
         if isinstance(self.preview, PreviewBrowser):
             self.preview._apply_copy_btn_style(colors)
+        # 主题变更时清空 Document 级渲染缓存（高亮颜色/折叠样式依赖主题）
+        clear_document_render_cache()
         # 主题变更时重建预览以应用新 CSS（重置标志让 _push_to_preview 走 setHtml 路径）
         self._html_template_loaded = False
         if getattr(self, 'editor', None) is not None:
@@ -904,7 +911,6 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         if hasattr(self, "_preview_timer"):
             self._preview_timer.stop()
         self._update_preview()
-        self._initial_preview_rendered = True
 
     def invalidate_preview(self) -> None:
         self._preview_dirty = True
@@ -914,10 +920,14 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             return
 
         self._preview_dirty = False
-        self._initial_preview_rendered = True
         self.refresh_preview_now()
 
     def _on_text_changed(self):
+        # Wave 4 E3：大文件模式暂停自动刷新（大文件 md 全量渲染高成本），
+        # 保留 refresh_preview_now() 手动刷新入口。
+        editor = getattr(self, "editor", None)
+        if editor is not None and editor.is_large_file_mode():
+            return
         self._preview_timer.start()
 
     def resizeEvent(self, event):
@@ -934,10 +944,23 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
 
     def _update_preview(self):
         text = self.editor.toPlainText()
+        doc = self.editor.document()
+        if doc is not None and is_enabled("markdown_incremental"):
+            # Document 级缓存：同一 SharedDocument 多 View 共用，内容未变跳过渲染
+            html_content = _DOC_RENDER_CACHE.get_or_render(
+                doc, doc.revision(), lambda: self._render_full(text)
+            )
+        else:
+            html_content = self._render_full(text)
+        self._push_to_preview(html_content)
 
-        if self._render_cache and is_enabled("markdown_incremental"):
-            html_content = self._render_cache.render(text)
-        elif HAS_MARKDOWN_IT or HAS_MARKDOWN:
+    def _render_full(self, text: str) -> str:
+        """完整渲染流程（渲染 → 高亮 → 图片 → 折叠），最终产物整体可被 Document 缓存复用。"""
+        # widget 层快路径：同一 widget 连续相同文本秒回（同 revision 已由 Document 缓存覆盖）
+        if text == self._last_render_text:
+            return self._last_render_html
+
+        if HAS_MARKDOWN_IT or HAS_MARKDOWN:
             html_content = self._render_markdown_with_source_map(text)
         else:
             html_content = self._basic_md_to_html(text)
@@ -949,10 +972,12 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
 
         html_content = self._resolve_local_images(html_content)
 
-        # 包裹折叠 section（编辑器的折叠状态同步到预览）
+        # 包裹折叠 section（编辑器的折叠状态同步到预览；产物仅依赖 text）
         html_content = self._wrap_fold_sections(html_content, text)
 
-        self._push_to_preview(html_content)
+        self._last_render_text = text
+        self._last_render_html = html_content
+        return html_content
 
     def _push_to_preview(self, html_content: str):
         """把渲染好的 HTML 推送到预览，供 _update_preview / _on_async_highlight_done 共用。
@@ -965,7 +990,6 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             self.preview.set_code_blocks(self._code_blocks)
 
         if HAS_WEBENGINE and isinstance(self.preview, QWebEngineView) and self._html_template_loaded:
-            import json
             escaped = json.dumps(html_content)
             doc = self.editor.document()
             assert doc is not None
@@ -1069,9 +1093,11 @@ a {{
         md.enable(["table", "strikethrough"])
         try:
             from mdit_py_plugins.deflist import deflist_plugin
+            from mdit_py_plugins.tasklists import tasklists_plugin
             deflist_plugin(md)
+            tasklists_plugin(md)
         except ImportError:
-            get_logger(__name__).debug("mdit_py_plugins 未安装，定义列表语法不可用")
+            get_logger(__name__).debug("mdit_py_plugins 未安装，扩展语法（定义列表/任务列表）不可用")
         return md
 
     def _render_markdown(self, text: str) -> str:
@@ -1200,7 +1226,6 @@ a {{
         折叠区间计算与 FoldingManager 一致，确保编辑器和预览折叠对应。
         在 _process_code_blocks 之后、_push_to_preview 之前调用。
         """
-        import re
         from src.editor.outline_parser import parse_headings
 
         headings = parse_headings(text)
@@ -1271,7 +1296,6 @@ a {{
         if not self._html_template_loaded:
             return
 
-        import json
         collapsed = folding.get_collapsed_lines()
         js = f"window.updateFoldVisibility('{json.dumps(collapsed)}');"
         page = self.preview.page()
@@ -1401,9 +1425,6 @@ a {{
         html_content = self._resolve_local_images(html_content)
         html_content = self._wrap_fold_sections(html_content, text)
         self._push_to_preview(html_content)
-
-    def _on_async_highlight_ready(self, task_id: str, html: str, language: str):
-        pass
 
     @staticmethod
     def _wrap_code_lines_with_source_map(
@@ -1617,8 +1638,11 @@ a {{
     # ──────────── 预览 -> 编辑器 反向同步 ────────────
 
     def _on_preview_title(self, title: str):
-        """JS 经 document.title 回传消息，据此滚动编辑器或执行复制。"""
+        """JS 经 document.title 回传消息，据此滚动编辑器、执行复制或打开链接。"""
         if not title:
+            return
+        if title.startswith("__pnopen__:"):
+            self._open_external_link(title[len("__pnopen__:"):])
             return
         if title.startswith("__pncopy__:"):
             try:
@@ -1640,6 +1664,12 @@ a {{
         except ValueError:
             return
         self._scroll_editor_to_line(frac_line)
+
+    def _open_external_link(self, url: str) -> None:
+        """预览链接点击 → 系统外部浏览器打开（与 QTextBrowser 回退路径一致）。"""
+        if not url:
+            return
+        QDesktopServices.openUrl(QUrl(url))
 
     def _scroll_editor_to_line(self, frac_line: float):
         """把源码行 frac_line 滚到编辑器视口顶部(不移动光标)。
@@ -1673,32 +1703,10 @@ a {{
 
     # ──────────── 预览显隐 ────────────
 
-    def debug_sync_state(self) -> None:
-        """打印运行时同步调试信息到日志。"""
-        if HAS_WEBENGINE and isinstance(self.preview, QWebEngineView):
-            page = self.preview.page()
-            if page is not None:
-                page.runJavaScript(
-                    "var nodes = document.querySelectorAll('[data-source-line]'); "
-                    "var sample = Array.from(nodes).slice(0, 15).map(function(el) {"
-                    "  return { line: el.getAttribute('data-source-line'), tag: el.tagName, cls: el.className };"
-                    "});"
-                    "JSON.stringify({ nodeCount: nodes.length, sample: sample, debug: window.__panzerSyncDebug || {} })",
-                    lambda result: get_logger(__name__).debug(
-                        "Markdown sync debug: %s", result
-                    ),
-                )
-
     def toggle_preview(self):
         self._preview_visible = not self._preview_visible
         self.preview.setVisible(self._preview_visible)
         if self._preview_visible:
-            self._update_preview()
-
-    def set_preview_visible(self, visible: bool):
-        self._preview_visible = visible
-        self.preview.setVisible(visible)
-        if visible:
             self._update_preview()
 
     # ══════════════════════════════════════════════════

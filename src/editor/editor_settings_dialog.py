@@ -19,6 +19,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
 from ..core.config import Config
+from ..utils.feature_flags import is_enabled as _feature_is_enabled
 
 
 class EditorSettingsDialog(QDialog):
@@ -118,6 +119,20 @@ class EditorSettingsDialog(QDialog):
 
         layout.addWidget(editor_group)
 
+        # ── 大文件选项（Wave 4 E3）──
+        large_file_group = QGroupBox("大文件")
+        large_file_layout = QFormLayout(large_file_group)
+
+        self.large_file_mode_cb = QCheckBox()
+        self.large_file_mode_cb.setToolTip(
+            "勾选后，达 1 万行的文件自动降级高成本功能：\n"
+            "关闭自动补全、跳过折叠计算、隐藏缩略图、暂停预览自动刷新\n"
+            "（不修改文件内容，开关可随时回退）"
+        )
+        large_file_layout.addRow("大文件模式:", self.large_file_mode_cb)
+
+        layout.addWidget(large_file_group)
+
         # ── 小秘书选项 ──
         secretary_group = QGroupBox("小秘书")
         secretary_layout = QFormLayout(secretary_group)
@@ -213,6 +228,9 @@ class EditorSettingsDialog(QDialog):
         self.show_secretary_cb.setChecked(
             self.config.get_secretary_setting("show_secretary", True)
         )
+
+        # E3：大文件模式开关（feature flag，持久化到 feature_flags.json）
+        self.large_file_mode_cb.setChecked(_feature_is_enabled("large_file_mode"))
 
         size_percent = self.config.get_secretary_setting("size_percent", 7)
         self.secretary_size_slider.setValue(size_percent)

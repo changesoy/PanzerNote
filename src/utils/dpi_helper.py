@@ -16,6 +16,8 @@ PyQt6 默认启用高 DPI 缩放，则会自动缩放"。
     size = scale_size(800, 600)
 """
 
+import re
+
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt, QSize
 
@@ -127,7 +129,6 @@ def scale_stylesheet(stylesheet: str) -> str:
     Returns:
         缩放后的样式表字符串
     """
-    import re
 
     def replace_px(match):
         value = float(match.group(1))

@@ -690,13 +690,16 @@ LOADED → on_unload() → UNLOADED
 
 #### 4.12.5 插件管理器 (`plugins/plugin_manager.py`)
 
-- `scan_plugins()` — 从 `plugins/` 目录递归扫描插件包（仅填 manifest 清单，启动阶段不加载）
-- `load_plugin(name)` — 加载插件（验证清单、版本兼容、`authorize(capabilities)`、装配 PluginContext、`on_load(ctx)`）
-- `activate_plugin(name)` / `deactivate_plugin(name)` — 激活/停用
+- `scan_plugins()` — 从 `plugins/` 目录递归扫描插件包（仅填 manifest 清单，启动阶段不加载）；检测残留启动 marker → 插件进入安全模式
+- `load_plugin(name)` — 加载插件（验证清单、版本兼容、`authorize(capabilities)`、装配 PluginContext、`on_load(ctx)`；on_load 前写入启动 marker）
+- `activate_plugin(name)` / `deactivate_plugin(name)` — 激活/停用（on_activate 成功后清除启动 marker）
 - `unload_plugin(name)` — 卸载（`on_unload()` + 自动解绑事件订阅 + 撤销授权）
 - `reload_plugin(name)` — 热加载（停用→卸载→清除模块缓存→重新加载→恢复状态）
+- `activate_enabled_plugins()` — **启动延迟加载（Wave 5 D5）**：窗口显示后由 MainWindow 经 `QTimer.singleShot(0, ...)` 调用，自动加载并激活 `enabled=true` 且非安全模式的插件，单个失败不影响其余
 
-**插件清单 (`plugin.json`) 必需字段**：`name`/`version`/`entry`；能力声明用 `capabilities` 数组。
+**启动恢复 marker（Wave 5 D14）**：`on_load` 前写入、`on_activate` 成功后清除（存于用户数据目录 `data/plugin_startup/`）。残留 marker = 上次启动在启动阶段异常退出 → 该插件进入安全模式（`SAFE_MODE`，管理对话框显示 `[安全模式]`），下次启动跳过，需在插件管理中手动加载处理。普通异常（程序未崩溃）会清除 marker，下次启动可重试。
+
+**插件清单 (`plugin.json`) 必需字段**：`name`/`version`/`entry`；能力声明用 `capabilities` 数组；`enabled`（可选，默认 true）控制启动时是否自动加载激活。
 
 ### 4.13 主题系统 (`themes/`)
 
@@ -1039,7 +1042,7 @@ pip install mypy>=1.20                         # 类型检查
 24. **可信插件模型**：插件代码运行在主程序进程中（GUI 线程），能力系统只限制 PanzerNote 暴露的 API 边界，不是完整安全沙箱。请只安装可信来源的插件
 25. **能力声明两层结构**：manifest 声明 `capabilities` → `CAPABILITY_PERMISSIONS` 映射内部权限；调用未声明/不存在的能力抛 `PluginCapabilityError`。命名空间类能力（`data.read`/`data.write`）用 `pass_plugin_id` 将调用者插件 id 传入 impl，天然隔离命名空间
 26. **文件安全入口**：`ctx.workspace.open_file()` 走 `FileOpenService.PLUGIN` 路径校验；`ctx.data` 数据目录由宿主从插件 id 派生（`data/plugin_data/{id}/data.json`），插件不可指定路径，写盘走 `FileGuard.safe_write`（原子写 + 1MB 上限）
-27. **主线程 + 异常隔离**：所有生命周期钩子与回调在 GUI 线程执行，无插件线程与超时；生命周期异常 → `ERROR`（可重载），回调（命令/菜单/事件）异常 → 仅 log 不自动禁插件；事件订阅走白名单 + 100ms 节流 + 单插件单事件上限 5，卸载自动解绑
+27. **主线程 + 异常隔离 + 启动恢复**：所有生命周期钩子与回调在 GUI 线程执行，无插件线程与超时；生命周期异常 → `ERROR`（可重载），回调（命令/菜单/事件）异常 → 仅 log 不自动禁插件；事件订阅走白名单 + 100ms 节流 + 单插件单事件上限 5，卸载自动解绑。插件启动走**延迟加载**（窗口显示后 `QTimer.singleShot(0, ...)` 激活 `enabled` 插件，不进启动关键路径）；**启动恢复 marker** 覆盖 on_load→on_activate 全程（残留 marker → 安全模式跳过，需手动处理）
 
 ### 性能约束
 

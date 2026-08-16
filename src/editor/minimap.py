@@ -21,6 +21,7 @@ from PyQt6.QtGui import QPainter, QColor, QPixmap, QPicture
 
 from ..utils.feature_flags import is_enabled
 from ..themes.theme_aware_mixin import ThemeAwareMixin
+from ..themes.theme_v2.consumer import v2_color, v2_token
 from ..utils.logger import get_logger
 
 
@@ -74,10 +75,11 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
         self._init_theme(theme_engine)
 
     def _apply_theme_colors(self, colors):
-        self._bg_color = colors.minimap_bg
-        self._border_color = colors.border
-        self._text_color = colors.text_disabled
-        primary = QColor(colors.primary)
+        # B2：minimap 消费 v2 minimap recipe（回退 v1）
+        self._bg_color = v2_color(self._theme_engine, "minimap", "background", colors.minimap_bg)
+        self._border_color = v2_color(self._theme_engine, "minimap", "background", colors.border)
+        self._text_color = v2_color(self._theme_engine, "minimap", "text", colors.text_disabled)
+        primary = QColor(v2_token(self._theme_engine, "accent", colors.primary))
         self._viewport_color = QColor(primary.red(), primary.green(), primary.blue(), 30)
         self._viewport_border_color = QColor(primary.red(), primary.green(), primary.blue(), 70)
         self._cache_valid = False

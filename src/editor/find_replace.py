@@ -16,6 +16,7 @@ from PyQt6.QtGui import (
 )
 
 from ..themes.theme_aware_mixin import ThemeAwareMixin
+from ..themes.theme_v2.consumer import v2_color, v2_token
 from ..utils.logger import get_logger
 from .search_service import SearchService
 
@@ -300,38 +301,47 @@ class FindReplaceBar(ThemeAwareMixin, QWidget):
         self._apply_highlights()
 
     def _apply_theme_colors(self, colors):
+        # B2：查找栏消费 v2 语义 token + search recipe（回退 v1）
+        bar_bg = v2_token(self._theme_engine, "surface_secondary", colors.surface)
+        border = v2_token(self._theme_engine, "border_muted", colors.border)
+        input_bg = v2_token(self._theme_engine, "surface_raised", colors.card)
+        text = v2_token(self._theme_engine, "text_primary", colors.text_primary)
+        focus_border = v2_token(self._theme_engine, "focus", colors.focus_border)
+        hover_bg = v2_token(self._theme_engine, "surface_raised", colors.primary_light)
+        pressed_bg = v2_token(self._theme_engine, "border_strong", colors.border)
+
         self.setStyleSheet(f"""
             FindReplaceBar {{
-                background-color: {colors.surface};
-                border-bottom: 1px solid {colors.border};
+                background-color: {bar_bg};
+                border-bottom: 1px solid {border};
             }}
             QLineEdit {{
                 padding: 3px 6px;
-                border: 1px solid {colors.border};
+                border: 1px solid {border};
                 border-radius: 3px;
-                background: {colors.card};
-                color: {colors.text_primary};
+                background: {input_bg};
+                color: {text};
                 font-size: 12px;
             }}
-            QLineEdit:focus {{ border-color: {colors.focus_border}; }}
+            QLineEdit:focus {{ border-color: {focus_border}; }}
             QPushButton, QToolButton {{
                 padding: 3px 8px;
-                border: 1px solid {colors.border};
+                border: 1px solid {border};
                 border-radius: 3px;
-                background: {colors.card};
-                color: {colors.text_primary};
+                background: {input_bg};
+                color: {text};
                 font-size: 12px;
             }}
-            QPushButton:hover, QToolButton:hover {{ background: {colors.primary_light}; }}
-            QPushButton:pressed, QToolButton:pressed {{ background: {colors.border}; }}
-            QCheckBox {{ font-size: 12px; margin-left: 4px; color: {colors.text_primary}; }}
-            QLabel {{ font-size: 12px; color: {colors.text_primary}; }}
+            QPushButton:hover, QToolButton:hover {{ background: {hover_bg}; }}
+            QPushButton:pressed, QToolButton:pressed {{ background: {pressed_bg}; }}
+            QCheckBox {{ font-size: 12px; margin-left: 4px; color: {text}; }}
+            QLabel {{ font-size: 12px; color: {text}; }}
         """)
         self._update_match_label()
-        # 高亮颜色从主题 token 取值
-        self._match_bg = QColor(colors.search_match_bg)
-        self._current_bg = QColor(colors.search_current_bg)
-        self._current_fg = QColor(colors.search_current_fg)
+        # 高亮颜色：v2 search recipe 优先，回退 v1
+        self._match_bg = QColor(v2_color(self._theme_engine, "search", "match_bg", colors.search_match_bg))
+        self._current_bg = QColor(v2_color(self._theme_engine, "search", "current_bg", colors.search_current_bg))
+        self._current_fg = QColor(v2_color(self._theme_engine, "search", "current_fg", colors.search_current_fg))
         if self._matches and self.isVisible():
             self._apply_highlights()
 
@@ -339,9 +349,9 @@ class FindReplaceBar(ThemeAwareMixin, QWidget):
         """更新匹配计数标签"""
         total = len(self._matches)
         colors = self._theme_engine.get_active_theme().colors
-        error_color = colors.error
-        text_color = colors.text_secondary
-        match_border = colors.search_match_bg
+        error_color = v2_token(self._theme_engine, "danger", colors.error)
+        text_color = v2_token(self._theme_engine, "text_secondary", colors.text_secondary)
+        match_border = v2_color(self._theme_engine, "search", "match_bg", colors.search_match_bg)
         if total == 0:
             query = self.search_input.text()
             if query:

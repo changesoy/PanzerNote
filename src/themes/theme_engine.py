@@ -20,6 +20,7 @@ except ImportError:
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from ..utils.logger import get_logger
+from .theme_v2.service import ThemeV2Service
 
 
 @dataclass
@@ -220,6 +221,26 @@ class ThemeEngine(QObject):
         self._active_theme_id: Optional[str] = None
         self._logger = get_logger(__name__)
         self._load_builtin_themes()
+        self._init_theme_v2()
+
+    def _init_theme_v2(self) -> None:
+        """B2：初始化 Theme v2 运行时（default 包），跟随 v1 主题明暗选择变体。
+
+        v2 加载失败时保持禁用，消费方回退 v1 机制，不影响应用启动。
+        """
+        themes_dir = os.path.normpath(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "..", "themes"
+        ))
+        self.theme_v2 = ThemeV2Service(themes_dir, parent=self)
+        if not self.theme_v2.load_default():
+            return
+        active = self.get_active_theme()
+        self.theme_v2.set_variant(self.theme_v2.variant_for_dark(active.is_dark))
+        self.theme_changed.connect(self._on_theme_changed_v2)
+
+    def _on_theme_changed_v2(self, theme_id: str) -> None:
+        theme = self.get_theme(theme_id) or self.get_active_theme()
+        self.theme_v2.set_variant(self.theme_v2.variant_for_dark(theme.is_dark))
 
     def _get_themes_dir(self) -> str:
         app_dir = self._config.get_app_dir()
@@ -522,3 +543,7 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
             self._active_theme_id = saved_theme
         else:
             self._active_theme_id = "light"
+        # B2：恢复持久化主题后同步 Theme v2 variant（initialize 不触发 theme_changed）
+        service = getattr(self, "theme_v2", None)
+        if service is not None:
+            service.set_variant(service.variant_for_dark(self.get_active_theme().is_dark))

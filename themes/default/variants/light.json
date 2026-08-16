@@ -1,0 +1,25 @@
+{
+  "color_identity": {
+    "strategy": "chromatic",
+    "primary": "#0969DA",
+    "accents": ["#0969DA"],
+    "hue_family": "blue"
+  },
+  "tokens": {
+    "surface_primary": "#FFFFFF",
+    "surface_secondary": "#F6F8FA",
+    "surface_raised": "#FFFFFF",
+    "text_primary": "#1F2328",
+    "text_secondary": "#656D76",
+    "text_muted": "#8C959F",
+    "border_muted": "#D0D7DE",
+    "border_strong": "#AFB8C1",
+    "accent": "#0969DA",
+    "focus": "#0969DA",
+    "danger": "#CF222E"
+  },
+  "syntax": {
+    "palette": "light-github-v1",
+    "overrides": {}
+  }
+}

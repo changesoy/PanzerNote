@@ -10,6 +10,7 @@ from typing import Optional
 from PyQt6.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor, QFont, QTextDocument
 
 from ..utils.logger import get_logger
+from ..themes.theme_v2.consumer import v2_color
 
 try:
     from pygments.lexers import get_lexer_for_filename, get_lexer_by_name
@@ -19,6 +20,27 @@ except ImportError:
     HAS_PYGMENTS = False
 
 from .highlight_themes import get_editor_formats, build_format
+
+
+# md_* v1 token → v2 markdown recipe style 键映射（B2）
+_MD_STYLE_MAP = {
+    "h1_fg": "heading",
+    "h2_fg": "heading",
+    "h3_fg": "heading",
+    "h456_fg": "heading",
+    "bold_fg": "bold",
+    "italic_fg": "italic",
+    "code_fg": "code",
+    "code_bg": "code_bg",
+    "link_fg": "link",
+    "image_fg": "image",
+    "list_fg": "list",
+    "quote_fg": "quote",
+    "hr_fg": "hr",
+    "fence_fg": "fence",
+    "code_block_fg": "code_block_text",
+    "code_block_bg": "code_block_bg",
+}
 
 
 # ════════════════════════════════════════════════════════
@@ -101,6 +123,12 @@ class MarkdownHighlighter(QSyntaxHighlighter):
         theme_colors = self._theme_engine.get_active_theme().colors
 
         def get_color(key: str) -> str:
+            # B2：md_* → v2 markdown recipe（token 引用），回退 v1
+            style_key = _MD_STYLE_MAP.get(key)
+            if style_key:
+                color = v2_color(self._theme_engine, "markdown", style_key)
+                if color:
+                    return color
             token_key = f"md_{key}"
             if hasattr(theme_colors, token_key):
                 return str(getattr(theme_colors, token_key))

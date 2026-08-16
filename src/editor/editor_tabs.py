@@ -35,6 +35,7 @@ from ..security.file_guard import FileSizeExceededError, FileOperationTimeoutErr
 from ..security.file_access_context import FileAccessContext
 from ..security.input_validator import InputValidator
 from ..themes.theme_aware_mixin import ThemeAwareMixin
+from ..themes.theme_v2.consumer import v2_color, v2_token
 from .editor import Editor
 from .markdown_preview import MarkdownPreviewWidget
 from .find_replace import FindReplaceBar
@@ -261,9 +262,10 @@ class _TabCloseButton(QWidget):
         self._btn.clicked.connect(self._on_clicked)
 
     def _apply_btn_style(self, colors) -> None:
+        close_hover = v2_color(self._theme_engine, "tab", "close_hover", colors.hover_bg)
         self._btn.setStyleSheet(
             f"#tabCloseInnerBtn {{ border: none; background: transparent; border-radius: 2px; padding: 0; }}"
-            f"#tabCloseInnerBtn:hover {{ background: {colors.hover_bg}; }}"
+            f"#tabCloseInnerBtn:hover {{ background: {close_hover}; }}"
         )
 
     def _on_clicked(self):
@@ -1451,56 +1453,65 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             keep_index -= 1
 
     def _apply_theme_colors(self, colors):
+        # B2：tabs 消费 v2 tab recipe（回退 v1）
+        tab_bg = v2_color(self._theme_engine, "tab", "background", colors.surface)
+        active_bg = v2_color(self._theme_engine, "tab", "active_background", colors.card)
+        pane_bg = v2_color(self._theme_engine, "tab", "pane_background", colors.editor_bg)
+        tab_fg = v2_color(self._theme_engine, "tab", "text", colors.text_secondary)
+        active_fg = v2_token(self._theme_engine, "text_primary", colors.text_primary)
+        hover_bg = v2_color(self._theme_engine, "tab", "hover_background", colors.primary_light)
+        border = v2_color(self._theme_engine, "tab", "border", colors.border)
+
         self.setStyleSheet(f"""
     QTabWidget {{
-        background-color: {colors.surface};
+        background-color: {tab_bg};
         border: none;
     }}
 
     QTabWidget::pane {{
-        background-color: {colors.editor_bg};
+        background-color: {pane_bg};
         border: none;
         top: -1px;
     }}
 
     QTabBar {{
-        background-color: {colors.surface};
+        background-color: {tab_bg};
         border: none;
     }}
 
     QTabBar::tab {{
         padding: 8px 15px;
         margin-right: 2px;
-        background-color: {colors.surface};
-        border: 1px solid {colors.border};
+        background-color: {tab_bg};
+        border: 1px solid {border};
         border-bottom: none;
         border-top-left-radius: 4px;
         border-top-right-radius: 4px;
-        color: {colors.text_secondary};
+        color: {tab_fg};
     }}
 
     QTabBar::tab:selected {{
-        background-color: {colors.card};
-        border-color: {colors.border};
-        border-bottom: 1px solid {colors.card};
-        color: {colors.text_primary};
+        background-color: {active_bg};
+        border-color: {border};
+        border-bottom: 1px solid {active_bg};
+        color: {active_fg};
     }}
 
     QTabBar::tab:hover:!selected {{
-        background-color: {colors.primary_light};
-        color: {colors.text_primary};
+        background-color: {hover_bg};
+        color: {active_fg};
     }}
 
     QTabBar QToolButton {{
-        background-color: {colors.surface};
-        color: {colors.text_primary};
-        border: 1px solid {colors.border};
+        background-color: {tab_bg};
+        color: {active_fg};
+        border: 1px solid {border};
         border-radius: 3px;
         margin: 1px;
     }}
 
     QTabBar QToolButton:hover {{
-        background-color: {colors.primary_light};
+        background-color: {hover_bg};
     }}
     """)
         tab_bar = self.tabBar()

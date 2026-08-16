@@ -1,0 +1,25 @@
+{
+  "color_identity": {
+    "strategy": "chromatic",
+    "primary": "#0078D4",
+    "accents": ["#0078D4"],
+    "hue_family": "blue"
+  },
+  "tokens": {
+    "surface_primary": "#1F1F1F",
+    "surface_secondary": "#252526",
+    "surface_raised": "#313131",
+    "text_primary": "#D4D4D4",
+    "text_secondary": "#9D9D9D",
+    "text_muted": "#808080",
+    "border_muted": "#3C3C3C",
+    "border_strong": "#4B4B4B",
+    "accent": "#0078D4",
+    "focus": "#0078D4",
+    "danger": "#F85149"
+  },
+  "syntax": {
+    "palette": "dark-vscode-v1",
+    "overrides": {}
+  }
+}

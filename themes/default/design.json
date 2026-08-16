@@ -1,0 +1,28 @@
+{
+  "spacing": {
+    "space_1": 2,
+    "space_2": 4,
+    "space_3": 8,
+    "space_4": 12,
+    "space_5": 16,
+    "space_6": 20,
+    "space_7": 24,
+    "space_8": 32
+  },
+  "radius": {
+    "radius_sm": 3,
+    "radius_md": 6,
+    "radius_lg": 10,
+    "radius_full": 100
+  },
+  "density": {
+    "density_compact": 24,
+    "density_default": 30,
+    "density_comfortable": 36
+  },
+  "typography": {
+    "font_ui": "Inter, Microsoft YaHei",
+    "font_mono": "JetBrains Mono, Consolas",
+    "font_scale": 1.0
+  }
+}

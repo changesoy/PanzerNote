@@ -59,6 +59,7 @@ from ..utils.logger import get_logger
 from ..utils.feature_flags import is_enabled
 from ..security.path_validator import PathValidator
 from ..themes.theme_aware_mixin import ThemeAwareMixin
+from ..themes.theme_v2.consumer import v2_color, v2_token
 from .highlight_themes import highlight_code_html
 from .webengine_runtime import WebEngineRuntime
 
@@ -523,31 +524,31 @@ window.updateFoldVisibility = function(collapsedLinesJson) {{
 def _build_preview_css_vars(theme_engine) -> str:
     """根据主题引擎构造 :root CSS 变量覆盖块。
 
+    B2：优先消费 Theme v2（semantic token + markdown/scrollbar recipe），回退 v1。
     theme_engine 必须传入，不允许为 None。
     """
     c = theme_engine.get_active_theme().colors
 
-    # 颜色语义映射：CSS 变量名 → 主题 token 值
-    # light/dark 主题 token 已各自配置正确色值，无需再做明暗判断
+    # 颜色语义映射：CSS 变量名 → v2 token / recipe 值（v1 token 兜底）
     vars_map = {
-        "bg-card": c.background,
-        "text-primary": c.text_primary,
-        "text-secondary": c.text_secondary,
-        "text-muted": c.text_disabled,
-        "border": c.border,
-        "border-soft": c.divider,
-        "divider": c.divider,
-        "surface": c.surface,
-        "surface-soft": c.surface,
-        "surface-hover": c.sidebar_bg,
-        "primary": c.primary,
-        "primary-hover": c.primary_dark,
-        "bg-codeblock": c.bg_codeblock,
-        "codeblock-border": c.codeblock_border,
-        "toc-bg": c.sidebar_bg,
-        "scrollbar-track": c.surface,
-        "scrollbar-thumb": c.border,
-        "scrollbar-thumb-hover": c.text_disabled,
+        "bg-card": v2_token(theme_engine, "surface_primary", c.background),
+        "text-primary": v2_token(theme_engine, "text_primary", c.text_primary),
+        "text-secondary": v2_token(theme_engine, "text_secondary", c.text_secondary),
+        "text-muted": v2_token(theme_engine, "text_muted", c.text_disabled),
+        "border": v2_token(theme_engine, "border_muted", c.border),
+        "border-soft": v2_token(theme_engine, "border_muted", c.divider),
+        "divider": v2_token(theme_engine, "border_muted", c.divider),
+        "surface": v2_token(theme_engine, "surface_secondary", c.surface),
+        "surface-soft": v2_token(theme_engine, "surface_secondary", c.surface),
+        "surface-hover": v2_token(theme_engine, "surface_raised", c.sidebar_bg),
+        "primary": v2_token(theme_engine, "accent", c.primary),
+        "primary-hover": v2_token(theme_engine, "focus", c.primary_dark),
+        "bg-codeblock": v2_color(theme_engine, "markdown", "code_block_bg", c.bg_codeblock),
+        "codeblock-border": v2_token(theme_engine, "border_muted", c.codeblock_border),
+        "toc-bg": v2_token(theme_engine, "surface_secondary", c.sidebar_bg),
+        "scrollbar-track": v2_color(theme_engine, "scrollbar", "track", c.surface),
+        "scrollbar-thumb": v2_color(theme_engine, "scrollbar", "handle", c.border),
+        "scrollbar-thumb-hover": v2_color(theme_engine, "scrollbar", "handle_hover", c.text_disabled),
     }
     lines = [":root {"]
     for k, v in vars_map.items():
@@ -607,18 +608,22 @@ class PreviewBrowser(QTextBrowser):
         self._mouse_pos = QPoint()
 
     def _apply_copy_btn_style(self, colors) -> None:
-        """使用主题色更新浮动复制按钮样式。"""
+        """使用主题色更新浮动复制按钮样式（B2：优先 v2 token，回退 v1）。"""
+        btn_bg = v2_token(self._theme_engine, "surface_raised", colors.card)
+        btn_border = v2_token(self._theme_engine, "border_muted", colors.border)
+        btn_hover_bg = v2_token(self._theme_engine, "surface_secondary", colors.surface)
+        btn_hover_border = v2_token(self._theme_engine, "text_muted", colors.text_disabled)
         self._copy_btn.setStyleSheet(
             f"QPushButton {{"
-            f"  background: {colors.card};"
-            f"  border: 1px solid {colors.border};"
+            f"  background: {btn_bg};"
+            f"  border: 1px solid {btn_border};"
             f"  border-radius: 3px;"
             f"  font-size: 12px;"
             f"  padding: 0;"
             f"}}"
             f"QPushButton:hover {{"
-            f"  background: {colors.surface};"
-            f"  border-color: {colors.text_disabled};"
+            f"  background: {btn_hover_bg};"
+            f"  border-color: {btn_hover_border};"
             f"}}"
         )
 

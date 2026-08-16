@@ -66,7 +66,7 @@ class PluginManagerDialog(ThemeAwareMixin, QDialog):
         close_btn.clicked.connect(self.accept)
         layout.addWidget(close_btn)
 
-    def _apply_theme_colors(self, colors):
+    def _apply_theme_colors(self):
         # B5：QDialog 背景由全局 dialog recipe 驱动，QListWidget/QPushButton/
         # QScrollBar 由全局 tree_item/button/scrollbar recipe 驱动，
         # 页面不再打局部样式补丁（B3 消费契约 8.1）。

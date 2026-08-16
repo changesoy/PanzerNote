@@ -524,31 +524,29 @@ window.updateFoldVisibility = function(collapsedLinesJson) {{
 def _build_preview_css_vars(theme_engine) -> str:
     """根据主题引擎构造 :root CSS 变量覆盖块。
 
-    B2：优先消费 Theme v2（semantic token + markdown/scrollbar recipe），回退 v1。
+    B2：纯消费 Theme v2（semantic token + markdown/scrollbar recipe），无 v1 回退。
     theme_engine 必须传入，不允许为 None。
     """
-    c = theme_engine.get_active_theme().colors
-
-    # 颜色语义映射：CSS 变量名 → v2 token / recipe 值（v1 token 兜底）
+    # 颜色语义映射：CSS 变量名 → v2 token / recipe 值（B8：字面量 fallback = v1 light 值）
     vars_map = {
-        "bg-card": v2_token(theme_engine, "surface_primary", c.background),
-        "text-primary": v2_token(theme_engine, "text_primary", c.text_primary),
-        "text-secondary": v2_token(theme_engine, "text_secondary", c.text_secondary),
-        "text-muted": v2_token(theme_engine, "text_muted", c.text_disabled),
-        "border": v2_token(theme_engine, "border_muted", c.border),
-        "border-soft": v2_token(theme_engine, "border_muted", c.divider),
-        "divider": v2_token(theme_engine, "border_muted", c.divider),
-        "surface": v2_token(theme_engine, "surface_secondary", c.surface),
-        "surface-soft": v2_token(theme_engine, "surface_secondary", c.surface),
-        "surface-hover": v2_token(theme_engine, "surface_raised", c.sidebar_bg),
-        "primary": v2_token(theme_engine, "accent", c.primary),
-        "primary-hover": v2_token(theme_engine, "focus", c.primary_dark),
-        "bg-codeblock": v2_color(theme_engine, "markdown", "code_block_bg", c.bg_codeblock),
-        "codeblock-border": v2_token(theme_engine, "border_muted", c.codeblock_border),
-        "toc-bg": v2_token(theme_engine, "surface_secondary", c.sidebar_bg),
-        "scrollbar-track": v2_color(theme_engine, "scrollbar", "track", c.surface),
-        "scrollbar-thumb": v2_color(theme_engine, "scrollbar", "handle", c.border),
-        "scrollbar-thumb-hover": v2_color(theme_engine, "scrollbar", "handle_hover", c.text_disabled),
+        "bg-card": v2_token(theme_engine, "surface_primary", "#FFFFFF"),
+        "text-primary": v2_token(theme_engine, "text_primary", "#212121"),
+        "text-secondary": v2_token(theme_engine, "text_secondary", "#757575"),
+        "text-muted": v2_token(theme_engine, "text_muted", "#BDBDBD"),
+        "border": v2_token(theme_engine, "border_muted", "#E0E0E0"),
+        "border-soft": v2_token(theme_engine, "border_muted", "#EEEEEE"),
+        "divider": v2_token(theme_engine, "border_muted", "#EEEEEE"),
+        "surface": v2_token(theme_engine, "surface_secondary", "#F5F5F5"),
+        "surface-soft": v2_token(theme_engine, "surface_secondary", "#F5F5F5"),
+        "surface-hover": v2_token(theme_engine, "surface_raised", "#FAFAFA"),
+        "primary": v2_token(theme_engine, "accent", "#2196F3"),
+        "primary-hover": v2_token(theme_engine, "focus", "#1976D2"),
+        "bg-codeblock": v2_color(theme_engine, "markdown", "code_block_bg", "#EDF3FA"),
+        "codeblock-border": v2_token(theme_engine, "border_muted", "#D8DEE9"),
+        "toc-bg": v2_token(theme_engine, "surface_secondary", "#FAFAFA"),
+        "scrollbar-track": v2_color(theme_engine, "scrollbar", "track", "#F5F5F5"),
+        "scrollbar-thumb": v2_color(theme_engine, "scrollbar", "handle", "#E0E0E0"),
+        "scrollbar-thumb-hover": v2_color(theme_engine, "scrollbar", "handle_hover", "#BDBDBD"),
     }
     lines = [":root {"]
     for k, v in vars_map.items():
@@ -595,8 +593,7 @@ class PreviewBrowser(QTextBrowser):
         self._copy_btn.setToolTip("复制到剪贴板")
         self._copy_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self._copy_btn.hide()
-        colors = theme_engine.get_active_theme().colors
-        self._apply_copy_btn_style(colors)
+        self._apply_copy_btn_style()
         self._copy_btn.clicked.connect(self._copy_current)
         self._copy_btn.installEventFilter(self)
 
@@ -607,12 +604,12 @@ class PreviewBrowser(QTextBrowser):
         self._hover_timer.timeout.connect(self._check_hover)
         self._mouse_pos = QPoint()
 
-    def _apply_copy_btn_style(self, colors) -> None:
-        """使用主题色更新浮动复制按钮样式（B2：优先 v2 token，回退 v1）。"""
-        btn_bg = v2_token(self._theme_engine, "surface_raised", colors.card)
-        btn_border = v2_token(self._theme_engine, "border_muted", colors.border)
-        btn_hover_bg = v2_token(self._theme_engine, "surface_secondary", colors.surface)
-        btn_hover_border = v2_token(self._theme_engine, "text_muted", colors.text_disabled)
+    def _apply_copy_btn_style(self) -> None:
+        """使用主题 token 更新浮动复制按钮样式（B2：纯 v2，无 v1 回退）。"""
+        btn_bg = v2_token(self._theme_engine, "surface_raised", "#FFFFFF")
+        btn_border = v2_token(self._theme_engine, "border_muted", "#E0E0E0")
+        btn_hover_bg = v2_token(self._theme_engine, "surface_secondary", "#F5F5F5")
+        btn_hover_border = v2_token(self._theme_engine, "text_muted", "#BDBDBD")
         self._copy_btn.setStyleSheet(
             f"QPushButton {{"
             f"  background: {btn_bg};"
@@ -892,9 +889,9 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             self.config.set_view_setting("preview_width", sizes[1])
         self._schedule_resync()
 
-    def _apply_theme_colors(self, colors):
+    def _apply_theme_colors(self):
         if isinstance(self.preview, PreviewBrowser):
-            self.preview._apply_copy_btn_style(colors)
+            self.preview._apply_copy_btn_style()
         # 主题变更时清空 Document 级渲染缓存（高亮颜色/折叠样式依赖主题）
         clear_document_render_cache()
         # 主题变更时重建预览以应用新 CSS（重置标志让 _push_to_preview 走 setHtml 路径）
@@ -1036,12 +1033,12 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
                     exc_info=True,
                 )
 
-                colors = self._theme_engine.get_active_theme().colors
-                fallback_bg = colors.background
-                fallback_text = colors.text_primary
-                fallback_code_bg = colors.bg_codeblock
-                fallback_border = colors.codeblock_border
-                fallback_link = colors.primary
+                # B2：模板格式失败时的降级 HTML（B8：字面量 = v1 light 值，无 v1 回退）
+                fallback_bg = "#FFFFFF"
+                fallback_text = "#212121"
+                fallback_code_bg = "#EDF3FA"
+                fallback_border = "#D8DEE9"
+                fallback_link = "#2196F3"
 
                 full_html = f"""<!DOCTYPE html>
 <html>

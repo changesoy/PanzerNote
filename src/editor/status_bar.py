@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import QStatusBar, QLabel, QFrame, QHBoxLayout, QWidget
 from PyQt6.QtCore import Qt, pyqtSignal, QEvent
 
 from ..themes.theme_aware_mixin import ThemeAwareMixin
+from ..themes.theme_v2.consumer import v2_token
 
 
 class StatusBarWidget(ThemeAwareMixin, QStatusBar):
@@ -83,23 +84,28 @@ class StatusBarWidget(ThemeAwareMixin, QStatusBar):
         self.file_type_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.addPermanentWidget(self.file_type_label)
 
-    def _apply_theme_colors(self, colors):
+    def _apply_theme_colors(self):
+        # B3：状态栏消费 v2 token（无 v1 回退，B8：字面量 = v1 light 值）
+        statusbar_bg = v2_token(self._theme_engine, "surface_secondary", "#F5F5F5")
+        border = v2_token(self._theme_engine, "border_muted", "#E0E0E0")
+        text_primary = v2_token(self._theme_engine, "text_primary", "#212121")
+        divider = v2_token(self._theme_engine, "border_muted", "#EEEEEE")
         self.setStyleSheet(f"""
             QStatusBar {{
-                background-color: {colors.statusbar_bg};
-                border-top: 1px solid {colors.border};
+                background-color: {statusbar_bg};
+                border-top: 1px solid {border};
             }}
             QStatusBar::item {{
                 border: none;
             }}
             QLabel {{
                 padding: 2px 8px;
-                color: {colors.text_primary};
+                color: {text_primary};
             }}
         """)
         sep_style = f"""
             QFrame {{
-                background-color: {colors.divider};
+                background-color: {divider};
                 max-width: 1px;
                 margin: 3px 0px;
             }}

@@ -50,7 +50,8 @@ from .plugins.capability_registry import PluginCapabilityError
 from .plugins.plugin_event_bus import PluginEventBus
 from .themes.theme_engine import ThemeEngine
 from .themes.theme_preview import ThemePreviewDialog
-from .themes.theme_v2.consumer import v2_token
+from .themes.theme_v2.consumer import v2_active_variant, v2_token
+from .themes.theme_v2.transition import CommitResult
 from .themes.theme_v2.transition_controller import ThemeTransitionController, easing_for
 from .themes.theme_v2.types import ThemeSwitchLevel
 from .ui.command_palette import CommandPalette
@@ -122,7 +123,7 @@ class MainWindow(QMainWindow):
 
         self._native_titlebar_filter = install_native_titlebar_theme_filter(
             cast(QApplication, QApplication.instance()),
-            lambda: self.theme_engine.get_active_theme().is_dark,
+            lambda: v2_active_variant(self.theme_engine) == "dark",
             parent=self,
         )
 
@@ -267,10 +268,12 @@ class MainWindow(QMainWindow):
         self.outline_panel.heading_clicked.connect(self._on_outline_heading_clicked)
         self.find_in_files_panel.result_clicked.connect(self._on_find_in_files_result)
         self.shortcut_panel.set_edit_callback(self._on_shortcut_edited)
-        # Batch 4：主题切换 / 文件树变化 → 插件事件
-        self.theme_engine.theme_changed.connect(
-            lambda theme_id: self._plugin_event_bus.emit("theme.changed", theme_id)
-        )
+        # Batch 4：主题切换 / 文件树变化 → 插件事件（B8：订阅 manager 信号）
+        theme_manager = getattr(self.theme_engine, "theme_manager", None)
+        if theme_manager is not None:
+            theme_manager.theme_committed.connect(
+                lambda _pkg, variant: self._plugin_event_bus.emit("theme.changed", variant)
+            )
         self.file_tree.tree_changed.connect(
             lambda: self._plugin_event_bus.emit("file_tree.changed")
         )
@@ -616,8 +619,7 @@ class MainWindow(QMainWindow):
 
         def apply_later() -> None:
             try:
-                theme = self.theme_engine.get_active_theme()
-                self._update_title_bar_theme(theme.is_dark)
+                self._update_title_bar_theme(v2_active_variant(self.theme_engine) == "dark")
             except Exception:
                 pass
 
@@ -1510,14 +1512,14 @@ class MainWindow(QMainWindow):
     def _apply_theme(self):
         stylesheet = self.theme_engine.generate_stylesheet()
         self.setStyleSheet(stylesheet)
-        theme = self.theme_engine.get_active_theme()
-        colors = theme.colors
-        self._game_placeholder.setStyleSheet(f"color: {colors.text_disabled}; font-size: 18px;")
-        self.line1.setStyleSheet(f"background-color: {colors.border};")
-        self.line2.setStyleSheet(f"background-color: {colors.border};")
+        text_disabled = v2_token(self.theme_engine, "text_muted", "#BDBDBD")
+        border = v2_token(self.theme_engine, "border_muted", "#E0E0E0")
+        self._game_placeholder.setStyleSheet(f"color: {text_disabled}; font-size: 18px;")
+        self.line1.setStyleSheet(f"background-color: {border};")
+        self.line2.setStyleSheet(f"background-color: {border};")
 
         # Windows 下设置标题栏暗色模式（DWM API）
-        self._update_title_bar_theme(theme.is_dark)
+        self._update_title_bar_theme(v2_active_variant(self.theme_engine) == "dark")
 
     def _update_title_bar_theme(self, is_dark: bool):
         """更新当前主窗口原生标题栏深/浅色。"""
@@ -1535,15 +1537,16 @@ class MainWindow(QMainWindow):
         dialog.theme_applied.connect(self._on_theme_applied)
         dialog.exec()
 
-    def _on_theme_applied(self, theme_id: str):
+    def _on_theme_applied(self, package_id: str, variant_id: str):
         """B7：唯一切换编排点（设计文档 9.2）。
 
         包一层 Snapshot Overlay 过渡：逐窗口 grab 旧帧 → 同步执行真实切换 →
         淡出。motion off / 大文件模式下恒瞬时（allow_animation=False）。
+        B8：theme_preview 已多包化，切换参数为 (package_id, variant_id)。
         """
         self._theme_transition.run(
             self._transition_windows(),
-            lambda: self._switch_theme_now(theme_id),
+            lambda: self._switch_theme_now(package_id, variant_id),
             level=ThemeSwitchLevel.L0,  # B7 生产路径恒 L0（同包变体切换）
             motion_level=self._motion_level(),
             allow_animation=self._animations_allowed(),
@@ -1551,14 +1554,17 @@ class MainWindow(QMainWindow):
             easing=self._transition_easing(),
         )
 
-    def _switch_theme_now(self, theme_id: str) -> None:
-        """过渡 callable：engine.set_active_theme（内部经 manager 完成 v2 事务）
-        + _apply_theme（全局 QSS 重涂 + DWM 标题栏）——全部同步完成。
+    def _switch_theme_now(self, package_id: str, variant_id: str) -> None:
+        """过渡 callable：经 manager 完成 v2 事务（同包变体切换）
+        + 持久化 view.theme（package/variant）+ _apply_theme（全局 QSS
+        重涂 + DWM 标题栏）——全部同步完成。
         """
-        if not self.theme_engine.set_active_theme(theme_id):
+        manager = getattr(self.theme_engine, "theme_manager", None)
+        if manager is None or manager.request(package_id, variant_id) is not CommitResult.COMMITTED:
             return
+        self.config.set_view_setting("theme", f"{package_id}/{variant_id}")
         self._apply_theme()
-        self.secretary.show_message(f"已切换主题: {self.theme_engine.get_active_theme().name}")
+        self.secretary.show_message(f"已切换主题")
 
     def _transition_windows(self) -> list:
         """参与过渡的窗口：主窗口 + 可见顶层 QDialog/QMainWindow。

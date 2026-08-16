@@ -87,14 +87,14 @@ class CommandPalette(ThemeAwareMixin, QDialog):
 
         self._init_theme(theme_engine)
 
-    def _apply_theme_colors(self, colors):
-        # B4：命令面板消费 v2 recipe/token（dialog/input recipe），回退 v1。
+    def _apply_theme_colors(self):
+        # B4：命令面板消费 v2 recipe/token（dialog/input recipe），无 v1 回退。
         # QListWidget 由全局 tree_item recipe 驱动，不在页面内打补丁（B3 契约 8.1）。
-        dialog_bg = v2_color(self._theme_engine, "dialog", "background", colors.surface)
-        input_bg = v2_color(self._theme_engine, "input", "background", colors.card)
-        input_fg = v2_color(self._theme_engine, "input", "text", colors.text_primary)
-        border = v2_token(self._theme_engine, "border_muted", colors.border)
-        text_secondary = v2_token(self._theme_engine, "text_secondary", colors.text_secondary)
+        dialog_bg = v2_color(self._theme_engine, "dialog", "background", "#F5F5F5")
+        input_bg = v2_color(self._theme_engine, "input", "background", "#FFFFFF")
+        input_fg = v2_color(self._theme_engine, "input", "text", "#212121")
+        border = v2_token(self._theme_engine, "border_muted", "#E0E0E0")
+        text_secondary = v2_token(self._theme_engine, "text_secondary", "#757575")
 
         self.setStyleSheet(f"""
             CommandPalette {{

@@ -42,18 +42,16 @@ class CompletionPopup(QListWidget):
         # _rebuild_qss() 的两路输入：主题色（apply_theme_colors）与条目
         # 行高（apply_font）。任一更新都整体重建样式表，不做增量拼接。
         self._theme_engine: ThemeEngine | None = None
-        self._colors = None
         self._item_min_height = 22
 
-    def apply_theme_colors(self, theme_engine: ThemeEngine, colors) -> None:
+    def apply_theme_colors(self, theme_engine: ThemeEngine) -> None:
         """应用自动补全弹窗主题颜色。
 
         由 Editor._apply_theme_colors() 调用。
         CompletionPopup 是无父顶层浮窗，不依赖主窗口 QSS 级联，
-        样式优先消费 v2 recipe（tooltip / scrollbar / tree_item），回退 v1。
+        样式优先消费 v2 recipe（tooltip / scrollbar / tree_item）。
         """
         self._theme_engine = theme_engine
-        self._colors = colors
         self._rebuild_qss()
 
     def apply_font(self, font_family: str, font_size: int) -> None:
@@ -71,22 +69,21 @@ class CompletionPopup(QListWidget):
 
     def _rebuild_qss(self) -> None:
         """从当前主题色与条目行高整体重建样式表。"""
-        if self._theme_engine is None or self._colors is None:
+        if self._theme_engine is None:
             return
-        engine, colors = self._theme_engine, self._colors
+        engine = self._theme_engine
         # 弹层容器吃 tooltip recipe；滚动条吃 scrollbar recipe；条目 hover
         # 用 surface_secondary（弹窗背景是 surface_raised，同色 hover 不可见）。
-        # 选中色仍是 v1 primary_light——v2 暂无 accent_soft 类 token，
-        # 已列入 Wave8 遗留清单。
-        bg = v2_color(engine, "tooltip", "background", colors.card)
-        fg = v2_color(engine, "tooltip", "text", colors.text_primary)
-        border = v2_color(engine, "tooltip", "border", colors.border)
-        hover_bg = v2_token(engine, "surface_secondary", colors.surface)
-        sel_bg = colors.primary_light
-        sb_track = v2_color(engine, "scrollbar", "track", colors.surface)
-        sb_handle = v2_color(engine, "scrollbar", "handle", colors.border)
+        # 选中色走 accent_soft token（B8：= v1 primary_light）。
+        bg = v2_color(engine, "tooltip", "background", "#FFFFFF")
+        fg = v2_color(engine, "tooltip", "text", "#212121")
+        border = v2_color(engine, "tooltip", "border", "#E0E0E0")
+        hover_bg = v2_token(engine, "surface_secondary", "#F5F5F5")
+        sel_bg = v2_token(engine, "accent_soft", "#BBDEFB")
+        sb_track = v2_color(engine, "scrollbar", "track", "#F5F5F5")
+        sb_handle = v2_color(engine, "scrollbar", "handle", "#E0E0E0")
         sb_handle_hover = v2_color(engine, "scrollbar", "handle_hover",
-                                   colors.text_disabled)
+                                   "#BDBDBD")
         self.setStyleSheet(f"""
     QListWidget#CompletionPopup {{
         background-color: {bg};

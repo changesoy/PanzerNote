@@ -289,12 +289,13 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
         self.external_container.hide()
         layout.addWidget(self.external_container)
 
-    def _apply_theme_colors(self, colors):
-        # B4：文件树消费 v2 token（侧栏 = surface_secondary，标题栏 = surface_primary），回退 v1
-        sidebar_bg = v2_token(self._theme_engine, "surface_secondary", colors.sidebar_bg)
-        surface = v2_token(self._theme_engine, "surface_primary", colors.surface)
-        border = v2_token(self._theme_engine, "border_muted", colors.border)
-        text_primary = v2_token(self._theme_engine, "text_primary", colors.text_primary)
+    def _apply_theme_colors(self):
+        # B4：文件树消费 v2 token（侧栏 = surface_secondary，标题栏 = surface_primary），
+        # 无 v1 回退（B8：字面量 = v1 light 值）
+        sidebar_bg = v2_token(self._theme_engine, "surface_secondary", "#FAFAFA")
+        surface = v2_token(self._theme_engine, "surface_primary", "#F5F5F5")
+        border = v2_token(self._theme_engine, "border_muted", "#E0E0E0")
+        text_primary = v2_token(self._theme_engine, "text_primary", "#212121")
 
         self.setStyleSheet(f"""
             QWidget {{

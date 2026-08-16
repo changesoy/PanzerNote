@@ -161,10 +161,10 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
 
         self._init_theme(theme_engine)
 
-    def _apply_theme_colors(self, colors):
-        # B4：搜索面板文字消费 v2 token（text_secondary），回退 v1；
+    def _apply_theme_colors(self):
+        # B4：搜索面板文字消费 v2 token（text_secondary），无 v1 回退；
         # 输入/下拉/勾选/按钮/结果树由 B3 全局 recipe 驱动
-        text_secondary = v2_token(self._theme_engine, "text_secondary", colors.text_secondary)
+        text_secondary = v2_token(self._theme_engine, "text_secondary", "#757575")
         label_style = f"font-size: 11px; color: {text_secondary};"
         for label in (self._scope_label, self._include_label,
                       self._exclude_label, self._status_label):

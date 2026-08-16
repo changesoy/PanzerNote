@@ -89,14 +89,14 @@ class ShortcutEditDialog(ThemeAwareMixin, QDialog):
 
         self._init_theme(theme_engine)
 
-    def _apply_theme_colors(self, colors):
+    def _apply_theme_colors(self):
         # B5：QDialog/QLabel/QPushButton 由全局 QSS（dialog/button recipe）驱动；
-        # QKeySequenceEdit 不在全局覆盖清单，消费 input recipe 色值，回退 v1。
-        bg = v2_color(self._theme_engine, "input", "background", colors.card)
-        text = v2_color(self._theme_engine, "input", "text", colors.text_primary)
-        border = v2_color(self._theme_engine, "input", "border", colors.border)
-        focus_border = v2_color(self._theme_engine, "input", "focus_border", colors.primary)
-        selection = v2_color(self._theme_engine, "input", "selection_bg", colors.primary_light)
+        # QKeySequenceEdit 不在全局覆盖清单，消费 input recipe 色值，无 v1 回退。
+        bg = v2_color(self._theme_engine, "input", "background", "#FFFFFF")
+        text = v2_color(self._theme_engine, "input", "text", "#212121")
+        border = v2_color(self._theme_engine, "input", "border", "#E0E0E0")
+        focus_border = v2_color(self._theme_engine, "input", "focus_border", "#2196F3")
+        selection = v2_color(self._theme_engine, "input", "selection_bg", "#BBDEFB")
         radius = v2_style_value(self._theme_engine, "input", "radius", 4)
         pad = v2_style_value(self._theme_engine, "input", "padding", 6)
         self.setStyleSheet(scale_stylesheet(f"""
@@ -212,15 +212,15 @@ class ShortcutPanel(ThemeAwareMixin, QWidget):
 
         self._populate_tree()
 
-    def _apply_theme_colors(self, colors):
+    def _apply_theme_colors(self):
         # B5：QWidget 面板背景与 QLabel 消费 v2 token；QLineEdit/QTreeWidget/
         # QScrollBar 由全局 recipe（input/tree_item/scrollbar）驱动。
-        # QHeaderView 不在全局覆盖清单，token 化保留。
-        panel_bg = v2_token(self._theme_engine, "surface_secondary", colors.dialog_bg)
-        surface = v2_token(self._theme_engine, "surface_primary", colors.surface)
-        text_primary = v2_token(self._theme_engine, "text_primary", colors.text_primary)
-        text_secondary = v2_token(self._theme_engine, "text_secondary", colors.text_secondary)
-        border = v2_token(self._theme_engine, "border_muted", colors.border)
+        # QHeaderView 不在全局覆盖清单，token 化保留。无 v1 回退。
+        panel_bg = v2_token(self._theme_engine, "surface_secondary", "#FFFFFF")
+        surface = v2_token(self._theme_engine, "surface_primary", "#F5F5F5")
+        text_primary = v2_token(self._theme_engine, "text_primary", "#212121")
+        text_secondary = v2_token(self._theme_engine, "text_secondary", "#757575")
+        border = v2_token(self._theme_engine, "border_muted", "#E0E0E0")
         self.setStyleSheet(scale_stylesheet(f"""
         QWidget#ShortcutPanel {{
             background-color: {panel_bg};

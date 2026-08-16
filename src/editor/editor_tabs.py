@@ -35,7 +35,7 @@ from ..security.file_guard import FileSizeExceededError, FileOperationTimeoutErr
 from ..security.file_access_context import FileAccessContext
 from ..security.input_validator import InputValidator
 from ..themes.theme_aware_mixin import ThemeAwareMixin
-from ..themes.theme_v2.consumer import v2_color, v2_token
+from ..themes.theme_v2.consumer import v2_color, v2_export_colors, v2_token
 from .editor import Editor
 from .markdown_preview import MarkdownPreviewWidget
 from .find_replace import FindReplaceBar
@@ -270,15 +270,14 @@ class _TabCloseButton(QWidget):
         self._btn.setFixedSize(15, 16)
         self._btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._btn.setText("×")
-        colors = theme_engine.get_active_theme().colors
-        self._apply_btn_style(colors)
+        self._apply_btn_style()
         layout.addWidget(self._btn)
         layout.addStretch()
 
         self._btn.clicked.connect(self._on_clicked)
 
-    def _apply_btn_style(self, colors) -> None:
-        close_hover = v2_color(self._theme_engine, "tab", "close_hover", colors.hover_bg)
+    def _apply_btn_style(self) -> None:
+        close_hover = v2_color(self._theme_engine, "tab", "close_hover", "#BBDEFB")
         self._btn.setStyleSheet(
             f"#tabCloseInnerBtn {{ border: none; background: transparent; border-radius: 2px; padding: 0; }}"
             f"#tabCloseInnerBtn:hover {{ background: {close_hover}; }}"
@@ -1061,7 +1060,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 is_md,
                 self,
                 _on_pdf_ready,
-                self._theme_engine.get_active_theme().colors,
+                v2_export_colors(self._theme_engine),
             )
             return True, 0
         except RuntimeError as e:
@@ -1090,7 +1089,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             body_html = ExportService.render_content(content, is_md)
             full_html = build_export_html_document(
                 body_html,
-                self._theme_engine.get_active_theme().colors,
+                v2_export_colors(self._theme_engine),
             )
             self.config.get_file_guard().safe_write_bytes(
                 filepath,
@@ -1468,16 +1467,16 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 break
             keep_index -= 1
 
-    def _apply_theme_colors(self, colors):
-        # B2：tabs 消费 v2 tab recipe（回退 v1）
-        tab_bg = v2_color(self._theme_engine, "tab", "background", colors.surface)
-        active_bg = v2_color(self._theme_engine, "tab", "active_background", colors.card)
-        pane_bg = v2_color(self._theme_engine, "tab", "pane_background", colors.editor_bg)
-        tab_fg = v2_color(self._theme_engine, "tab", "text", colors.text_secondary)
-        active_fg = v2_token(self._theme_engine, "text_primary", colors.text_primary)
-        hover_bg = v2_color(self._theme_engine, "tab", "hover_background", colors.primary_light)
-        pressed_bg = v2_color(self._theme_engine, "tab", "pressed_background", colors.border)
-        border = v2_color(self._theme_engine, "tab", "border", colors.border)
+    def _apply_theme_colors(self):
+        # B8：tabs 消费 v2 tab recipe
+        tab_bg = v2_color(self._theme_engine, "tab", "background", "#F5F5F5")
+        active_bg = v2_color(self._theme_engine, "tab", "active_background", "#FFFFFF")
+        pane_bg = v2_color(self._theme_engine, "tab", "pane_background", "#FFFFFF")
+        tab_fg = v2_color(self._theme_engine, "tab", "text", "#757575")
+        active_fg = v2_token(self._theme_engine, "text_primary", "#212121")
+        hover_bg = v2_color(self._theme_engine, "tab", "hover_background", "#BBDEFB")
+        pressed_bg = v2_color(self._theme_engine, "tab", "pressed_background", "#E0E0E0")
+        border = v2_color(self._theme_engine, "tab", "border", "#E0E0E0")
 
         self.setStyleSheet(f"""
     QTabWidget {{
@@ -1552,7 +1551,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             for i in range(tab_bar.count()):
                 btn = tab_bar.tabButton(i, QTabBar.ButtonPosition.RightSide)
                 if isinstance(btn, _TabCloseButton):
-                    btn._apply_btn_style(colors)
+                    btn._apply_btn_style()
 
     def _on_tab_close_requested(self, index: int):
         self._close_tab(index)

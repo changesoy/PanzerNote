@@ -42,6 +42,26 @@ _MD_STYLE_MAP = {
     "code_block_bg": "code_block_bg",
 }
 
+# B2：v2 recipe 不可用时的字面量 fallback（= v1 light md_* 值），无 v1 对象回退
+_MD_FALLBACK = {
+    "h1_fg": "#000000",
+    "h2_fg": "#000000",
+    "h3_fg": "#000000",
+    "h456_fg": "#2b2b2b",
+    "bold_fg": "#2b2b2b",
+    "italic_fg": "#2b2b2b",
+    "code_fg": "#008000",
+    "code_bg": "#f2f2f2",
+    "link_fg": "#2470B3",
+    "image_fg": "#6A1B9A",
+    "list_fg": "#2b2b2b",
+    "quote_fg": "#808080",
+    "hr_fg": "#AAAAAA",
+    "fence_fg": "#808080",
+    "code_block_fg": "#2b2b2b",
+    "code_block_bg": "#f5f5f5",
+}
+
 
 # ════════════════════════════════════════════════════════
 #  Pygments 语法高亮器
@@ -120,19 +140,14 @@ class MarkdownHighlighter(QSyntaxHighlighter):
 
     def _init_formats(self, is_dark: bool):
         """初始化所有格式"""
-        theme_colors = self._theme_engine.get_active_theme().colors
-
         def get_color(key: str) -> str:
-            # B2：md_* → v2 markdown recipe（token 引用），回退 v1
+            # B2：md_* → v2 markdown recipe（token 引用），无 v1 回退
             style_key = _MD_STYLE_MAP.get(key)
             if style_key:
                 color = v2_color(self._theme_engine, "markdown", style_key)
                 if color:
                     return color
-            token_key = f"md_{key}"
-            if hasattr(theme_colors, token_key):
-                return str(getattr(theme_colors, token_key))
-            return "#000000"
+            return _MD_FALLBACK.get(key, "#000000")
 
         self.inline_rules = []
 

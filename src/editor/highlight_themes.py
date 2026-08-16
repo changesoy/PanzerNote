@@ -162,16 +162,9 @@ else:
 # ════════════════════════════════════════════════════════
 
 def _color_map(theme_engine) -> dict:
-    """构建 {Token: color} 映射。
-
-    B2：优先消费 Theme v2 syntax palette（含 override）；v2 不可用时回退 v1
-    ThemeColorScheme 的 syntax_* 属性。
-    """
+    """构建 {Token: color} 映射（B2：纯 v2 syntax palette，无 v1 回退）。"""
     v2_colors = v2_syntax_colors(theme_engine)
-    if v2_colors:
-        return {token: v2_colors.get(name) for token, name in TOKEN_MAP.items() if name in v2_colors}
-    colors = theme_engine.get_active_theme().colors
-    return {token: getattr(colors, name) for token, name in TOKEN_MAP.items() if hasattr(colors, name)}
+    return {token: v2_colors.get(name) for token, name in TOKEN_MAP.items() if name in v2_colors}
 
 
 def build_format(style: dict) -> QTextCharFormat:

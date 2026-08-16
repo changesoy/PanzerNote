@@ -237,12 +237,12 @@ li input[type="checkbox"] {
 """
 
 
-def build_export_html_document(body_html: str, colors, title: str = "") -> str:
+def build_export_html_document(body_html: str, theme_colors: dict[str, str], title: str = "") -> str:
     """构建完整的导出 HTML 文档
 
     参数：
       body_html：已渲染的安全 HTML 片段
-      colors：ThemeColorScheme 实例，提供主题色值
+      theme_colors：v2 色值集合（v2_export_colors 产物），提供主题色值
       title：文档标题（可选）
 
     返回：完整的 HTML 文档字符串
@@ -254,19 +254,19 @@ def build_export_html_document(body_html: str, colors, title: str = "") -> str:
     """
     title_tag = f"<title>{html_module.escape(title)}</title>" if title else ""
     root_vars = f""":root {{
-    --text-primary: {colors.text_primary};
-    --text-secondary: {colors.text_secondary};
-    --text-muted: {colors.text_disabled};
-    --border: {colors.border};
-    --border-soft: {colors.divider};
-    --divider: {colors.divider};
-    --surface: {colors.surface};
-    --surface-soft: {colors.surface};
-    --surface-hover: {colors.sidebar_bg};
-    --primary: {colors.primary};
-    --primary-hover: {colors.primary_dark};
-    --bg-codeblock: {colors.bg_codeblock};
-    --scrollbar-thumb-hover: {colors.text_disabled};
+    --text-primary: {theme_colors["text_primary"]};
+    --text-secondary: {theme_colors["text_secondary"]};
+    --text-muted: {theme_colors["text_disabled"]};
+    --border: {theme_colors["border"]};
+    --border-soft: {theme_colors["divider"]};
+    --divider: {theme_colors["divider"]};
+    --surface: {theme_colors["surface"]};
+    --surface-soft: {theme_colors["surface"]};
+    --surface-hover: {theme_colors["sidebar_bg"]};
+    --primary: {theme_colors["primary"]};
+    --primary-hover: {theme_colors["primary_dark"]};
+    --bg-codeblock: {theme_colors["bg_codeblock"]};
+    --scrollbar-thumb-hover: {theme_colors["text_disabled"]};
 }}"""
     export_shell_css = """/* ========== 导出文档外壳 ========== */
 body {

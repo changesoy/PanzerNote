@@ -93,3 +93,19 @@ def v2_active_variant(theme_engine: ThemeEngine) -> str | None:
     if svc is None:
         return None
     return svc.active_variant()
+
+
+def v2_export_colors(theme_engine: ThemeEngine) -> dict[str, str]:
+    """导出 HTML/PDF 所需的 v2 色值集合（B8：替代 v1 ThemeColorScheme 传参）。"""
+    return {
+        "text_primary": v2_token(theme_engine, "text_primary", "#212121"),
+        "text_secondary": v2_token(theme_engine, "text_secondary", "#757575"),
+        "text_disabled": v2_token(theme_engine, "text_muted", "#BDBDBD"),
+        "border": v2_token(theme_engine, "border_muted", "#E0E0E0"),
+        "divider": v2_token(theme_engine, "border_muted", "#EEEEEE"),
+        "surface": v2_token(theme_engine, "surface_secondary", "#F5F5F5"),
+        "sidebar_bg": v2_token(theme_engine, "surface_secondary", "#FAFAFA"),
+        "primary": v2_token(theme_engine, "accent", "#2196F3"),
+        "primary_dark": v2_color(theme_engine, "button", "pressed_background", "#1976D2"),
+        "bg_codeblock": v2_token(theme_engine, "md_preview_code_block_bg", "#EDF3FA"),
+    }

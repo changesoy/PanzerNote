@@ -50,7 +50,13 @@ from ..utils.perf_probe import measure as _perf_measure
 from ..utils.feature_flags import is_enabled as _feature_enabled
 from .folding import FoldingManager
 from ..themes.theme_aware_mixin import ThemeAwareMixin
-from ..themes.theme_v2.consumer import v2_color, v2_color_qcolor, v2_style_value, v2_token
+from ..themes.theme_v2.consumer import (
+    v2_active_variant,
+    v2_color,
+    v2_color_qcolor,
+    v2_style_value,
+    v2_token,
+)
 
 
 class LineNumberArea(QWidget):
@@ -234,20 +240,20 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
 
-    def _apply_theme_colors(self, colors):
-        # B2：编辑器 slice 优先消费 Theme v2（token + editor/scrollbar recipe），回退 v1
-        bg = v2_color(self._theme_engine, "editor", "background", colors.editor_bg)
+    def _apply_theme_colors(self):
+        # B8：编辑器 slice 消费 Theme v2（token + editor/scrollbar recipe），fallback 字面量
+        bg = v2_color(self._theme_engine, "editor", "background", "#FFFFFF")
         # 选区：accent 半透明（经典 GitHub 淡蓝选区观感，深浅双变体均合理）
         sel = v2_color_qcolor(
-            self._theme_engine, "editor", "selection", colors.primary_light, alpha=102
+            self._theme_engine, "editor", "selection", "#BBDEFB", alpha=102
         ).name(QColor.NameFormat.HexArgb)
-        fg = v2_token(self._theme_engine, "text_primary", colors.text_primary)
+        fg = v2_token(self._theme_engine, "text_primary", "#212121")
 
-        # B2 生产首版：编辑器 Scrollbar 走 v2 scrollbar recipe（B3 推广到全应用）
-        sb_track = v2_color(self._theme_engine, "scrollbar", "track", colors.surface)
-        sb_handle = v2_color(self._theme_engine, "scrollbar", "handle", colors.border)
-        sb_hover = v2_color(self._theme_engine, "scrollbar", "handle_hover", colors.text_disabled)
-        sb_pressed = v2_color(self._theme_engine, "scrollbar", "handle_pressed", colors.text_secondary)
+        # 编辑器 Scrollbar 走 v2 scrollbar recipe
+        sb_track = v2_color(self._theme_engine, "scrollbar", "track", "#F5F5F5")
+        sb_handle = v2_color(self._theme_engine, "scrollbar", "handle", "#E0E0E0")
+        sb_hover = v2_color(self._theme_engine, "scrollbar", "handle_hover", "#BDBDBD")
+        sb_pressed = v2_color(self._theme_engine, "scrollbar", "handle_pressed", "#757575")
         sb_width = int(v2_style_value(self._theme_engine, "scrollbar", "width", 12))
         sb_min_len = int(v2_style_value(self._theme_engine, "scrollbar", "min_len", 20))
         sb_margin = int(v2_style_value(self._theme_engine, "scrollbar", "margin", 2))
@@ -303,7 +309,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         # 更新高亮器的主题（3.5.8：两种高亮器均实现 set_dark_mode——Pygments
         # 走 set_dark_mode 重建 formats，不经过 set_file_type，避免摘除共享高亮）
         if self._highlighter and self._filepath_or_ext:
-            is_dark = self._theme_engine.get_active_theme().is_dark
+            is_dark = v2_active_variant(self._theme_engine) == "dark"
             if hasattr(self._highlighter, 'set_dark_mode'):
                 self._highlighter.set_dark_mode(is_dark)
             else:
@@ -313,7 +319,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
 
         # 更新无父顶层补全弹窗的主题
         if hasattr(self, "_completion_popup") and self._completion_popup is not None:
-            self._completion_popup.apply_theme_colors(self._theme_engine, colors)
+            self._completion_popup.apply_theme_colors(self._theme_engine)
             font_family = self.config.get_editor_setting("font_family", "Microsoft YaHei")
             font_size = self.config.get_editor_setting("font_size", 12)
             self._completion_popup.apply_font(font_family, font_size)
@@ -479,11 +485,10 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
     def line_number_area_paint_event(self, event):
         """绘制行号 + 折叠标记"""
         painter = QPainter(self.line_number_area)
-        colors = self._theme_engine.get_active_theme().colors
-        bg_color = v2_color(self._theme_engine, "editor", "background", colors.sidebar_bg)
-        text_color = v2_color(self._theme_engine, "editor", "line_number", colors.editor_line_number)
-        bookmark_bg_color = v2_color(self._theme_engine, "editor", "bookmark_bg", colors.editor_bookmark_bg)
-        bookmark_fg_color = v2_color(self._theme_engine, "editor", "bookmark_fg", colors.editor_bookmark_fg)
+        bg_color = v2_color(self._theme_engine, "editor", "background", "#F5F5F5")
+        text_color = v2_color(self._theme_engine, "editor", "line_number", "#BDBDBD")
+        bookmark_bg_color = v2_color(self._theme_engine, "editor", "bookmark_bg", "#FF9800")
+        bookmark_fg_color = v2_color(self._theme_engine, "editor", "bookmark_fg", "#FFFFFF")
         painter.fillRect(event.rect(), QColor(bg_color))
 
         supports_fold = self._file_type in self._FOLD_SUPPORTED_TYPES
@@ -522,11 +527,11 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
                 if supports_fold and self._folding.is_foldable(block_number):
                     collapsed = (block_number + 1) in self._folding._collapsed_blocks
                     fold_color_expanded_name = v2_color(
-                        self._theme_engine, "editor", "fold_marker", colors.editor_fold_marker
+                        self._theme_engine, "editor", "fold_marker", "#4CAF50"
                     )
                     fold_color_collapsed_name = v2_color(
                         self._theme_engine, "editor", "fold_marker_collapsed",
-                        colors.editor_fold_marker_collapsed,
+                        "#66BB6A",
                     )
                     painter.setBrush(QColor(fold_color_collapsed_name if collapsed else fold_color_expanded_name))
                     painter.setPen(Qt.PenStyle.NoPen)
@@ -566,7 +571,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
                 self._theme_engine,
                 "editor",
                 "current_line",
-                self._theme_engine.get_active_theme().colors.editor_current_line,
+                "#FFF9C4",
             )
             line_color = QColor(line_color_name)
             selection.format.setBackground(line_color)
@@ -589,10 +594,9 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             self._selection_manager.refresh()
             return
 
-        colors = self._theme_engine.get_active_theme().colors
-        match_bg = v2_color(self._theme_engine, "editor", "bracket_match_bg", colors.editor_bracket_match_bg)
-        match_fg = v2_color(self._theme_engine, "editor", "bracket_match_fg", colors.editor_bracket_match_fg)
-        unmatched = v2_color(self._theme_engine, "editor", "bracket_unmatched", colors.editor_bracket_unmatched)
+        match_bg = v2_color(self._theme_engine, "editor", "bracket_match_bg", "#E6F2E6")
+        match_fg = v2_color(self._theme_engine, "editor", "bracket_match_fg", "#1A1A1A")
+        unmatched = v2_color(self._theme_engine, "editor", "bracket_unmatched", "#E06C75")
 
         selections: list[QTextEdit.ExtraSelection] = []
 
@@ -732,7 +736,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
                 self._lazy_highlight.set_highlighter(self._highlighter)
                 self.apply_auto_minimap()
                 return
-        is_dark = self._theme_engine.get_active_theme().is_dark
+        is_dark = v2_active_variant(self._theme_engine) == "dark"
         self._highlighter, self._file_type = get_highlighter_for_file(
             doc, filepath_or_ext, theme_engine=self._theme_engine, is_dark=is_dark
         )

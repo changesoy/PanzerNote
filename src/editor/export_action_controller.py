@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import QFileDialog, QMessageBox, QWidget
 
 from ..game.secretary_widget import SecretaryWidget
 from ..themes.theme_engine import ThemeEngine
+from ..themes.theme_v2.consumer import v2_export_colors
 from ..utils.error_handler import ErrorHandler, ErrorCategory
 
 from .editor_tabs import EditorTabWidget
@@ -63,7 +64,7 @@ class ExportActionController:
                 is_md,
                 self._parent_widget,
                 on_pdf_ready,
-                self._theme_engine.get_active_theme().colors,
+                v2_export_colors(self._theme_engine),
             )
         except RuntimeError as e:
             QMessageBox.warning(self._parent_widget, "导出失败", str(e))
@@ -109,7 +110,7 @@ class ExportActionController:
                 content,
                 is_md,
                 filepath,
-                self._theme_engine.get_active_theme().colors,
+                v2_export_colors(self._theme_engine),
                 file_guard=self._editor_tabs.config.get_file_guard(),
             )
             self._secretary.show_message(

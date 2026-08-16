@@ -178,11 +178,11 @@ class SidePanelHost(ThemeAwareMixin, QWidget):
     # 主题
     # ------------------------------------------------------------------
 
-    def _apply_theme_colors(self, colors) -> None:
-        self._last_colors = colors
-        # B4：侧栏消费 v2 token（侧栏/活动栏 = surface_secondary），回退 v1
-        bg = v2_token(self._theme_engine, "surface_secondary", colors.sidebar_bg)
-        border = v2_token(self._theme_engine, "border_muted", colors.border)
+    def _apply_theme_colors(self) -> None:
+        self._theme_applied = True
+        # B4：侧栏消费 v2 token（侧栏/活动栏 = surface_secondary），无 v1 回退
+        bg = v2_token(self._theme_engine, "surface_secondary", "#FAFAFA")
+        border = v2_token(self._theme_engine, "border_muted", "#E0E0E0")
 
         self.setStyleSheet(f"""
             #side_panel_host {{
@@ -203,12 +203,12 @@ class SidePanelHost(ThemeAwareMixin, QWidget):
 
     def _style_button(self, btn: QToolButton) -> None:
         """给单个按钮设样式。"""
-        c = self._last_colors
-        if c is None:
+        if not self._theme_applied:
             return
-        text = v2_token(self._theme_engine, "text_primary", c.text_primary)
-        border = v2_token(self._theme_engine, "border_muted", c.border)
-        accent = v2_token(self._theme_engine, "accent", c.accent)
+        text = v2_token(self._theme_engine, "text_primary", "#212121")
+        border = v2_token(self._theme_engine, "border_muted", "#E0E0E0")
+        accent = v2_token(self._theme_engine, "accent", "#2196F3")
+        on_accent = v2_token(self._theme_engine, "on_accent", "#FFFFFF")
         btn.setStyleSheet(f"""
             QToolButton {{
                 background: transparent;
@@ -225,7 +225,7 @@ class SidePanelHost(ThemeAwareMixin, QWidget):
             QToolButton:checked {{
                 background-color: {accent};
                 border-color: {accent};
-                color: #FFFFFF;  /* B3 对比度铁律：accent 底前景必须白色 */
+                color: {on_accent};
             }}
         """)
 

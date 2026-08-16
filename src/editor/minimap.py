@@ -44,13 +44,6 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
             raise RuntimeError("Minimap 必须传入 theme_engine，不允许为 None")
         self._editor = editor
         self._dragging = False
-        colors = theme_engine.get_active_theme().colors
-        self._bg_color = colors.minimap_bg
-        self._border_color = colors.border
-        self._text_color = colors.text_disabled
-        primary = QColor(colors.primary)
-        self._viewport_color = QColor(primary.red(), primary.green(), primary.blue(), 30)
-        self._viewport_border_color = QColor(primary.red(), primary.green(), primary.blue(), 70)
 
         self.setFixedWidth(self.MINIMAP_WIDTH)
         self.setCursor(Qt.CursorShape.ArrowCursor)
@@ -74,12 +67,12 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
 
         self._init_theme(theme_engine)
 
-    def _apply_theme_colors(self, colors):
-        # B2：minimap 消费 v2 minimap recipe（回退 v1）
-        self._bg_color = v2_color(self._theme_engine, "minimap", "background", colors.minimap_bg)
-        self._border_color = v2_color(self._theme_engine, "minimap", "background", colors.border)
-        self._text_color = v2_color(self._theme_engine, "minimap", "text", colors.text_disabled)
-        primary = QColor(v2_token(self._theme_engine, "accent", colors.primary))
+    def _apply_theme_colors(self):
+        # B2：minimap 消费 v2 minimap recipe + 语义 token，无 v1 回退
+        self._bg_color = v2_color(self._theme_engine, "minimap", "background", "#FFFFFF")
+        self._border_color = v2_token(self._theme_engine, "border_muted", "#E0E0E0")
+        self._text_color = v2_color(self._theme_engine, "minimap", "text", "#BDBDBD")
+        primary = QColor(v2_token(self._theme_engine, "accent", "#2196F3"))
         self._viewport_color = QColor(primary.red(), primary.green(), primary.blue(), 30)
         self._viewport_border_color = QColor(primary.red(), primary.green(), primary.blue(), 70)
         self._cache_valid = False

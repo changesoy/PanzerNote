@@ -38,6 +38,7 @@ from PyQt6.QtGui import QPixmap, QFont, QPainter, QColor
 from ..core.config import Config
 from ..utils.logger import get_logger
 from ..themes.theme_aware_mixin import ThemeAwareMixin
+from ..themes.theme_v2.consumer import v2_token
 
 
 _POSITION_DEBOUNCE_MS = 16
@@ -69,18 +70,18 @@ class SpeechBubble(QFrame):
 
         self.hide()
 
-    def apply_theme_colors(self, colors):
+    def apply_theme_colors(self, bubble_bg: str, bubble_border: str, text_primary: str):
         self.setStyleSheet(f"""
             QFrame {{
-                background-color: {colors.secretary_bubble_bg};
-                border: 2px solid {colors.secretary_bubble_border};
+                background-color: {bubble_bg};
+                border: 2px solid {bubble_border};
                 border-radius: 12px;
             }}
         """)
         self.label.setStyleSheet(f"""
             QLabel {{
                 font-size: 12px;
-                color: {colors.text_primary};
+                color: {text_primary};
                 background: transparent;
                 border: none;
                 line-height: 1.4;
@@ -205,8 +206,13 @@ class SecretaryWidget(ThemeAwareMixin, QWidget):
 
         QTimer.singleShot(500, self._initial_setup)
 
-    def _apply_theme_colors(self, colors):
-        self.bubble.apply_theme_colors(colors)
+    def _apply_theme_colors(self):
+        # B3：小秘书归记事本侧 UI，主题感知（无 v1 回退，B8：字面量 = v1 light 值）
+        self.bubble.apply_theme_colors(
+            v2_token(self._theme_engine, "surface_raised", "#FFFFFF"),
+            v2_token(self._theme_engine, "border_muted", "#E0E0E0"),
+            v2_token(self._theme_engine, "text_primary", "#212121"),
+        )
 
     def _initial_setup(self):
         """初始设置"""
@@ -367,8 +373,8 @@ class SecretaryWidget(ThemeAwareMixin, QWidget):
         painter = QPainter(placeholder)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        bg_color = self._theme_engine.get_active_theme().colors.border
-        text_color = self._theme_engine.get_active_theme().colors.text_secondary
+        bg_color = v2_token(self._theme_engine, "border_muted", "#E0E0E0")
+        text_color = v2_token(self._theme_engine, "text_secondary", "#757575")
         painter.setBrush(QColor(bg_color))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(10, 10, w - 20, h - 20, 10, 10)

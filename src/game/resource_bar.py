@@ -15,6 +15,7 @@ from PyQt6.QtGui import QFont
 
 from ..core.config import Config
 from ..themes.theme_aware_mixin import ThemeAwareMixin
+from ..themes.theme_v2.consumer import v2_token
 from .game_palette import game_palette
 
 
@@ -38,7 +39,7 @@ class ResourceItem(QWidget):
         self.value_label.setMinimumWidth(60)
         layout.addWidget(self.value_label)
 
-    def apply_theme_colors(self, colors):
+    def apply_theme_colors(self, text_primary: str, text_secondary: str):
         # 资源色固定（D28），不随主题明暗变化；文字仍主题感知
         palette = game_palette()
         color_map = {
@@ -47,12 +48,12 @@ class ResourceItem(QWidget):
             "steel": palette["resource_steel"],
             "bauxite": palette["resource_bauxite"],
         }
-        color = color_map.get(self.name, colors.text_secondary)
+        color = color_map.get(self.name, text_secondary)
         self.icon_label.setStyleSheet(f"""
             background-color: {color};
             border-radius: 4px;
         """)
-        self.value_label.setStyleSheet(f"color: {colors.text_primary};")
+        self.value_label.setStyleSheet(f"color: {text_primary};")
 
     def set_value(self, value: int):
         self._value = value
@@ -111,17 +112,20 @@ class ResourceBar(ThemeAwareMixin, QWidget):
 
         self.refresh()
 
-    def _apply_theme_colors(self, colors):
+    def _apply_theme_colors(self):
+        # B3：资源栏消费 v2 token（无 v1 回退，B8：字面量 = v1 light 值）
         self.setStyleSheet(f"""
             ResourceBar {{
-                background-color: {colors.statusbar_bg};
-                border-bottom: 1px solid {colors.border};
+                background-color: {v2_token(self._theme_engine, "surface_secondary", "#F5F5F5")};
+                border-bottom: 1px solid {v2_token(self._theme_engine, "border_muted", "#E0E0E0")};
             }}
         """)
+        text_primary = v2_token(self._theme_engine, "text_primary", "#212121")
+        text_secondary = v2_token(self._theme_engine, "text_secondary", "#757575")
         for item in (self.fuel, self.ammo, self.steel, self.bauxite):
-            item.apply_theme_colors(colors)
-        self.docs_label.setStyleSheet(f"color: {colors.text_secondary};")
-        self.typing_label.setStyleSheet(f"color: {colors.text_secondary};")
+            item.apply_theme_colors(text_primary, text_secondary)
+        self.docs_label.setStyleSheet(f"color: {text_secondary};")
+        self.typing_label.setStyleSheet(f"color: {text_secondary};")
 
     def refresh(self):
         resources = self.config.get_resources()

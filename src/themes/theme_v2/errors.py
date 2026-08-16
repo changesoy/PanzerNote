@@ -31,3 +31,11 @@ class ThemeResourceError(ThemeError):
 
 class ThemeFallbackError(ThemeError):
     """缺省 renderer / icon fallback 不可达。"""
+
+
+class ThemeSwitchPlanError(ThemeError):
+    """切换计划非法（如 L1 计划中有 renderer 变化但无注册宿主，或提交了非计划内步骤）。"""
+
+
+class ThemeSwitchUnsupportedError(ThemeError):
+    """切换等级不支持执行（L2 Shell rebuild 在 Wave 8 只留 Contract，executor 拒绝）。"""

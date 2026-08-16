@@ -21,6 +21,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 
 from ..utils.logger import get_logger
 from .theme_v2.library import ThemeComponentLibrary
+from .theme_v2.manager import ThemeManager
 from .theme_v2.service import ThemeV2Service
 
 
@@ -228,6 +229,7 @@ class ThemeEngine(QObject):
         """B2：初始化 Theme v2 运行时（default 包），跟随 v1 主题明暗选择变体。
 
         v2 加载失败时保持禁用，消费方回退 v1 机制，不影响应用启动。
+        B7：v2 激活态写入口唯一收口到 ThemeManager（设计文档 9.1）。
         """
         themes_dir = os.path.normpath(os.path.join(
             os.path.dirname(os.path.abspath(__file__)), "..", "..", "themes"
@@ -237,13 +239,17 @@ class ThemeEngine(QObject):
         self.components = ThemeComponentLibrary(self.theme_v2)
         if not self.theme_v2.load_default():
             return
+        self.theme_manager = ThemeManager(themes_dir, self.theme_v2, parent=self)
         active = self.get_active_theme()
-        self.theme_v2.set_variant(self.theme_v2.variant_for_dark(active.is_dark))
+        self.theme_manager.request_variant_for_dark(active.is_dark)
         self.theme_changed.connect(self._on_theme_changed_v2)
 
     def _on_theme_changed_v2(self, theme_id: str) -> None:
+        """B7：v1 theme_changed → 委托 ThemeManager 切换 v2 变体（service 不再直写激活态）。"""
         theme = self.get_theme(theme_id) or self.get_active_theme()
-        self.theme_v2.set_variant(self.theme_v2.variant_for_dark(theme.is_dark))
+        manager = getattr(self, "theme_manager", None)
+        if manager is not None:
+            manager.request_variant_for_dark(theme.is_dark)
 
     def _get_themes_dir(self) -> str:
         app_dir = self._config.get_app_dir()
@@ -624,7 +630,8 @@ QFrame[frameShape="5"] {{
             self._active_theme_id = saved_theme
         else:
             self._active_theme_id = "light"
-        # B2：恢复持久化主题后同步 Theme v2 variant（initialize 不触发 theme_changed）
-        service = getattr(self, "theme_v2", None)
-        if service is not None:
-            service.set_variant(service.variant_for_dark(self.get_active_theme().is_dark))
+        # B2：恢复持久化主题后同步 Theme v2 variant（initialize 不触发 theme_changed）。
+        # B7：走 ThemeManager（9.1），不经 controller（启动期无动画）。
+        manager = getattr(self, "theme_manager", None)
+        if manager is not None:
+            manager.request_variant_for_dark(self.get_active_theme().is_dark)

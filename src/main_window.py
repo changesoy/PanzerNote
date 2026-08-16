@@ -1530,6 +1530,13 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def _on_theme_applied(self, theme_id: str):
+        """B7：唯一切换编排点（设计文档 9.2）。
+
+        ``engine.set_active_theme``（v1 持久化 + theme_changed → 内部经 manager
+        完成 v2 事务）→ ``_apply_theme``（全局 QSS 重涂 + DWM 标题栏）。
+        """
+        if not self.theme_engine.set_active_theme(theme_id):
+            return
         self._apply_theme()
         self.secretary.show_message(f"已切换主题: {self.theme_engine.get_active_theme().name}")
 

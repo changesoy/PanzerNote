@@ -18,6 +18,7 @@ from typing import Any, Mapping
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from ...utils.logger import get_logger
+from .errors import ThemeSchemaError
 from .loader import ThemePackageLoader
 from .renderer_registry import RendererRegistry
 from .resources import PaletteRegistry, ThemeResourceContract
@@ -57,6 +58,10 @@ class ThemeV2Service(QObject):
 
         Returns:
             True 成功；False 失败（消费方回退 v1，不抛异常）。
+
+        Note:
+            B7 起加载职责逐步上移 ThemeManager（9.1）；本方法保留给启动期
+            回退路径，load_default 成功后的激活态写入口一律走 manager。
         """
         try:
             root = self._themes_root / "default"
@@ -89,16 +94,41 @@ class ThemeV2Service(QObject):
     def snapshot(self) -> ThemeSnapshot | None:
         return self._snapshot
 
-    def set_variant(self, variant_id: str) -> None:
-        """切换激活变体（B2：仅接受 snapshot 中存在的 variant）。"""
-        if self._snapshot is None:
-            return
-        if variant_id not in self._snapshot.variants:
-            _logger.warning("Theme v2 无变体 '%s'（可用: %s）", variant_id, sorted(self._snapshot.variants))
-            return
-        if variant_id != self._active_variant:
-            self._active_variant = variant_id
-            self.theme_v2_changed.emit()
+    # ──────────────────────────────────────────────── B7 事务写入口（唯一写入口）
+    def activate(
+        self,
+        snapshot: ThemeSnapshot,
+        variant_id: str,
+        palettes: Mapping[str, Mapping[SyntaxTokenKey, ColorValue]] | None = None,
+    ) -> None:
+        """B7：原子替换激活快照 + 变体 + syntax palette（**不发信号**）。
+
+        由 ThemeManager commit 事务步骤 2 调用（4.4）；失败回滚由 manager
+        用旧值再次调用 activate 完成，因此旧对象需在 manager 手中保留到成功。
+        ``palettes`` 为 None 时保持现有 palette（同包变体切换传 None）。
+        """
+        if variant_id not in snapshot.variants:
+            raise ThemeSchemaError(
+                f"Theme v2 无变体 '{variant_id}'（可用: {sorted(snapshot.variants)}）"
+            )
+        self._snapshot = snapshot
+        self._active_variant = variant_id
+        if palettes is not None:
+            self._palettes = {pid: dict(p) for pid, p in palettes.items()}
+
+    def notify_changed(self) -> None:
+        """B7：发布 v2 变更信号（manager commit 事务步骤 4，成功路径唯一发布点）。"""
+        self.theme_v2_changed.emit()
+
+    def deactivate(self) -> None:
+        """B7：v2 禁用降级——清空激活态，消费方下次读取即回退 v1。
+
+        由调用点在 v2 切换失败后主动调用（4.4 事务外降级链），随后自行重涂；
+        本方法不发信号（失败路径信号永不发布）。
+        """
+        self._snapshot = None
+        self._active_variant = None
+        self._palettes = {}
 
     def active_variant(self) -> str | None:
         """当前激活 variant id；未选择时取 snapshot 第一个 variant。"""
@@ -165,6 +195,10 @@ class ThemeV2Service(QObject):
         return merged
 
     # ──────────────────────────────────────────────── 工具
+    def syntax_palettes(self) -> Mapping[str, Mapping[SyntaxTokenKey, ColorValue]]:
+        """当前注册的 syntax palette（只读副本；manager 回滚与同包变体切换用）。"""
+        return {pid: dict(palette) for pid, palette in self._palettes.items()}
+
     def variant_for_dark(self, is_dark: bool) -> str:
         """B2 明暗 → variant id 映射（Dark→dark，Light→light，缺失时取首个）。"""
         if self._snapshot is None:

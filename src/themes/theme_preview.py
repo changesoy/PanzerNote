@@ -305,8 +305,12 @@ class ThemePreviewWidget(QWidget):
         )
 
     def _on_apply(self):
+        """B7：对话框只发请求应用信号，不自行应用（9.1）。
+
+        ``theme_applied`` 语义从「已应用」改为「请求应用」——切换序列统一
+        收口到 main_window（唯一编排点），事务边界清晰。
+        """
         if self._current_theme_id:
-            self._engine.set_active_theme(self._current_theme_id)
             self.theme_applied.emit(self._current_theme_id)
 
 

@@ -20,6 +20,7 @@ except ImportError:
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from ..utils.logger import get_logger
+from .theme_v2.library import ThemeComponentLibrary
 from .theme_v2.service import ThemeV2Service
 
 
@@ -232,6 +233,8 @@ class ThemeEngine(QObject):
             os.path.dirname(os.path.abspath(__file__)), "..", "..", "themes"
         ))
         self.theme_v2 = ThemeV2Service(themes_dir, parent=self)
+        # B3：Core Controls 统一视觉实现入口（available() 为 False 时回退 v1 全局 QSS）
+        self.components = ThemeComponentLibrary(self.theme_v2)
         if not self.theme_v2.load_default():
             return
         active = self.get_active_theme()
@@ -345,6 +348,10 @@ class ThemeEngine(QObject):
 
     def generate_stylesheet(self, theme: Optional[ThemeDefinition] = None) -> str:
         t = theme or self.get_active_theme()
+        # B3：v2 可用时 Core Controls 整段走 recipe（单次组装原子性），否则回退 v1
+        components = getattr(self, "components", None)
+        if components is not None and components.available():
+            return self._generate_stylesheet_v2(t)
         c = t.colors
 
         parts = []
@@ -533,6 +540,80 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
 
         if t.stylesheet_overrides:
             for selector, styles in t.stylesheet_overrides.items():
+                parts.append(f"{selector} {{\n    {styles}\n}}\n")
+
+        return "\n".join(parts)
+
+    def _generate_stylesheet_v2(self, theme: ThemeDefinition) -> str:
+        """B3：全局 QSS 由 v2 recipe 驱动（结构段 token + 控件段 library）。
+
+        仅在 ``generate_stylesheet`` 确认 ``components.available()`` 后调用：
+        结构段消费变体 token，Core Controls 与结构辅助（group_box/dialog）
+        消费 library 解析结果，整段原子切换（v2 不可用则整体回退 v1）。
+
+        variant 按传入主题的明暗选择（``variant_for_dark(theme.is_dark)``），
+        与 v1 路径按 ``theme.colors`` 取色语义一致；不切换引擎激活变体。
+        """
+        svc = self.theme_v2
+        vid = svc.variant_for_dark(theme.is_dark)
+        variant = svc.variant_snapshot(vid)
+        assert variant is not None  # available() 已保证 snapshot 非空
+        tokens = variant.tokens
+        tab = self.components.resolve("tab", vid) or {}
+
+        parts = [f"""
+QMainWindow {{
+    background-color: {tokens['surface_primary']};
+    color: {tokens['text_primary']};
+}}
+QMenuBar {{
+    background-color: {tokens['surface_secondary']};
+    color: {tokens['text_primary']};
+    border-bottom: 1px solid {tokens['border_muted']};
+}}
+QMenuBar::item:selected {{
+    background-color: {tokens['surface_raised']};
+}}
+QTabWidget::pane {{
+    border: 1px solid {tokens['border_muted']};
+}}
+QTabBar::tab {{
+    background-color: {tab.get('background', tokens['surface_secondary'])};
+    color: {tab.get('text', tokens['text_secondary'])};
+    border: 1px solid {tab.get('border', tokens['border_muted'])};
+    padding: 4px 12px;
+}}
+QTabBar::tab:selected {{
+    background-color: {tab.get('active_background', tokens['surface_primary'])};
+    color: {tab.get('active_text', tokens['text_primary'])};
+}}
+QStatusBar {{
+    background-color: {tokens['surface_secondary']};
+    color: {tokens['text_secondary']};
+    border-top: 1px solid {tokens['border_muted']};
+}}
+QLabel {{
+    color: {tokens['text_primary']};
+}}
+QSplitter::handle {{
+    background-color: {tokens['border_muted']};
+}}
+QFrame[frameShape="4"] {{
+    background-color: {tokens['border_muted']};
+    border: none;
+    max-height: 1px;
+}}
+QFrame[frameShape="5"] {{
+    background-color: {tokens['border_muted']};
+    border: none;
+    max-width: 1px;
+}}
+"""]
+
+        parts.append(self.components.all_qss(vid))
+
+        if theme.stylesheet_overrides:
+            for selector, styles in theme.stylesheet_overrides.items():
                 parts.append(f"{selector} {{\n    {styles}\n}}\n")
 
         return "\n".join(parts)

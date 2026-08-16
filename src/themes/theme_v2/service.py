@@ -108,10 +108,11 @@ class ThemeV2Service(QObject):
             return None
         return next(iter(self._snapshot.variants))
 
-    def variant_snapshot(self) -> VariantSnapshot | None:
+    def variant_snapshot(self, variant_id: str | None = None) -> VariantSnapshot | None:
+        """指定 variant 的快照；未指定时取当前激活 variant（B3：供按主题明暗选色）。"""
         if self._snapshot is None:
             return None
-        vid = self.active_variant()
+        vid = variant_id or self.active_variant()
         if vid is None:
             return None
         return self._snapshot.variants.get(vid)

@@ -363,7 +363,9 @@ class ThemeEngine(QObject):
         # B3：v2 可用时 Core Controls 整段走 recipe（单次组装原子性），否则回退 v1
         components = getattr(self, "components", None)
         if components is not None and components.available():
-            return self._generate_stylesheet_v2(t)
+            # 运行时（theme is None）取 v2 激活变体为唯一真相源，保证全局 QSS
+            # 与 ThemeAwareMixin 消费一致；显式传 theme（预览/测试）按明暗选择。
+            return self._generate_stylesheet_v2(t, use_active=theme is None)
         c = t.colors
 
         parts = []
@@ -556,18 +558,31 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
 
         return "\n".join(parts)
 
-    def _generate_stylesheet_v2(self, theme: ThemeDefinition) -> str:
+    def _generate_stylesheet_v2(
+        self,
+        theme: ThemeDefinition,
+        use_active: bool = False,
+    ) -> str:
         """B3：全局 QSS 由 v2 recipe 驱动（结构段 token + 控件段 library）。
 
         仅在 ``generate_stylesheet`` 确认 ``components.available()`` 后调用：
         结构段消费变体 token，Core Controls 与结构辅助（group_box/dialog）
         消费 library 解析结果，整段原子切换（v2 不可用则整体回退 v1）。
 
-        variant 按传入主题的明暗选择（``variant_for_dark(theme.is_dark)``），
-        与 v1 路径按 ``theme.colors`` 取色语义一致；不切换引擎激活变体。
+        variant 选择（单一真相源，修复深色模式遗漏根因 1）：
+          - ``use_active=True``（运行时 _apply_theme）：取 ``svc.active_variant()``
+            当前真正激活变体，保证全局 QSS 与 ThemeAwareMixin 消费一致，
+            不再依赖 v1 遗留 ``_active_theme_id`` 推导明暗；
+          - ``use_active=False``（显式传 theme，如预览/测试）：按传入主题明暗
+            选择（``variant_for_dark(theme.is_dark)``）。
         """
         svc = self.theme_v2
-        vid = svc.variant_for_dark(theme.is_dark)
+        if use_active:
+            vid = svc.active_variant()
+            if not vid:
+                vid = svc.variant_for_dark(theme.is_dark)
+        else:
+            vid = svc.variant_for_dark(theme.is_dark)
         variant = svc.variant_snapshot(vid)
         assert variant is not None  # available() 已保证 snapshot 非空
         tokens = variant.tokens

@@ -23,6 +23,10 @@ Wave8-B1-Foundation设计文档.md
 Wave8-B3-CoreControls设计文档.md
 Wave8-B7-Switching设计文档.md
 Wave8-V1清理迁移方案.md
+Wave8-深色模式修复规划书.md
+
+# 主题检测工具（本地维护，不入库）
+scripts/check_dark_theme_gaps.py
 
 # 主题设计暂时产物（提示词）
 docs/theme-design/*提示词.txt

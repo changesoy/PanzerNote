@@ -347,10 +347,16 @@ class ThemeEngine(QObject):
             self._logger.warning("主题不存在: %s", theme_id)
             return False
         self._active_theme_id = theme_id
-        self._config.set_view_setting("theme", theme_id)
+        # B8 v1 清理：view.theme 语义 = package/variant（当前仅 default 包）
+        self._config.set_view_setting("theme", f"default/{theme_id}")
         self._logger.info("切换主题: %s", theme_id)
         self.theme_changed.emit(theme_id)
         return True
+
+    @staticmethod
+    def _parse_theme_setting(value: str) -> str:
+        """解析 config view.theme（package/variant 或旧版 variant id）。"""
+        return value.rsplit("/", 1)[-1] if "/" in value else value
 
     def generate_stylesheet(self, theme: Optional[ThemeDefinition] = None) -> str:
         t = theme or self.get_active_theme()
@@ -625,7 +631,9 @@ QFrame[frameShape="5"] {{
         return "\n".join(parts)
 
     def initialize_active_theme(self) -> None:
-        saved_theme = self._config.get_view_setting("theme", "light")
+        saved_theme = self._parse_theme_setting(
+            self._config.get_view_setting("theme", "light")
+        )
         if saved_theme in self._themes:
             self._active_theme_id = saved_theme
         else:

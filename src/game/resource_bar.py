@@ -15,6 +15,7 @@ from PyQt6.QtGui import QFont
 
 from ..core.config import Config
 from ..themes.theme_aware_mixin import ThemeAwareMixin
+from .game_palette import game_palette
 
 
 class ResourceItem(QWidget):
@@ -38,11 +39,13 @@ class ResourceItem(QWidget):
         layout.addWidget(self.value_label)
 
     def apply_theme_colors(self, colors):
+        # 资源色固定（D28），不随主题明暗变化；文字仍主题感知
+        palette = game_palette()
         color_map = {
-            "fuel": colors.resource_fuel,
-            "ammo": colors.resource_ammo,
-            "steel": colors.resource_steel,
-            "bauxite": colors.resource_bauxite,
+            "fuel": palette["resource_fuel"],
+            "ammo": palette["resource_ammo"],
+            "steel": palette["resource_steel"],
+            "bauxite": palette["resource_bauxite"],
         }
         color = color_map.get(self.name, colors.text_secondary)
         self.icon_label.setStyleSheet(f"""

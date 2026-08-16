@@ -16,6 +16,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont
 
 from ..themes.theme_aware_mixin import ThemeAwareMixin
+from .game_palette import game_palette
 
 
 class GameIconButton(QToolButton):
@@ -112,9 +113,11 @@ class GameSidebar(ThemeAwareMixin, QWidget):
 
         colors = theme_engine.get_active_theme().colors
         back_color = colors.text_disabled
-        build_color = colors.game_build
-        garage_color = colors.game_garage
-        collection_color = colors.game_collection
+        # 游戏侧图标色固定（D28），不随主题明暗变化
+        palette = game_palette()
+        build_color = palette["game_build"]
+        garage_color = palette["game_garage"]
+        collection_color = palette["game_collection"]
 
         self.back_btn = GameIconButton("back", "返回 (Ctrl+Z / Esc)", back_color)
         self.back_btn.clicked.connect(lambda: self.view_changed.emit("back"))
@@ -150,7 +153,7 @@ class GameSidebar(ThemeAwareMixin, QWidget):
         self.collection_btn.clicked.connect(lambda: self._on_btn_clicked("collection"))
         layout.addWidget(self.collection_btn, 0, Qt.AlignmentFlag.AlignHCenter)
 
-        # 图标名 → 主题 token 字段名映射
+        # 图标名 → 游戏固定配色 key 映射（D28：不读主题 token）
         self._icon_token_map = {
             "construction": "game_build",
             "garage": "game_garage",
@@ -174,10 +177,11 @@ class GameSidebar(ThemeAwareMixin, QWidget):
                 border-right: 1px solid {colors.border};
             }}
         """)
+        palette = game_palette()
         for name, btn in self._buttons.items():
-            token_name = self._icon_token_map.get(name)
-            if token_name and hasattr(colors, token_name):
-                btn.update_color(getattr(colors, token_name))
+            color = palette.get(self._icon_token_map.get(name, ""))
+            if color:
+                btn.update_color(color)
             btn.update_style_with_colors(colors)
         self.back_btn.update_style_with_colors(colors)
 

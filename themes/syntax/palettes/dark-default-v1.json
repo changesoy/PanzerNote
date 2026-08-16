@@ -1,12 +1,12 @@
 {
   "syntax_keyword": "#C586C0",
-  "syntax_keyword_type": "#569CD6",
+  "syntax_keyword_type": "#4EC9B0",
   "syntax_builtin": "#DCDCAA",
   "syntax_class": "#4EC9B0",
   "syntax_function": "#DCDCAA",
   "syntax_variable": "#9CDCFE",
   "syntax_tag": "#569CD6",
-  "syntax_namespace": "#4EC9B0",
+  "syntax_namespace": "#D4D4D4",
   "syntax_string": "#CE9178",
   "syntax_string_escape": "#D7BA7D",
   "syntax_string_affix": "#C586C0",
@@ -19,6 +19,6 @@
   "syntax_error": "#F44747",
   "syntax_deleted": "#F44747",
   "syntax_inserted": "#6A9955",
-  "syntax_heading": "#569CD6",
+  "syntax_heading": "#D4D4D4",
   "syntax_output": "#D4D4D4"
 }

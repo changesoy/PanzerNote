@@ -7,7 +7,7 @@
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
-    QPushButton, QLabel, QSplitter, QWidget, QScrollArea,
+    QPushButton, QLabel, QSplitter, QWidget, QScrollArea, QFrame,
     QGroupBox, QFormLayout, QCheckBox, QDialogButtonBox,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -48,6 +48,9 @@ class ThemePreviewWidget(QWidget):
 
         self._theme_list = QListWidget()
         self._theme_list.setObjectName("ThemeList")
+        # 列表与面板同色无边框（VS Code 侧栏列表语义）：QSS border:none
+        # 对 QFrame 原生 frame 绘制不生效，需显式去掉 frame
+        self._theme_list.setFrameShape(QFrame.Shape.NoFrame)
         self._theme_list.currentItemChanged.connect(self._on_theme_selected)
         left_layout.addWidget(self._theme_list)
 
@@ -126,19 +129,50 @@ class ThemePreviewWidget(QWidget):
         info_group.setLayout(info_layout)
         self._preview_layout.addWidget(info_group)
 
-        colors_group = QGroupBox("颜色方案预览")
-        colors_layout = QVBoxLayout()
-
         c = theme.colors
         # B5：色块边框统一用当前 UI 主题的边框色（light/dark 下观感一致），
         # 色块内部填充仍展示被预览主题的色值。
         ui_border = v2_token(self._engine, "border_muted",
                              self._engine.get_active_theme().colors.border)
 
-        # ── 通用颜色 ──
-        general_group = QGroupBox("通用颜色")
-        general_layout = QVBoxLayout()
-        general_items = [
+        # ── 颜色预览辅助：所有 section 同一构造函数，保证列对齐一致 ──
+        def _build_swatch_row(label_text, color_hex):
+            row = QHBoxLayout()
+            row.setSpacing(8)
+            row.setContentsMargins(0, 0, 0, 0)
+            swatch = QLabel()
+            swatch.setObjectName("ColorSwatch")
+            swatch.setProperty("swatchColor", color_hex)
+            swatch.setFixedSize(48, 22)
+            swatch.setStyleSheet(
+                f"background-color: {color_hex}; "
+                f"border: 1px solid {ui_border}; border-radius: 3px;"
+            )
+            label = QLabel(label_text)
+            label.setMinimumWidth(170)
+            hex_label = QLabel(color_hex)
+            hex_label.setFont(QFont("Consolas", 9))
+            hex_label.setMinimumWidth(70)
+            hex_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            row.addWidget(swatch, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+            row.addWidget(label, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+            row.addStretch(1)
+            row.addWidget(hex_label, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)
+            return row
+
+        def _add_swatch_section(title, items):
+            group = QGroupBox(title)
+            vbox = QVBoxLayout()
+            vbox.setSpacing(4)
+            vbox.setContentsMargins(9, 6, 9, 6)
+            for label_text, color_hex in items:
+                vbox.addLayout(_build_swatch_row(label_text, color_hex))
+            group.setLayout(vbox)
+            self._preview_layout.addWidget(group)
+
+        # 通用 / 编辑器 / UI 三个子 section 和 资源/交互状态 等保持同级，
+        # 不额外嵌套外层 QGroupBox，保证每列的起始 X 坐标全局一致。
+        _add_swatch_section("通用颜色", [
             ("主色 (Primary)", c.primary),
             ("主色深色 (Primary Dark)", c.primary_dark),
             ("主色浅色 (Primary Light)", c.primary_light),
@@ -155,33 +189,9 @@ class ThemePreviewWidget(QWidget):
             ("警告色 (Warning)", c.warning),
             ("成功色 (Success)", c.success),
             ("信息色 (Info)", c.info),
-        ]
+        ])
 
-        for label_text, color_hex in general_items:
-            row = QHBoxLayout()
-            label = QLabel(label_text)
-            swatch = QLabel()
-            swatch.setObjectName("ColorSwatch")
-            swatch.setProperty("swatchColor", color_hex)
-            swatch.setFixedSize(40, 20)
-            swatch.setStyleSheet(
-                f"background-color: {color_hex}; "
-                f"border: 1px solid {ui_border}; border-radius: 2px;"
-            )
-            hex_label = QLabel(color_hex)
-            hex_label.setFont(QFont("Consolas", 9))
-            row.addWidget(swatch)
-            row.addWidget(label)
-            row.addStretch()
-            row.addWidget(hex_label)
-            general_layout.addLayout(row)
-        general_group.setLayout(general_layout)
-        colors_layout.addWidget(general_group)
-
-        # ── 编辑器颜色 ──
-        editor_group = QGroupBox("编辑器颜色")
-        editor_layout = QVBoxLayout()
-        editor_items = [
+        _add_swatch_section("编辑器颜色", [
             ("编辑器背景", c.editor_bg),
             ("行号颜色", c.editor_line_number),
             ("当前行高亮", c.editor_current_line),
@@ -189,33 +199,9 @@ class ThemePreviewWidget(QWidget):
             ("括号匹配背景", c.editor_bracket_match_bg),
             ("括号匹配前景", c.editor_bracket_match_fg),
             ("未匹配括号", c.editor_bracket_unmatched),
-        ]
+        ])
 
-        for label_text, color_hex in editor_items:
-            row = QHBoxLayout()
-            label = QLabel(label_text)
-            swatch = QLabel()
-            swatch.setObjectName("ColorSwatch")
-            swatch.setProperty("swatchColor", color_hex)
-            swatch.setFixedSize(40, 20)
-            swatch.setStyleSheet(
-                f"background-color: {color_hex}; "
-                f"border: 1px solid {ui_border}; border-radius: 2px;"
-            )
-            hex_label = QLabel(color_hex)
-            hex_label.setFont(QFont("Consolas", 9))
-            row.addWidget(swatch)
-            row.addWidget(label)
-            row.addStretch()
-            row.addWidget(hex_label)
-            editor_layout.addLayout(row)
-        editor_group.setLayout(editor_layout)
-        colors_layout.addWidget(editor_group)
-
-        # ── UI 区域颜色 ──
-        ui_group = QGroupBox("UI 区域颜色")
-        ui_layout = QVBoxLayout()
-        ui_items = [
+        _add_swatch_section("UI 区域颜色", [
             ("侧边栏背景", c.sidebar_bg),
             ("状态栏背景", c.statusbar_bg),
             ("菜单栏背景", c.menubar_bg),
@@ -224,87 +210,16 @@ class ThemePreviewWidget(QWidget):
             ("缩略图视口", c.minimap_viewport),
             ("小秘书气泡背景", c.secretary_bubble_bg),
             ("小秘书气泡边框", c.secretary_bubble_border),
-        ]
+        ])
 
-        for label_text, color_hex in ui_items:
-            row = QHBoxLayout()
-            label = QLabel(label_text)
-            swatch = QLabel()
-            swatch.setObjectName("ColorSwatch")
-            swatch.setProperty("swatchColor", color_hex)
-            swatch.setFixedSize(40, 20)
-            swatch.setStyleSheet(
-                f"background-color: {color_hex}; "
-                f"border: 1px solid {ui_border}; border-radius: 2px;"
-            )
-            hex_label = QLabel(color_hex)
-            hex_label.setFont(QFont("Consolas", 9))
-            row.addWidget(swatch)
-            row.addWidget(label)
-            row.addStretch()
-            row.addWidget(hex_label)
-            ui_layout.addLayout(row)
-        ui_group.setLayout(ui_layout)
-        colors_layout.addWidget(ui_group)
-
-        colors_group.setLayout(colors_layout)
-        self._preview_layout.addWidget(colors_group)
-
-        resources_group = QGroupBox("资源颜色")
-        res_layout = QVBoxLayout()
-        resource_items = [
+        _add_swatch_section("资源颜色", [
             ("燃料", c.resource_fuel),
             ("弹药", c.resource_ammo),
             ("钢材", c.resource_steel),
             ("铝材", c.resource_bauxite),
-        ]
-        for label_text, color_hex in resource_items:
-            row = QHBoxLayout()
-            swatch = QLabel()
-            swatch.setObjectName("ColorSwatch")
-            swatch.setProperty("swatchColor", color_hex)
-            swatch.setFixedSize(40, 20)
-            swatch.setStyleSheet(
-                f"background-color: {color_hex}; "
-                f"border: 1px solid {ui_border}; border-radius: 2px;"
-            )
-            label = QLabel(label_text)
-            hex_label = QLabel(color_hex)
-            hex_label.setFont(QFont("Consolas", 9))
-            row.addWidget(swatch)
-            row.addWidget(label)
-            row.addStretch()
-            row.addWidget(hex_label)
-            res_layout.addLayout(row)
+        ])
 
-        resources_group.setLayout(res_layout)
-        self._preview_layout.addWidget(resources_group)
-
-        def _add_color_section(title, items):
-            group = QGroupBox(title)
-            layout = QVBoxLayout()
-            for label_text, color_hex in items:
-                row = QHBoxLayout()
-                swatch = QLabel()
-                swatch.setObjectName("ColorSwatch")
-                swatch.setProperty("swatchColor", color_hex)
-                swatch.setFixedSize(40, 20)
-                swatch.setStyleSheet(
-                    f"background-color: {color_hex}; "
-                    f"border: 1px solid {ui_border}; border-radius: 2px;"
-                )
-                label = QLabel(label_text)
-                hex_label = QLabel(color_hex)
-                hex_label.setFont(QFont("Consolas", 9))
-                row.addWidget(swatch)
-                row.addWidget(label)
-                row.addStretch()
-                row.addWidget(hex_label)
-                layout.addLayout(row)
-            group.setLayout(layout)
-            self._preview_layout.addWidget(group)
-
-        _add_color_section("交互状态", [
+        _add_swatch_section("交互状态", [
             ("强调色前景", c.accent_fg),
             ("悬停背景", c.hover_bg),
             ("激活背景", c.active_bg),
@@ -313,31 +228,31 @@ class ThemePreviewWidget(QWidget):
             ("选区前景", c.selection_fg),
         ])
 
-        _add_color_section("搜索高亮", [
+        _add_swatch_section("搜索高亮", [
             ("查找命中背景", c.search_match_bg),
             ("当前命中背景", c.search_current_bg),
             ("当前命中前景", c.search_current_fg),
         ])
 
-        _add_color_section("书签与折叠", [
+        _add_swatch_section("书签与折叠", [
             ("书签背景", c.editor_bookmark_bg),
             ("书签前景", c.editor_bookmark_fg),
             ("折叠标记", c.editor_fold_marker),
             ("折叠标记(已折叠)", c.editor_fold_marker_collapsed),
         ])
 
-        _add_color_section("代码块", [
+        _add_swatch_section("代码块", [
             ("代码块背景", c.bg_codeblock),
             ("代码块边框", c.codeblock_border),
         ])
 
-        _add_color_section("游戏图标", [
+        _add_swatch_section("游戏图标", [
             ("建造图标", c.game_build),
             ("车库图标", c.game_garage),
             ("图鉴图标", c.game_collection),
         ])
 
-        _add_color_section("Markdown 高亮", [
+        _add_swatch_section("Markdown 高亮", [
             ("标题 H1", c.md_h1_fg),
             ("标题 H2", c.md_h2_fg),
             ("标题 H3", c.md_h3_fg),
@@ -356,7 +271,7 @@ class ThemePreviewWidget(QWidget):
             ("代码块背景", c.md_code_block_bg),
         ])
 
-        _add_color_section("语法高亮", [
+        _add_swatch_section("语法高亮", [
             ("关键字", c.syntax_keyword),
             ("类型关键字", c.syntax_keyword_type),
             ("内置名称", c.syntax_builtin),
@@ -446,14 +361,22 @@ class ThemePreviewDialog(ThemeAwareMixin, QDialog):
         color: {text_secondary};
     }}
 
+    /* B6：预览区不设边框——左面板无边框，右侧保留 1px 边框会在
+       左面板边缘露出一道细线，观感不对称；分组结构由 QGroupBox 承担。 */
     QScrollArea#ThemePreviewArea {{
         background-color: {dialog_bg};
-        border: 1px solid {border};
+        border: none;
         border-radius: 4px;
     }}
 
     QScrollArea#ThemePreviewArea > QWidget {{
         background-color: {dialog_bg};
+    }}
+
+    /* 左右面板同为 dialog 背景时 splitter 分隔线多余（B6）：
+       覆盖全局结构段的 handle 背景；拖拽调宽功能不受影响。 */
+    QSplitter::handle {{
+        background-color: transparent;
     }}
     """)
 

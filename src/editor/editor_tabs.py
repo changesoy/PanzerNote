@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QLineEdit, QFormLayout, QApplication, QToolButton
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QMimeData, QPoint, QByteArray
-from PyQt6.QtGui import QFont, QTextCursor, QColor, QTextCharFormat, QDrag, QAction
+from PyQt6.QtGui import QFont, QTextCursor, QColor, QTextCharFormat, QDrag, QAction, QImage, QPainter, QPixmap
 
 from ..core.config import Config
 from ..core import workspace_entries
@@ -200,8 +200,24 @@ class DraggableTabBar(QTabBar):
         mime.setData(MIME_TAB_ID, str(tab_id).encode('utf-8'))
         if filepath:
             mime.setData(MIME_TAB_FILEPATH, filepath.encode('utf-8'))
-            mime.setText(os.path.basename(filepath))
         drag.setMimeData(mime)
+
+        # B6（8.1 拖拽视觉）：拖拽体为半透明的标签缩略图，随鼠标跟手。
+        # 不携带 text/plain——避免编辑器把 tab 拖拽当文本拖放而写入文件名。
+        rect = self.tabRect(self._drag_tab_index)
+        pixmap = self.grab(rect)
+        if not pixmap.isNull():
+            img = pixmap.toImage().convertToFormat(QImage.Format.Format_ARGB32)
+            painter = QPainter(img)
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
+            painter.fillRect(img.rect(), QColor(0, 0, 0, 150))  # ~60% 不透明度
+            painter.end()
+            drag.setPixmap(QPixmap.fromImage(img))
+            # 热点 = 按下点在源 tab 内的相对偏移：缩略图初始与源 tab 垂直对齐，
+            # 拖拽过程中保持按下时的相对位置（VS Code 行为）。
+            hx = max(0, min(rect.width() - 1, self._drag_start_pos.x() - rect.left()))
+            hy = max(0, min(rect.height() - 1, self._drag_start_pos.y() - rect.top()))
+            drag.setHotSpot(QPoint(hx, hy))
 
         result = drag.exec(Qt.DropAction.MoveAction | Qt.DropAction.CopyAction)
         self._drag_tab_index = -1
@@ -1460,6 +1476,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         tab_fg = v2_color(self._theme_engine, "tab", "text", colors.text_secondary)
         active_fg = v2_token(self._theme_engine, "text_primary", colors.text_primary)
         hover_bg = v2_color(self._theme_engine, "tab", "hover_background", colors.primary_light)
+        pressed_bg = v2_color(self._theme_engine, "tab", "pressed_background", colors.border)
         border = v2_color(self._theme_engine, "tab", "border", colors.border)
 
         self.setStyleSheet(f"""
@@ -1484,10 +1501,16 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         margin-right: 2px;
         background-color: {tab_bg};
         border: 1px solid {border};
-        border-bottom: none;
+        border-bottom: 1px solid {tab_bg};
         border-top-left-radius: 4px;
         border-top-right-radius: 4px;
         color: {tab_fg};
+    }}
+
+    /* 首 tab 左侧无边框：tab 栏最左侧与正文左边缘齐平，
+       不出现 1px 深色竖线（pane 无边框，两边视觉连续）。 */
+    QTabBar::tab:first {{
+        border-left: none;
     }}
 
     QTabBar::tab:selected {{
@@ -1500,6 +1523,18 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     QTabBar::tab:hover:!selected {{
         background-color: {hover_bg};
         color: {active_fg};
+    }}
+
+    /* B6 pressed 态：仅当 hover AND pressed 同时生效，避免 Qt 在 tab 增删时
+       pressed 伪状态在相邻 tab 上残留，导致"某 tab 颜色莫名变深"。 */
+    QTabBar::tab:hover:pressed:!selected {{
+        background-color: {pressed_bg};
+    }}
+
+    /* tab 栏左下角/右下角 corner（文档模式下的左右空白区域）：
+       与 tab 栏同色，避免 tab 最左侧/最右侧出现 pane 背景的竖向色条。 */
+    QTabWidget::left-corner, QTabWidget::right-corner {{
+        background-color: {tab_bg};
     }}
 
     QTabBar QToolButton {{

@@ -235,6 +235,9 @@ QCheckBox::indicator {{
     border-radius: {s['indicator_radius']}px;
     background-color: transparent;
 }}
+QCheckBox::indicator:hover {{
+    border-color: {s['indicator_hover_border']};
+}}
 QCheckBox::indicator:checked {{
     background-color: {s['indicator_checked_bg']};
     border-color: {s['indicator_checked_bg']};
@@ -260,6 +263,9 @@ QRadioButton::indicator {{
     border: 1px solid {s['indicator_border']};
     border-radius: {s['indicator_radius']}px;
     background-color: transparent;
+}}
+QRadioButton::indicator:hover {{
+    border-color: {s['indicator_hover_border']};
 }}
 QRadioButton::indicator:checked {{
     background-color: {s['indicator_checked_bg']};
@@ -338,24 +344,48 @@ QToolTip {{
 def _b_tree_item(s: Mapping[str, Any]) -> str:
     # B4：Tree/List 状态（B3 文档 2.1 组件 12 含 QListView/QListWidget）。
     # QListWidget 是 QListView 子类，QTreeView 选择器不覆盖它，故一并列出。
-    views = "QTreeView, QListView, QListWidget"
-    return f"""
-{views} {{
+    # B6：补 pressed 态（按下变深，VS Code 列表交互）与拖拽 drop indicator
+    # （8.1 拖拽视觉：目标落点线）。drop-indicator 仅 QTreeView 支持样式化。
+    #
+    # B6 修正（渲染实测）："QTreeView, QListView, QListWidget::xxx" 逗号混排
+    # 会让 ::xxx 只附着最后一项，前面的退化为裸类型选择器——子控件规则
+    # （::viewport/::item 系列）必须逐选择器独立成段。viewport 不继承
+    # view 的 QSS 背景，缺失时无 item 的空白区回落到原生绘制色。
+    views = ("QTreeView", "QListView", "QListWidget")
+    head = ", ".join(views)
+    parts = [f"""
+{head} {{
     background-color: {s['background']};
     color: {s['text']};
     border: none;
-}}
-{views}::item {{
+}}"""]
+    for v in views:
+        parts.append(f"""
+{v}::viewport {{
+    background-color: {s['background']};
+}}""")
+        parts.append(f"""
+{v}::item {{
     padding: 2px 4px;
-}}
-{views}::item:selected {{
+}}""")
+        parts.append(f"""
+{v}::item:selected {{
     background-color: {s['selected_background']};
     color: {s['selected_text']};
-}}
-{views}::item:hover:!selected {{
+}}""")
+        parts.append(f"""
+{v}::item:hover:!selected {{
     background-color: {s['hover_background']};
-}}
-"""
+}}""")
+        parts.append(f"""
+{v}::item:pressed:!selected {{
+    background-color: {s['pressed_background']};
+}}""")
+    parts.append(f"""
+QTreeView::drop-indicator {{
+    border: 2px solid {s['drop_indicator']};
+}}""")
+    return "\n".join(parts) + "\n"
 
 
 def _b_group_box(s: Mapping[str, Any]) -> str:

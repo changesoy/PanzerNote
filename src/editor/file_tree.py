@@ -70,6 +70,9 @@ class DroppableTreeView(QTreeView):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAcceptDrops(True)
+        # B6（8.1 拖拽视觉）：显示拖拽落点指示线（颜色由全局 tree_item
+        # recipe 的 drop_indicator 控制）
+        self.setDropIndicatorShown(True)
 
     def _ask_move_or_copy(self, filename: str, dest_folder: str) -> Optional[str]:
         """询问用户移动还是复制文件。返回 "move" / "copy" / None（取消）。"""

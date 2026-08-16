@@ -24,6 +24,7 @@
       "text": "text_secondary",
       "active_text": "text_primary",
       "hover_background": "surface_raised",
+      "pressed_background": "border_muted",
       "border": "border_muted",
       "close_hover": "surface_raised"
     }
@@ -153,6 +154,7 @@
     "renderer": "default-v1",
     "style": {
       "indicator_border": "border_strong",
+      "indicator_hover_border": "border_strong",
       "indicator_checked_bg": "accent",
       "indicator_checked_fg": "#FFFFFF",
       "indicator_radius": "radius_sm",
@@ -164,6 +166,7 @@
     "renderer": "default-v1",
     "style": {
       "indicator_border": "border_strong",
+      "indicator_hover_border": "border_strong",
       "indicator_checked_bg": "accent",
       "indicator_radius": "radius_full",
       "text": "text_primary",
@@ -198,6 +201,8 @@
       "selected_background": "surface_raised",
       "selected_text": "text_primary",
       "hover_background": "surface_raised",
+      "pressed_background": "border_muted",
+      "drop_indicator": "focus",
       "disabled_text": "text_muted",
       "indent": 16,
       "icon_size": 16

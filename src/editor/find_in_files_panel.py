@@ -334,7 +334,9 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
         match_node.setData(0, Qt.ItemDataRole.UserRole, (filepath, line_num))
 
         font = QFont("Consolas, Courier New, monospace")
-        font.setPointSize(QApplication.font().pointSize() - 1)
+        base_point = QApplication.font().pointSize()
+        if base_point > 1:  # 防御：字体 pointSize 为 -1/0 时跳过缩放，避免 Qt 警告
+            font.setPointSize(base_point - 1)
         match_node.setFont(0, font)
 
         file_node.addChild(match_node)

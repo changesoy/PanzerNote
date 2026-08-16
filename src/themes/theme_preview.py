@@ -15,6 +15,7 @@ from PyQt6.QtGui import QFont, QColor, QPalette
 
 from .theme_engine import ThemeEngine, ThemeDefinition, ThemeColorScheme
 from .theme_aware_mixin import ThemeAwareMixin
+from .theme_v2.consumer import v2_color, v2_token
 
 
 class ThemePreviewWidget(QWidget):
@@ -129,6 +130,10 @@ class ThemePreviewWidget(QWidget):
         colors_layout = QVBoxLayout()
 
         c = theme.colors
+        # B5：色块边框统一用当前 UI 主题的边框色（light/dark 下观感一致），
+        # 色块内部填充仍展示被预览主题的色值。
+        ui_border = v2_token(self._engine, "border_muted",
+                             self._engine.get_active_theme().colors.border)
 
         # ── 通用颜色 ──
         general_group = QGroupBox("通用颜色")
@@ -156,10 +161,12 @@ class ThemePreviewWidget(QWidget):
             row = QHBoxLayout()
             label = QLabel(label_text)
             swatch = QLabel()
+            swatch.setObjectName("ColorSwatch")
+            swatch.setProperty("swatchColor", color_hex)
             swatch.setFixedSize(40, 20)
             swatch.setStyleSheet(
                 f"background-color: {color_hex}; "
-                f"border: 1px solid {c.border}; border-radius: 2px;"
+                f"border: 1px solid {ui_border}; border-radius: 2px;"
             )
             hex_label = QLabel(color_hex)
             hex_label.setFont(QFont("Consolas", 9))
@@ -188,10 +195,12 @@ class ThemePreviewWidget(QWidget):
             row = QHBoxLayout()
             label = QLabel(label_text)
             swatch = QLabel()
+            swatch.setObjectName("ColorSwatch")
+            swatch.setProperty("swatchColor", color_hex)
             swatch.setFixedSize(40, 20)
             swatch.setStyleSheet(
                 f"background-color: {color_hex}; "
-                f"border: 1px solid {c.border}; border-radius: 2px;"
+                f"border: 1px solid {ui_border}; border-radius: 2px;"
             )
             hex_label = QLabel(color_hex)
             hex_label.setFont(QFont("Consolas", 9))
@@ -221,10 +230,12 @@ class ThemePreviewWidget(QWidget):
             row = QHBoxLayout()
             label = QLabel(label_text)
             swatch = QLabel()
+            swatch.setObjectName("ColorSwatch")
+            swatch.setProperty("swatchColor", color_hex)
             swatch.setFixedSize(40, 20)
             swatch.setStyleSheet(
                 f"background-color: {color_hex}; "
-                f"border: 1px solid {c.border}; border-radius: 2px;"
+                f"border: 1px solid {ui_border}; border-radius: 2px;"
             )
             hex_label = QLabel(color_hex)
             hex_label.setFont(QFont("Consolas", 9))
@@ -250,10 +261,12 @@ class ThemePreviewWidget(QWidget):
         for label_text, color_hex in resource_items:
             row = QHBoxLayout()
             swatch = QLabel()
+            swatch.setObjectName("ColorSwatch")
+            swatch.setProperty("swatchColor", color_hex)
             swatch.setFixedSize(40, 20)
             swatch.setStyleSheet(
                 f"background-color: {color_hex}; "
-                f"border: 1px solid {c.border}; border-radius: 2px;"
+                f"border: 1px solid {ui_border}; border-radius: 2px;"
             )
             label = QLabel(label_text)
             hex_label = QLabel(color_hex)
@@ -273,10 +286,12 @@ class ThemePreviewWidget(QWidget):
             for label_text, color_hex in items:
                 row = QHBoxLayout()
                 swatch = QLabel()
+                swatch.setObjectName("ColorSwatch")
+                swatch.setProperty("swatchColor", color_hex)
                 swatch.setFixedSize(40, 20)
                 swatch.setStyleSheet(
                     f"background-color: {color_hex}; "
-                    f"border: 1px solid {c.border}; border-radius: 2px;"
+                    f"border: 1px solid {ui_border}; border-radius: 2px;"
                 )
                 label = QLabel(label_text)
                 hex_label = QLabel(color_hex)
@@ -406,165 +421,51 @@ class ThemePreviewDialog(ThemeAwareMixin, QDialog):
         layout.addWidget(self._button_box)
 
     def _apply_theme_colors(self, colors: ThemeColorScheme):
-        """应用主题管理弹窗的局部样式。
+        """应用主题管理弹窗的局部样式（B5）。
 
-        只处理主题管理弹窗内容区，不修改全局主题样式。
+        只处理全局 QSS 未覆盖的结构区域：面板容器背景、次级标签、预览滚动区。
+        QDialog/QListWidget/QGroupBox/QCheckBox/QPushButton/QScrollBar/QSplitter
+        由全局 recipe（dialog/tree_item/group_box/checkbox/button/scrollbar）驱动。
+        色块 swatch 展示的是被预览主题自身的色值，属于功能内容，不在此主题化。
         """
+        dialog_bg = v2_color(self._engine, "dialog", "background", colors.dialog_bg)
+        text_primary = v2_token(self._engine, "text_primary", colors.text_primary)
+        text_secondary = v2_token(self._engine, "text_secondary", colors.text_secondary)
+        border = v2_token(self._engine, "border_muted", colors.border)
         self.setStyleSheet(f"""
-    QDialog#ThemePreviewDialog {{
-        background-color: {colors.dialog_bg};
-        color: {colors.text_primary};
-    }}
-
     QWidget#ThemePreviewWidget,
     QWidget#ThemePreviewLeftPanel,
     QWidget#ThemePreviewRightPanel,
     QWidget#ThemePreviewContent {{
-        background-color: {colors.dialog_bg};
-        color: {colors.text_primary};
-    }}
-
-    QSplitter#ThemePreviewSplitter::handle {{
-        background-color: {colors.border};
-    }}
-
-    QLabel {{
-        color: {colors.text_primary};
+        background-color: {dialog_bg};
+        color: {text_primary};
     }}
 
     QLabel#ThemePreviewSectionLabel,
     QLabel#ThemeInfoLabel {{
-        color: {colors.text_secondary};
-    }}
-
-    QListWidget#ThemeList {{
-        background-color: {colors.card};
-        color: {colors.text_primary};
-        border: 1px solid {colors.border};
-        border-radius: 4px;
-        padding: 4px;
-        outline: none;
-    }}
-
-    QListWidget#ThemeList::item {{
-        color: {colors.text_primary};
-        background: transparent;
-        padding: 6px 8px;
-        border-radius: 4px;
-    }}
-
-    QListWidget#ThemeList::item:hover {{
-        background-color: {colors.surface};
-    }}
-
-    QListWidget#ThemeList::item:selected {{
-        background-color: {colors.primary_light};
-        color: {colors.text_primary};
-        border-left: 3px solid {colors.primary};
+        color: {text_secondary};
     }}
 
     QScrollArea#ThemePreviewArea {{
-        background-color: {colors.dialog_bg};
-        border: 1px solid {colors.border};
+        background-color: {dialog_bg};
+        border: 1px solid {border};
         border-radius: 4px;
     }}
 
     QScrollArea#ThemePreviewArea > QWidget {{
-        background-color: {colors.dialog_bg};
-    }}
-
-    QGroupBox {{
-        background-color: {colors.card};
-        color: {colors.text_primary};
-        border: 1px solid {colors.border};
-        border-radius: 4px;
-        margin-top: 10px;
-        padding-top: 14px;
-    }}
-
-    QGroupBox::title {{
-        subcontrol-origin: margin;
-        left: 8px;
-        padding: 0 4px;
-        color: {colors.text_secondary};
-        background-color: {colors.card};
-    }}
-
-    QCheckBox {{
-        color: {colors.text_primary};
-    }}
-
-    QPushButton,
-    QDialogButtonBox QPushButton {{
-        background-color: {colors.primary};
-        color: white;
-        border: 1px solid {colors.primary_dark};
-        border-radius: 4px;
-        padding: 6px 16px;
-        min-height: 24px;
-    }}
-
-    QPushButton:hover,
-    QDialogButtonBox QPushButton:hover {{
-        background-color: {colors.primary_dark};
-    }}
-
-    QPushButton:pressed,
-    QDialogButtonBox QPushButton:pressed {{
-        background-color: {colors.primary_dark};
-    }}
-
-    QPushButton:disabled,
-    QDialogButtonBox QPushButton:disabled {{
-        background-color: {colors.border};
-        color: {colors.text_disabled};
-        border-color: {colors.border};
-    }}
-
-    QScrollBar:vertical {{
-        background-color: {colors.surface};
-        width: 12px;
-        margin: 0;
-    }}
-
-    QScrollBar::handle:vertical {{
-        background-color: {colors.border};
-        border-radius: 6px;
-        min-height: 20px;
-        margin: 2px;
-    }}
-
-    QScrollBar::handle:vertical:hover {{
-        background-color: {colors.text_disabled};
-    }}
-
-    QScrollBar::add-line:vertical,
-    QScrollBar::sub-line:vertical {{
-        height: 0;
-    }}
-
-    QScrollBar:horizontal {{
-        background-color: {colors.surface};
-        height: 12px;
-        margin: 0;
-    }}
-
-    QScrollBar::handle:horizontal {{
-        background-color: {colors.border};
-        border-radius: 6px;
-        min-width: 20px;
-        margin: 2px;
-    }}
-
-    QScrollBar::handle:horizontal:hover {{
-        background-color: {colors.text_disabled};
-    }}
-
-    QScrollBar::add-line:horizontal,
-    QScrollBar::sub-line:horizontal {{
-        width: 0;
+        background-color: {dialog_bg};
     }}
     """)
+
+        # B5：切 UI 主题时即时刷新色块边框（swatch 为动态生成，点击主题才会重建）
+        swatch_border = v2_token(self._engine, "border_muted", colors.border)
+        for swatch in self.findChildren(QLabel, "ColorSwatch"):
+            color_hex = swatch.property("swatchColor")
+            if color_hex:
+                swatch.setStyleSheet(
+                    f"background-color: {color_hex};"
+                    f" border: 1px solid {swatch_border}; border-radius: 2px;"
+                )
 
         # QScrollArea 的 viewport 有时不会完全继承父级背景，显式补一次。
         preview_widget = getattr(self, "_preview_widget", None)
@@ -573,12 +474,12 @@ class ThemePreviewDialog(ThemeAwareMixin, QDialog):
 
         if preview_area is not None:
             preview_area.viewport().setStyleSheet(
-                f"background-color: {colors.dialog_bg};"
+                f"background-color: {dialog_bg};"
             )
 
         if preview_content is not None:
             preview_content.setStyleSheet(
-                f"background-color: {colors.dialog_bg};"
+                f"background-color: {dialog_bg};"
             )
 
     def _on_theme_applied(self, theme_id: str):

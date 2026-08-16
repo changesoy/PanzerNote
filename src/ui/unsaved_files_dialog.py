@@ -89,13 +89,8 @@ class UnsavedFilesDialog(QDialog):
         # 叉号 / ESC 触发 QDialog.rejected → 统一走 _on_cancel（内部防重入）
         self.rejected.connect(self._on_cancel)
 
-        colors = self._theme_engine.get_active_theme().colors
-        self._list.setStyleSheet(
-            f"QListWidget {{ background-color: {colors.card};"
-            f" color: {colors.text_primary};"
-            f" border: 1px solid {colors.border};"
-            f" border-radius: 4px; }}"
-        )
+        # B5：QDialog 背景由全局 dialog recipe 驱动，QListWidget 由全局
+        # tree_item recipe 驱动，页面不再打局部样式补丁。
 
     def choice(self) -> str:
         """返回 UnsavedChoice.SAVE / DISCARD / CANCEL。"""

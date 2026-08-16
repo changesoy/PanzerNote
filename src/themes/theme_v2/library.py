@@ -336,20 +336,23 @@ QToolTip {{
 
 
 def _b_tree_item(s: Mapping[str, Any]) -> str:
+    # B4：Tree/List 状态（B3 文档 2.1 组件 12 含 QListView/QListWidget）。
+    # QListWidget 是 QListView 子类，QTreeView 选择器不覆盖它，故一并列出。
+    views = "QTreeView, QListView, QListWidget"
     return f"""
-QTreeView {{
+{views} {{
     background-color: {s['background']};
     color: {s['text']};
     border: none;
 }}
-QTreeView::item {{
+{views}::item {{
     padding: 2px 4px;
 }}
-QTreeView::item:selected {{
+{views}::item:selected {{
     background-color: {s['selected_background']};
     color: {s['selected_text']};
 }}
-QTreeView::item:hover:!selected {{
+{views}::item:hover:!selected {{
     background-color: {s['hover_background']};
 }}
 """

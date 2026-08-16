@@ -24,6 +24,7 @@ from ..utils.logger import get_logger
 from ..utils.error_handler import ErrorHandler, ErrorCategory
 from ..security.input_validator import InputValidator, FilenameValidationError
 from ..themes.theme_aware_mixin import ThemeAwareMixin
+from ..themes.theme_v2.consumer import v2_token
 
 
 MIME_TAB_FILEPATH = "application/x-panzernote-tab-filepath"
@@ -286,42 +287,34 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
         layout.addWidget(self.external_container)
 
     def _apply_theme_colors(self, colors):
+        # B4：文件树消费 v2 token（侧栏 = surface_secondary，标题栏 = surface_primary），回退 v1
+        sidebar_bg = v2_token(self._theme_engine, "surface_secondary", colors.sidebar_bg)
+        surface = v2_token(self._theme_engine, "surface_primary", colors.surface)
+        border = v2_token(self._theme_engine, "border_muted", colors.border)
+        text_primary = v2_token(self._theme_engine, "text_primary", colors.text_primary)
+
         self.setStyleSheet(f"""
             QWidget {{
-                background-color: {colors.sidebar_bg};
+                background-color: {sidebar_bg};
             }}
         """)
         self._title_frame.setStyleSheet(f"""
             QFrame {{
-                background-color: {colors.surface};
-                border-bottom: 1px solid {colors.border};
+                background-color: {surface};
+                border-bottom: 1px solid {border};
             }}
         """)
-        self.tree_view.setStyleSheet(f"""
-            QTreeView {{
-                border: none;
-                background-color: {colors.sidebar_bg};
-            }}
-            QTreeView::item {{
-                padding: 5px;
-            }}
-            QTreeView::item:hover {{
-                background-color: {colors.primary_light};
-            }}
-            QTreeView::item:selected {{
-                background-color: {colors.editor_selection};
-                color: {colors.text_primary};
-            }}
-        """)
+        # B4：QTreeView 由全局 tree_item recipe 驱动（v2）/ 全局 v1 QSS（回退），
+        # 不再在页面内打补丁（B3 契约 8.1）
         self.external_title.setStyleSheet(f"""
             QLabel {{
                 padding: 8px 10px;
-                background-color: {colors.surface};
-                border-bottom: 1px solid {colors.border};
-                color: {colors.text_primary};
+                background-color: {surface};
+                border-bottom: 1px solid {border};
+                color: {text_primary};
             }}
         """)
-        self.external_list.setStyleSheet(f"background-color: {colors.sidebar_bg};")
+        self.external_list.setStyleSheet(f"background-color: {sidebar_bg};")
 
     def _on_file_move_requested(self, src_filepath: str, dest_folder: str):
         self.file_move_requested.emit(src_filepath, dest_folder)

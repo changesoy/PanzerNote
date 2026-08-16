@@ -14,6 +14,7 @@ from PyQt6.QtGui import QFont, QKeyEvent, QColor, QMouseEvent, QKeySequence
 
 from ..utils.dpi_helper import scale
 from ..themes.theme_aware_mixin import ThemeAwareMixin
+from ..themes.theme_v2.consumer import v2_color, v2_token
 
 # (display_name, shortcut_display, action_id)
 CommandEntry = Tuple[str, str, str]
@@ -88,29 +89,29 @@ class CommandPalette(ThemeAwareMixin, QDialog):
         self._init_theme(theme_engine)
 
     def _apply_theme_colors(self, colors):
+        # B4：命令面板消费 v2 recipe/token（dialog/input recipe），回退 v1。
+        # QListWidget 由全局 tree_item recipe 驱动，不在页面内打补丁（B3 契约 8.1）。
+        dialog_bg = v2_color(self._theme_engine, "dialog", "background", colors.surface)
+        input_bg = v2_color(self._theme_engine, "input", "background", colors.card)
+        input_fg = v2_color(self._theme_engine, "input", "text", colors.text_primary)
+        border = v2_token(self._theme_engine, "border_muted", colors.border)
+        text_secondary = v2_token(self._theme_engine, "text_secondary", colors.text_secondary)
+
         self.setStyleSheet(f"""
             CommandPalette {{
-                background-color: {colors.surface};
+                background-color: {dialog_bg};
             }}
             QLineEdit {{
                 border: none;
-                border-bottom: 1px solid {colors.border};
+                border-bottom: 1px solid {border};
                 padding: 8px 12px;
-                background: {colors.card};
-                color: {colors.text_primary};
+                background: {input_bg};
+                color: {input_fg};
                 font-size: 13px;
             }}
-            QListWidget {{
-                background: {colors.surface};
-                color: {colors.text_primary};
-                border: none;
-            }}
-            QListWidget::item:selected {{
-                background: {colors.primary_light};
-            }}
         """)
-        self._hint_label.setStyleSheet(f"color: {colors.text_secondary}; padding: 4px;")
-        self._border_color = colors.border
+        self._hint_label.setStyleSheet(f"color: {text_secondary}; padding: 4px;")
+        self._border_color = border
 
     # --- 快捷键关闭键 ---
 

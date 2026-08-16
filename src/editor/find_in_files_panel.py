@@ -28,6 +28,7 @@ from PyQt6.QtWidgets import (
 
 from .find_in_files_service import FindInFilesWorker
 from ..themes.theme_aware_mixin import ThemeAwareMixin
+from ..themes.theme_v2.consumer import v2_token
 
 
 class FindInFilesPanel(ThemeAwareMixin, QWidget):
@@ -159,8 +160,11 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
         self._init_theme(theme_engine)
 
     def _apply_theme_colors(self, colors):
-        self._scope_label.setStyleSheet(f"font-size: 11px; color: {colors.text_secondary};")
-        self._status_label.setStyleSheet(f"color: {colors.text_secondary}; font-size: 11px;")
+        # B4：搜索面板文字消费 v2 token（text_secondary），回退 v1；
+        # 输入/下拉/勾选/按钮/结果树由 B3 全局 recipe 驱动
+        text_secondary = v2_token(self._theme_engine, "text_secondary", colors.text_secondary)
+        self._scope_label.setStyleSheet(f"font-size: 11px; color: {text_secondary};")
+        self._status_label.setStyleSheet(f"color: {text_secondary}; font-size: 11px;")
 
     # ------------------------------------------------------------------
     # 搜索

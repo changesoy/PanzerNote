@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.themes.theme_aware_mixin import ThemeAwareMixin
+from src.themes.theme_v2.consumer import v2_token
 
 
 class SidePanelHost(ThemeAwareMixin, QWidget):
@@ -179,10 +180,9 @@ class SidePanelHost(ThemeAwareMixin, QWidget):
 
     def _apply_theme_colors(self, colors) -> None:
         self._last_colors = colors
-        bg = colors.sidebar_bg
-        border = colors.border
-        accent = colors.accent
-        surface = colors.surface
+        # B4：侧栏消费 v2 token（侧栏/活动栏 = surface_secondary），回退 v1
+        bg = v2_token(self._theme_engine, "surface_secondary", colors.sidebar_bg)
+        border = v2_token(self._theme_engine, "border_muted", colors.border)
 
         self.setStyleSheet(f"""
             #side_panel_host {{
@@ -190,7 +190,7 @@ class SidePanelHost(ThemeAwareMixin, QWidget):
                 border-left: 1px solid {border};
             }}
             #activity_bar {{
-                background-color: {surface};
+                background-color: {bg};
                 border-right: 1px solid {border};
             }}
             #panel_stack {{
@@ -206,10 +206,9 @@ class SidePanelHost(ThemeAwareMixin, QWidget):
         c = self._last_colors
         if c is None:
             return
-        text = c.text_primary
-        border = c.border
-        accent = c.accent
-        accent_fg = c.accent_fg
+        text = v2_token(self._theme_engine, "text_primary", c.text_primary)
+        border = v2_token(self._theme_engine, "border_muted", c.border)
+        accent = v2_token(self._theme_engine, "accent", c.accent)
         btn.setStyleSheet(f"""
             QToolButton {{
                 background: transparent;
@@ -226,7 +225,7 @@ class SidePanelHost(ThemeAwareMixin, QWidget):
             QToolButton:checked {{
                 background-color: {accent};
                 border-color: {accent};
-                color: {accent_fg};
+                color: #FFFFFF;  /* B3 对比度铁律：accent 底前景必须白色 */
             }}
         """)
 

@@ -2,7 +2,7 @@
 """Theme v2 契约常量（Wave 8 B1）。
 
 命名遵循 111.md 定稿决策：JSON 字段全部 snake_case；
-变量/组件 override 键名统一点号风格（`button.primary`）。
+recipe key 用单段组件语义名（`button` / `input` / `scrollbar`），组件变体经 style 键表达。
 """
 from __future__ import annotations
 

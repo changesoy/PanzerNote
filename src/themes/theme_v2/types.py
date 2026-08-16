@@ -12,7 +12,7 @@ from types import MappingProxyType
 from typing import Any, Literal, Mapping, TypeVar
 
 VariantId = str      # "light" / "dark"，来自 filename stem
-RecipeKey = str      # "button.primary" / "tab.active" / ...
+RecipeKey = str      # "button" / "tab" / "input" / "scrollbar" / ...（单段组件语义名）
 TokenKey = str       # "surface_primary" / "text_primary" / ...（UI 语义 token 白名单）
 SyntaxTokenKey = str  # "syntax_keyword" / "syntax_string" / ...（Pygments 语义 token）
 ColorValue = str     # "#RRGGBB" / "#RRGGBBAA"

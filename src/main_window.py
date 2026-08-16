@@ -51,7 +51,7 @@ from .plugins.plugin_event_bus import PluginEventBus
 from .themes.theme_engine import ThemeEngine
 from .themes.theme_preview import ThemePreviewDialog
 from .themes.theme_v2.consumer import v2_token
-from .themes.theme_v2.transition_controller import ThemeTransitionController
+from .themes.theme_v2.transition_controller import ThemeTransitionController, easing_for
 from .themes.theme_v2.types import ThemeSwitchLevel
 from .ui.command_palette import CommandPalette
 from .utils.logger import get_logger
@@ -1596,8 +1596,6 @@ class MainWindow(QMainWindow):
 
     def _transition_easing(self) -> QEasingCurve.Type:
         """缓动取自 motion.json（motion_level 档位不写 motion.json）。"""
-        from .themes.theme_v2.transition_controller import easing_for
-
         svc = getattr(self.theme_engine, "theme_v2", None)
         if svc is None:
             return QEasingCurve.Type.OutCubic

@@ -1501,16 +1501,14 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         margin-right: 2px;
         background-color: {tab_bg};
         border: 1px solid {border};
+        /* 所有 tab 统一无左边框：tab 栏最左侧与正文左边缘齐平（pane 无
+           边框，视觉连续）；tab 间分隔由前一个 tab 的右边框承担。
+           不用 :first 伪状态——实测在真实 QTabBar 上匹配不可靠。 */
+        border-left: none;
         border-bottom: 1px solid {tab_bg};
         border-top-left-radius: 4px;
         border-top-right-radius: 4px;
         color: {tab_fg};
-    }}
-
-    /* 首 tab 左侧无边框：tab 栏最左侧与正文左边缘齐平，
-       不出现 1px 深色竖线（pane 无边框，两边视觉连续）。 */
-    QTabBar::tab:first {{
-        border-left: none;
     }}
 
     QTabBar::tab:selected {{

@@ -313,7 +313,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
 
         # 更新无父顶层补全弹窗的主题
         if hasattr(self, "_completion_popup") and self._completion_popup is not None:
-            self._completion_popup.apply_theme_colors(colors)
+            self._completion_popup.apply_theme_colors(self._theme_engine, colors)
             font_family = self.config.get_editor_setting("font_family", "Microsoft YaHei")
             font_size = self.config.get_editor_setting("font_size", 12)
             self._completion_popup.apply_font(font_family, font_size)

@@ -80,7 +80,6 @@ class CommandPalette(ThemeAwareMixin, QDialog):
         self._hint_label = QLabel(f"↑↓ 导航  Enter 执行  {close_keys} 关闭  拖拽搜索栏移动")
         self._hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._hint_label.setFont(QFont("Microsoft YaHei", 8))
-        self._hint_label.setStyleSheet("padding: 4px;")
         layout.addWidget(self._hint_label)
 
         self._populate()

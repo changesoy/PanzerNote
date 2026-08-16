@@ -13,6 +13,9 @@ from PyQt6.QtCore import QPoint, Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QKeyEvent
 from PyQt6.QtWidgets import QListWidget, QListWidgetItem, QWidget
 
+from ..themes.theme_engine import ThemeEngine
+from ..themes.theme_v2.consumer import v2_color, v2_token
+
 # 词语提取正则：字母/数字/下划线 + 中日韩统一表意文字
 _WORD_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf]|[a-zA-Z0-9_]{2,}")
 
@@ -36,102 +39,22 @@ class CompletionPopup(QListWidget):
         self.setMinimumWidth(200)
         self._is_visible = False
         self.itemDoubleClicked.connect(self._on_accept)
+        # _rebuild_qss() 的两路输入：主题色（apply_theme_colors）与条目
+        # 行高（apply_font）。任一更新都整体重建样式表，不做增量拼接。
+        self._theme_engine: ThemeEngine | None = None
+        self._colors = None
+        self._item_min_height = 22
 
-    def apply_theme_colors(self, colors) -> None:
+    def apply_theme_colors(self, theme_engine: ThemeEngine, colors) -> None:
         """应用自动补全弹窗主题颜色。
 
         由 Editor._apply_theme_colors() 调用。
-        CompletionPopup 是无父顶层浮窗，不依赖主窗口 QSS 级联。
+        CompletionPopup 是无父顶层浮窗，不依赖主窗口 QSS 级联，
+        样式优先消费 v2 recipe（tooltip / scrollbar / tree_item），回退 v1。
         """
-        self.setStyleSheet(f"""
-    QListWidget#CompletionPopup {{
-        background-color: {colors.card};
-        color: {colors.text_primary};
-        border: 1px solid {colors.border};
-        border-radius: 4px;
-        padding: 2px;
-        outline: none;
-        selection-background-color: {colors.primary_light};
-        selection-color: {colors.text_primary};
-    }}
-
-    QListWidget#CompletionPopup::item {{
-        color: {colors.text_primary};
-        background: transparent;
-        padding: 4px 8px;
-        min-height: 22px;
-        border-radius: 3px;
-    }}
-
-    QListWidget#CompletionPopup::item:hover {{
-        background-color: {colors.surface};
-        color: {colors.text_primary};
-    }}
-
-    QListWidget#CompletionPopup::item:selected {{
-        background-color: {colors.primary_light};
-        color: {colors.text_primary};
-    }}
-
-    QListWidget#CompletionPopup::item:selected:active {{
-        background-color: {colors.primary_light};
-        color: {colors.text_primary};
-    }}
-
-    QListWidget#CompletionPopup::item:selected:!active {{
-        background-color: {colors.primary_light};
-        color: {colors.text_primary};
-    }}
-
-    QScrollBar:vertical {{
-        background-color: {colors.surface};
-        width: 10px;
-        margin: 0;
-    }}
-
-    QScrollBar::handle:vertical {{
-        background-color: {colors.border};
-        border-radius: 5px;
-        min-height: 20px;
-        margin: 2px;
-    }}
-
-    QScrollBar::handle:vertical:hover {{
-        background-color: {colors.text_disabled};
-    }}
-
-    QScrollBar::add-line:vertical,
-    QScrollBar::sub-line:vertical {{
-        height: 0;
-    }}
-
-    QScrollBar:horizontal {{
-        background-color: {colors.surface};
-        height: 10px;
-        margin: 0;
-    }}
-
-    QScrollBar::handle:horizontal {{
-        background-color: {colors.border};
-        border-radius: 5px;
-        min-width: 20px;
-        margin: 2px;
-    }}
-
-    QScrollBar::handle:horizontal:hover {{
-        background-color: {colors.text_disabled};
-    }}
-
-    QScrollBar::add-line:horizontal,
-    QScrollBar::sub-line:horizontal {{
-        width: 0;
-    }}
-    """)
-
-        # QListWidget 的 viewport 在部分平台/样式下可能保持系统默认背景，显式补一次。
-        self.viewport().setStyleSheet(  # type: ignore[union-attr]
-            f"background-color: {colors.card};"
-        )
+        self._theme_engine = theme_engine
+        self._colors = colors
+        self._rebuild_qss()
 
     def apply_font(self, font_family: str, font_size: int) -> None:
         """同步编辑器的字体和行高到补全弹窗。
@@ -140,15 +63,112 @@ class CompletionPopup(QListWidget):
         补全弹窗字号为编辑器的 0.8 倍，行间距按 1.1 倍字号计算。
         """
         popup_font_size = max(2, int(font_size * 0.8))
-        font = QFont(font_family, popup_font_size)
-        self.setFont(font)
+        self.setFont(QFont(font_family, popup_font_size))
         # QSS 的 ::item 不支持 margin，用 setSpacing() 控制选项间隙
         self.setSpacing(1)
-        item_height = int(popup_font_size * 1.1)
-        self.setStyleSheet(self.styleSheet() + f"""
+        self._item_min_height = int(popup_font_size * 1.1)
+        self._rebuild_qss()
+
+    def _rebuild_qss(self) -> None:
+        """从当前主题色与条目行高整体重建样式表。"""
+        if self._theme_engine is None or self._colors is None:
+            return
+        engine, colors = self._theme_engine, self._colors
+        # 弹层容器吃 tooltip recipe；滚动条吃 scrollbar recipe；条目 hover
+        # 用 surface_secondary（弹窗背景是 surface_raised，同色 hover 不可见）。
+        # 选中色仍是 v1 primary_light——v2 暂无 accent_soft 类 token，
+        # 已列入 Wave8 遗留清单。
+        bg = v2_color(engine, "tooltip", "background", colors.card)
+        fg = v2_color(engine, "tooltip", "text", colors.text_primary)
+        border = v2_color(engine, "tooltip", "border", colors.border)
+        hover_bg = v2_token(engine, "surface_secondary", colors.surface)
+        sel_bg = colors.primary_light
+        sb_track = v2_color(engine, "scrollbar", "track", colors.surface)
+        sb_handle = v2_color(engine, "scrollbar", "handle", colors.border)
+        sb_handle_hover = v2_color(engine, "scrollbar", "handle_hover",
+                                   colors.text_disabled)
+        self.setStyleSheet(f"""
+    QListWidget#CompletionPopup {{
+        background-color: {bg};
+        color: {fg};
+        border: 1px solid {border};
+        border-radius: 4px;
+        padding: 2px;
+        outline: none;
+        selection-background-color: {sel_bg};
+        selection-color: {fg};
+    }}
+
     QListWidget#CompletionPopup::item {{
-        min-height: {item_height}px;
-        padding: 0px 8px;
+        color: {fg};
+        background: transparent;
+        padding: 4px 8px;
+        min-height: {self._item_min_height}px;
+        border-radius: 3px;
+    }}
+
+    QListWidget#CompletionPopup::item:hover {{
+        background-color: {hover_bg};
+        color: {fg};
+    }}
+
+    QListWidget#CompletionPopup::item:selected {{
+        background-color: {sel_bg};
+        color: {fg};
+    }}
+
+    QListWidget#CompletionPopup::item:selected:active {{
+        background-color: {sel_bg};
+        color: {fg};
+    }}
+
+    QListWidget#CompletionPopup::item:selected:!active {{
+        background-color: {sel_bg};
+        color: {fg};
+    }}
+
+    QScrollBar:vertical {{
+        background-color: {sb_track};
+        width: 10px;
+        margin: 0;
+    }}
+
+    QScrollBar::handle:vertical {{
+        background-color: {sb_handle};
+        border-radius: 5px;
+        min-height: 20px;
+        margin: 2px;
+    }}
+
+    QScrollBar::handle:vertical:hover {{
+        background-color: {sb_handle_hover};
+    }}
+
+    QScrollBar::add-line:vertical,
+    QScrollBar::sub-line:vertical {{
+        height: 0;
+    }}
+
+    QScrollBar:horizontal {{
+        background-color: {sb_track};
+        height: 10px;
+        margin: 0;
+    }}
+
+    QScrollBar::handle:horizontal {{
+        background-color: {sb_handle};
+        border-radius: 5px;
+        min-width: 20px;
+        margin: 2px;
+    }}
+
+    QScrollBar::handle:horizontal:hover {{
+        background-color: {sb_handle_hover};
+    }}
+
+    QScrollBar::add-line:horizontal,
+    QScrollBar::sub-line:horizontal {{
+        width: 0;
     }}
     """)
 

@@ -63,6 +63,7 @@ class SettingsActionController:
             settings = dialog.get_settings()
             editor = settings["editor"]
             secretary = settings["secretary"]
+            view = settings["view"]
 
             # 保存编辑器设置
             for key, value in editor.items():
@@ -71,6 +72,10 @@ class SettingsActionController:
             # 保存小秘书设置
             for key, value in secretary.items():
                 self._config.set_secretary_setting(key, value)
+
+            # 保存界面设置（B7：view.motion_level）
+            for key, value in view.items():
+                self._config.set_view_setting(key, value)
 
             self._config.save_settings()
 

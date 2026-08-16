@@ -46,6 +46,11 @@ from .transition import (
     build_plan,
     params_for_recipe,
 )
+from .transition_controller import (
+    ThemeTransitionController,
+    duration_for,
+    easing_for,
+)
 from .typography import TypographyLoader
 from .types import (
     ColorIdentity,
@@ -115,6 +120,7 @@ __all__ = [
     "ThemeSwitchLevel",
     "ThemeSwitchPlanError",
     "ThemeSwitchUnsupportedError",
+    "ThemeTransitionController",
     "ThemeTransitionPlan",
     "ThemeValidator",
     "TOKEN_WHITELIST",
@@ -126,6 +132,8 @@ __all__ = [
     "WindowChromeIntent",
     "build_plan",
     "compute_switch_level",
+    "duration_for",
+    "easing_for",
     "params_for_recipe",
     "resolve_renderer_map",
     "signature_for",

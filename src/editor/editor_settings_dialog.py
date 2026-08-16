@@ -133,6 +133,21 @@ class EditorSettingsDialog(QDialog):
 
         layout.addWidget(large_file_group)
 
+        # ── 界面选项（Wave 8 B7：view.motion_level 三档）──
+        interface_group = QGroupBox("界面")
+        interface_layout = QFormLayout(interface_group)
+
+        self.motion_level_combo = QComboBox()
+        self.motion_level_combo.addItem("正常", "normal")
+        self.motion_level_combo.addItem("减弱（半速）", "reduced")
+        self.motion_level_combo.addItem("关闭", "off")
+        self.motion_level_combo.setToolTip(
+            "主题切换淡出动画：正常 / 半速减弱 / 关闭（QSS 悬停按压反馈不受影响）"
+        )
+        interface_layout.addRow("界面动效:", self.motion_level_combo)
+
+        layout.addWidget(interface_group)
+
         # ── 小秘书选项 ──
         secretary_group = QGroupBox("小秘书")
         secretary_layout = QFormLayout(secretary_group)
@@ -229,6 +244,12 @@ class EditorSettingsDialog(QDialog):
             self.config.get_secretary_setting("show_secretary", True)
         )
 
+        # B7：界面动效三档（view 命名空间，默认 normal）
+        motion_level = self.config.get_view_setting("motion_level", "normal")
+        index = self.motion_level_combo.findData(motion_level)
+        if index >= 0:
+            self.motion_level_combo.setCurrentIndex(index)
+
         # E3：大文件模式开关（feature flag，持久化到 feature_flags.json）
         self.large_file_mode_cb.setChecked(_feature_is_enabled("large_file_mode"))
 
@@ -242,6 +263,7 @@ class EditorSettingsDialog(QDialog):
         返回嵌套字典，按命名空间分组：
         - "editor": 编辑器相关设置
         - "secretary": 小秘书相关设置
+        - "view": 界面相关设置（B7：view.motion_level）
         """
         return {
             "editor": {
@@ -262,5 +284,8 @@ class EditorSettingsDialog(QDialog):
             "secretary": {
                 "show_secretary": self.show_secretary_cb.isChecked(),
                 "size_percent": self.secretary_size_slider.value(),
+            },
+            "view": {
+                "motion_level": self.motion_level_combo.currentData(),
             },
         }

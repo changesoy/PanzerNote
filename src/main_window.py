@@ -19,9 +19,9 @@ from PyQt6.QtWidgets import (
     QSplitter, QMenuBar, QMenu, QStatusBar,
     QLabel, QMessageBox, QTabWidget,
     QToolButton, QFrame, QSizePolicy, QApplication,
-    QLineEdit
+    QLineEdit, QDialog
 )
-from PyQt6.QtCore import Qt, QTimer, QEvent, pyqtSignal, QPoint, QRect
+from PyQt6.QtCore import Qt, QTimer, QEvent, pyqtSignal, QPoint, QRect, QEasingCurve
 from PyQt6.QtGui import QIcon, QCloseEvent, QAction
 from typing import Any, Callable, Dict, Optional, Tuple, cast
 
@@ -50,6 +50,9 @@ from .plugins.capability_registry import PluginCapabilityError
 from .plugins.plugin_event_bus import PluginEventBus
 from .themes.theme_engine import ThemeEngine
 from .themes.theme_preview import ThemePreviewDialog
+from .themes.theme_v2.consumer import v2_token
+from .themes.theme_v2.transition_controller import ThemeTransitionController
+from .themes.theme_v2.types import ThemeSwitchLevel
 from .ui.command_palette import CommandPalette
 from .utils.logger import get_logger
 from .utils.error_handler import ErrorHandler, ErrorCategory
@@ -113,6 +116,9 @@ class MainWindow(QMainWindow):
         self.theme_engine = ThemeEngine(self.config)
         self.theme_engine.load_external_themes()
         self.theme_engine.initialize_active_theme()
+
+        # B7：切换视觉过渡编排（启动期恢复主题不经 controller、无动画）
+        self._theme_transition = ThemeTransitionController(self)
 
         self._native_titlebar_filter = install_native_titlebar_theme_filter(
             cast(QApplication, QApplication.instance()),
@@ -1532,13 +1538,73 @@ class MainWindow(QMainWindow):
     def _on_theme_applied(self, theme_id: str):
         """B7：唯一切换编排点（设计文档 9.2）。
 
-        ``engine.set_active_theme``（v1 持久化 + theme_changed → 内部经 manager
-        完成 v2 事务）→ ``_apply_theme``（全局 QSS 重涂 + DWM 标题栏）。
+        包一层 Snapshot Overlay 过渡：逐窗口 grab 旧帧 → 同步执行真实切换 →
+        淡出。motion off / 大文件模式下恒瞬时（allow_animation=False）。
+        """
+        self._theme_transition.run(
+            self._transition_windows(),
+            lambda: self._switch_theme_now(theme_id),
+            level=ThemeSwitchLevel.L0,  # B7 生产路径恒 L0（同包变体切换）
+            motion_level=self._motion_level(),
+            allow_animation=self._animations_allowed(),
+            veil_color=self._transition_veil_color(),
+            easing=self._transition_easing(),
+        )
+
+    def _switch_theme_now(self, theme_id: str) -> None:
+        """过渡 callable：engine.set_active_theme（内部经 manager 完成 v2 事务）
+        + _apply_theme（全局 QSS 重涂 + DWM 标题栏）——全部同步完成。
         """
         if not self.theme_engine.set_active_theme(theme_id):
             return
         self._apply_theme()
         self.secretary.show_message(f"已切换主题: {self.theme_engine.get_active_theme().name}")
+
+    def _transition_windows(self) -> list:
+        """参与过渡的窗口：主窗口 + 可见顶层 QDialog/QMainWindow。
+
+        瞬时浮层（tooltip/menu/命令面板等）排除：CommandPalette 是 QDialog
+        需显式跳过，QMenu/QToolTip 非 QDialog/QMainWindow 天然排除。
+        """
+        windows: list = [self]
+        app = cast(QApplication, QApplication.instance())
+        if app is None:
+            return windows
+        for widget in app.topLevelWidgets():
+            if widget is self or not widget.isVisible():
+                continue
+            if isinstance(widget, (QDialog, QMainWindow)) and not isinstance(widget, CommandPalette):
+                windows.append(widget)
+        return windows
+
+    def _motion_level(self) -> str:
+        return str(self.config.get_view_setting("motion_level", "normal"))
+
+    def _animations_allowed(self) -> bool:
+        """D11 force Off：motion off 或当前编辑器大文件模式下禁用动画。"""
+        if self._motion_level() == "off":
+            return False
+        widget = self.editor_tabs.currentWidget()
+        editor = getattr(widget, "editor", None)
+        if editor is not None and getattr(editor, "is_large_file_mode", lambda: False)():
+            return False
+        return True
+
+    def _transition_veil_color(self) -> str:
+        """overlay 降级遮罩纯色 = 当前变体 surface_primary（旧主题色）。"""
+        return v2_token(self.theme_engine, "surface_primary", "#FFFFFF")
+
+    def _transition_easing(self) -> QEasingCurve.Type:
+        """缓动取自 motion.json（motion_level 档位不写 motion.json）。"""
+        from .themes.theme_v2.transition_controller import easing_for
+
+        svc = getattr(self.theme_engine, "theme_v2", None)
+        if svc is None:
+            return QEasingCurve.Type.OutCubic
+        snapshot = svc.snapshot()
+        if snapshot is None:
+            return QEasingCurve.Type.OutCubic
+        return easing_for(snapshot.motion.easing)
 
     # === 插件管理 ===
 

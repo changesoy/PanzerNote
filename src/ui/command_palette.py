@@ -14,7 +14,7 @@ from PyQt6.QtGui import QFont, QKeyEvent, QColor, QMouseEvent, QKeySequence
 
 from ..utils.dpi_helper import scale
 from ..themes.theme_aware_mixin import ThemeAwareMixin
-from ..themes.theme_v2.consumer import v2_color, v2_token
+from ..themes.theme_v2.consumer import v2_color, v2_design_value, v2_token
 
 # (display_name, shortcut_display, action_id)
 CommandEntry = Tuple[str, str, str]
@@ -95,6 +95,9 @@ class CommandPalette(ThemeAwareMixin, QDialog):
         input_fg = v2_color(self._theme_engine, "input", "text", "#212121")
         border = v2_token(self._theme_engine, "border_muted", "#E0E0E0")
         text_secondary = v2_token(self._theme_engine, "text_secondary", "#757575")
+        # 补漏 C：padding 走 design.json（space_3/space_4），font-size 为面板专属尺度保留
+        pad_v = v2_design_value(self._theme_engine, "spacing", "space_3", 8)
+        pad_h = v2_design_value(self._theme_engine, "spacing", "space_4", 12)
 
         self.setStyleSheet(f"""
             CommandPalette {{
@@ -103,7 +106,7 @@ class CommandPalette(ThemeAwareMixin, QDialog):
             QLineEdit {{
                 border: none;
                 border-bottom: 1px solid {border};
-                padding: 8px 12px;
+                padding: {pad_v}px {pad_h}px;
                 background: {input_bg};
                 color: {input_fg};
                 font-size: 13px;

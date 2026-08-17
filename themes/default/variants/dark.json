@@ -7,7 +7,7 @@
   },
   "tokens": {
     "surface_primary": "#181818",
-    "surface_secondary": "#181818",
+    "surface_secondary": "#252526",
     "surface_raised": "#2B2B2B",
     "text_primary": "#E0E0E0",
     "text_secondary": "#A0A0A0",
@@ -50,7 +50,7 @@
     "search_match_bg": "#3A3D41",
     "search_current_bg": "#515C6A",
     "search_current_fg": "#FFFFFF",
-    "minimap_viewport": "#3C3C3C"
+    "minimap_viewport": "#6E6E6E"
   },
   "syntax": {
     "palette": "dark-default-v1",

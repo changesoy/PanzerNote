@@ -72,6 +72,8 @@ class ThemeEngine(QObject):
         assert variant is not None  # load_default 成功即保证 snapshot 非空
         tokens = variant.tokens
         tab = self.components.resolve("tab", vid) or {}
+        # 补漏 C：QStatusBar 全局段收敛到 statusbar recipe（与 status_bar.py 局部 QSS 同源）
+        statusbar = self.components.resolve("statusbar", vid) or {}
 
         parts = [f"""
 QMainWindow {{
@@ -100,9 +102,9 @@ QTabBar::tab:selected {{
     color: {tab.get('active_text', tokens['text_primary'])};
 }}
 QStatusBar {{
-    background-color: {tokens['surface_secondary']};
-    color: {tokens['text_secondary']};
-    border-top: 1px solid {tokens['border_muted']};
+    background-color: {statusbar.get('background', tokens['surface_secondary'])};
+    color: {statusbar.get('text', tokens['text_secondary'])};
+    border-top: 1px solid {statusbar.get('border', tokens['border_muted'])};
 }}
 QLabel {{
     color: {tokens['text_primary']};

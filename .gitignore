@@ -25,6 +25,7 @@ Wave8-B7-Switching设计文档.md
 Wave8-V1清理迁移方案.md
 Wave8-深色模式修复规划书.md
 Wave8-Pythonic审查修复计划.md
+Wave8-补漏规划.md
 
 # 主题检测工具（本地维护，不入库）
 scripts/check_dark_theme_gaps.py

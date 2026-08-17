@@ -69,6 +69,10 @@ class ThemeResourceContract:
         except OSError as exc:
             raise ThemeResourceError(f"资源路径无法解析: {reference}") from exc
 
+        # B1 4.3：不存在的资源在 activate 前报错，不得拖到 paint/加载时爆发（补漏 D P1-8）。
+        if not resolved.is_file():
+            raise ThemeResourceError(f"资源文件不存在: {reference}")
+
         theme_root_resolved = theme_root.resolve()
         if _is_within(resolved, theme_root_resolved):
             return resolved

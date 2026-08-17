@@ -298,7 +298,7 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
         text_primary = v2_token(self._theme_engine, "text_primary", "#212121")
 
         self.setStyleSheet(f"""
-            QWidget {{
+            QWidget#FileTreeWidget {{
                 background-color: {sidebar_bg};
             }}
         """)

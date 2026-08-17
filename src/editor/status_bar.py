@@ -85,11 +85,22 @@ class StatusBarWidget(ThemeAwareMixin, QStatusBar):
         self.addPermanentWidget(self.file_type_label)
 
     def _apply_theme_colors(self):
-        # B3：状态栏消费 v2 token（无 v1 回退，B8：字面量 = v1 light 值）
-        statusbar_bg = v2_token(self._theme_engine, "surface_secondary", "#F5F5F5")
-        border = v2_token(self._theme_engine, "border_muted", "#E0E0E0")
-        text_primary = v2_token(self._theme_engine, "text_primary", "#212121")
-        divider = v2_token(self._theme_engine, "border_muted", "#EEEEEE")
+        # B3：状态栏消费 statusbar recipe（补漏 C：收敛自建 v2_token QSS → recipe 单一来源）
+        # 兜底字面量 = v1 light 值（recipe 缺失时保持旧观感，理论不触发）。
+        style = None
+        components = getattr(self._theme_engine, "components", None)
+        if components is not None:
+            style = components.resolve("statusbar")
+        if style is None:
+            statusbar_bg = v2_token(self._theme_engine, "surface_secondary", "#F5F5F5")
+            border = v2_token(self._theme_engine, "border_muted", "#E0E0E0")
+            text_primary = v2_token(self._theme_engine, "text_primary", "#212121")
+            divider = v2_token(self._theme_engine, "border_muted", "#EEEEEE")
+        else:
+            statusbar_bg = style["background"]
+            border = style["border"]
+            text_primary = style["text"]
+            divider = style["divider"]
         self.setStyleSheet(f"""
             QStatusBar {{
                 background-color: {statusbar_bg};

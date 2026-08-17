@@ -50,7 +50,7 @@
     "search_match_bg": "#FFEE58",
     "search_current_bg": "#FF9800",
     "search_current_fg": "#FFFFFF",
-    "minimap_viewport": "#E0E0E0"
+    "minimap_viewport": "#9E9E9E"
   },
   "syntax": {
     "palette": "light-default-v1",

@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.themes.theme_aware_mixin import ThemeAwareMixin
-from src.themes.theme_v2.consumer import v2_token
+from src.themes.theme_v2.consumer import v2_design_value, v2_token
 
 
 class SidePanelHost(ThemeAwareMixin, QWidget):
@@ -209,6 +209,10 @@ class SidePanelHost(ThemeAwareMixin, QWidget):
         border = v2_token(self._theme_engine, "border_muted", "#E0E0E0")
         accent = v2_token(self._theme_engine, "accent", "#2196F3")
         on_accent = v2_token(self._theme_engine, "on_accent", "#FFFFFF")
+        pressed_bg = v2_token(self._theme_engine, "border_strong", "#BDBDBD")
+        # 补漏 C：radius 走 design.json（radius_sm），font-size 为活动栏专属尺度保留；
+        # B9 P2-4：补 pressed 态（按下变深，比 hover 更明确）
+        radius = v2_design_value(self._theme_engine, "radius", "radius_sm", 3)
         btn.setStyleSheet(f"""
             QToolButton {{
                 background: transparent;
@@ -216,11 +220,15 @@ class SidePanelHost(ThemeAwareMixin, QWidget):
                 color: {text};
                 font-size: 13px;
                 font-weight: bold;
-                border-radius: 4px;
+                border-radius: {radius}px;
             }}
             QToolButton:hover {{
                 background-color: {border};
                 border-color: {border};
+            }}
+            QToolButton:pressed {{
+                background-color: {pressed_bg};
+                border-color: {pressed_bg};
             }}
             QToolButton:checked {{
                 background-color: {accent};

@@ -65,6 +65,28 @@ def v2_style_value(
     return recipe.style.get(style_key, default)
 
 
+def v2_design_value(
+    theme_engine: ThemeEngine,
+    table: str,
+    key: str,
+    default: object = None,
+) -> Any:
+    """读取 design.json 数值表（spacing/radius/density）；不可用返回 default。
+
+    补漏 C：P1-6 供页面级 QSS 消费 design 变量，消除 magic spacing/radius 字面量。
+    """
+    svc = _service(theme_engine)
+    if svc is None:
+        return default
+    design = svc.design()
+    if design is None:
+        return default
+    table_obj = getattr(design, table, None)
+    if not isinstance(table_obj, Mapping):
+        return default
+    return table_obj.get(key, default)
+
+
 def v2_color_qcolor(
     theme_engine: ThemeEngine,
     recipe_key: str,

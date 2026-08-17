@@ -296,40 +296,24 @@ class FindReplaceBar(ThemeAwareMixin, QWidget):
 
     def _apply_theme_colors(self):
         # B2：查找栏消费 v2 语义 token + search recipe（无 v1 回退，B8：字面量 = v1 light 值）
+        # 补漏 C：删除子控件局部美化（QLineEdit/QPushButton/QCheckBox/QLabel 由全局 recipe
+        # 驱动）；仅保留容器背景、关闭按钮（QToolButton 无全局样式）与 search recipe 高亮。
         bar_bg = v2_token(self._theme_engine, "surface_secondary", "#F5F5F5")
         border = v2_token(self._theme_engine, "border_muted", "#E0E0E0")
-        input_bg = v2_token(self._theme_engine, "surface_raised", "#FFFFFF")
-        text = v2_token(self._theme_engine, "text_primary", "#212121")
-        focus_border = v2_token(self._theme_engine, "focus", "#2196F3")
-        hover_bg = v2_token(self._theme_engine, "surface_raised", "#BBDEFB")
-        pressed_bg = v2_token(self._theme_engine, "border_strong", "#E0E0E0")
+        text_secondary = v2_token(self._theme_engine, "text_secondary", "#757575")
+        hover_bg = v2_token(self._theme_engine, "border_muted", "#E0E0E0")
 
         self.setStyleSheet(f"""
             FindReplaceBar {{
                 background-color: {bar_bg};
                 border-bottom: 1px solid {border};
             }}
-            QLineEdit {{
-                padding: 3px 6px;
-                border: 1px solid {border};
-                border-radius: 3px;
-                background: {input_bg};
-                color: {text};
-                font-size: 12px;
+            QToolButton {{
+                background: transparent;
+                border: none;
+                color: {text_secondary};
             }}
-            QLineEdit:focus {{ border-color: {focus_border}; }}
-            QPushButton, QToolButton {{
-                padding: 3px 8px;
-                border: 1px solid {border};
-                border-radius: 3px;
-                background: {input_bg};
-                color: {text};
-                font-size: 12px;
-            }}
-            QPushButton:hover, QToolButton:hover {{ background: {hover_bg}; }}
-            QPushButton:pressed, QToolButton:pressed {{ background: {pressed_bg}; }}
-            QCheckBox {{ font-size: 12px; margin-left: 4px; color: {text}; }}
-            QLabel {{ font-size: 12px; color: {text}; }}
+            QToolButton:hover {{ background: {hover_bg}; }}
         """)
         self._update_match_label()
         # 高亮颜色：v2 search recipe（无 v1 回退，B8：字面量 = v1 light 值）
@@ -362,7 +346,7 @@ class FindReplaceBar(ThemeAwareMixin, QWidget):
             self.match_label.setText(f"第 {idx}/{total} 个匹配")
             self.match_label.setStyleSheet(f"color: {text_color};")
             self.search_input.setStyleSheet(
-                f"QLineEdit {{ border: 1px solid {match_border}; border-radius: 3px; }}"
+                f"QLineEdit {{ border: 1px solid {match_border}; }}"
             )
 
     # ────────────────── 高亮管理 ──────────────────

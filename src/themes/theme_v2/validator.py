@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Mapping
 
 from .compat import resolve_renderer_map, signature_for
@@ -49,6 +50,9 @@ from .types import (
 #: motion.json 缺省时的中性默认值（B1 仅契约，动效语言延后）。
 _DEFAULT_MOTION = {"duration_fast": 100, "duration_normal": 200, "easing": "ease-out"}
 
+#: recipe key 单段 snake_case 命名（不用点分，随 111.md 命名统一；B9 P2-13 schema 强制）。
+_RECIPE_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+
 
 class ThemeValidator:
     """ThemePackage → ThemeSnapshot（完整校验 + 不可变构造）。"""
@@ -71,8 +75,9 @@ class ThemeValidator:
         for variant_id, data in package.variants.items():
             variants[variant_id] = self._build_variant(variant_id, data)
 
-        self._validate_palette_references(variants)
+        # renderer resolution 先于 resource resolution（B9 P2-11：对齐文档流水线顺序）。
         recipes = self._validate_recipes(package.recipes)
+        self._validate_palette_references(variants)
         icons = self._validate_icons(package.icons, package)
         design = self._build_design(package.design)
         motion = self._build_motion(package.motion)
@@ -265,8 +270,10 @@ class ThemeValidator:
 
         recipes: dict[RecipeKey, ComponentRecipe] = {}
         for key, value in raw.items():
-            if not isinstance(key, str) or not key.strip():
-                raise ThemeSemanticError(f"recipe key 必须是非空字符串: {key!r}")
+            if not isinstance(key, str) or not _RECIPE_KEY_PATTERN.fullmatch(key):
+                raise ThemeSemanticError(
+                    f"recipe key 必须是单段 snake_case（如 'button'，不用点分）: {key!r}"
+                )
             if not isinstance(value, dict):
                 raise ThemeSemanticError(f"recipe '{key}' 必须是 JSON 对象")
 

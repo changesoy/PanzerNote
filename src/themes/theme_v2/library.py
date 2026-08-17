@@ -36,10 +36,10 @@ CORE_RECIPES: tuple[str, ...] = (
 STRUCTURAL_RECIPES: tuple[str, ...] = ("group_box", "dialog")
 
 # 已定义但 QSS 暂无法表达的键（预留：B6 polish / icons 资源提供后启用）。
-# arrow/arrow_hover 需 image 资源；placeholder 需 palette 路径；indicator_checked_fg
-# 需勾选图形 image。
+# arrow/arrow_hover 需 image 资源；indicator_checked_fg 需勾选图形 image。
+# placeholder 已随补漏 C 接线（QSS placeholder-text-color，仅 QLineEdit）。
 _PENDING_KEYS: frozenset[str] = frozenset(
-    {"arrow", "arrow_hover", "placeholder", "indicator_checked_fg"}
+    {"arrow", "arrow_hover", "indicator_checked_fg"}
 )
 
 
@@ -151,6 +151,7 @@ QPushButton:focus {{ border: 1px solid {s['focus_border']}; }}
 
 def _b_input(s: Mapping[str, Any]) -> str:
     pad_v, pad_h = s["padding"], s["padding"] * 2
+    # 补漏 C：placeholder 接线（QSS placeholder-text-color，QSpinBox 无该概念故拆分）
     return f"""
 QLineEdit, QSpinBox {{
     background-color: {s['background']};
@@ -160,6 +161,7 @@ QLineEdit, QSpinBox {{
     color: {s['text']};
     selection-background-color: {s['selection_bg']};
 }}
+QLineEdit {{ placeholder-text-color: {s['placeholder']}; }}
 QLineEdit:focus, QSpinBox:focus {{ border-color: {s['focus_border']}; }}
 QLineEdit:disabled, QSpinBox:disabled {{
     background-color: {s['disabled_background']};
@@ -373,8 +375,15 @@ def _b_tree_item(s: Mapping[str, Any]) -> str:
     # 会让 ::xxx 只附着最后一项，前面的退化为裸类型选择器——子控件规则
     # （::viewport/::item 系列）必须逐选择器独立成段。viewport 不继承
     # view 的 QSS 背景，缺失时无 item 的空白区回落到原生绘制色。
+    #
+    # 补漏 C：padding 走 recipe（space_1 → 2px 4px，与 button/input 垂直基准 ×2
+    # 语义一致）；icon_size 接线为 QSS icon-size（Qt 6 支持 QListView/QTreeView）。
+    # indent 键为 QSS 不可表达（QTreeView::indentation 仅代码属性），保留为元数据。
     views = ("QTreeView", "QListView", "QListWidget")
     head = ", ".join(views)
+    pad_v = s.get("padding", 2)
+    pad_h = pad_v * 2
+    icon_size = s.get("icon_size", 16)
     parts = [f"""
 {head} {{
     background-color: {s['background']};
@@ -388,7 +397,8 @@ def _b_tree_item(s: Mapping[str, Any]) -> str:
 }}""")
         parts.append(f"""
 {v}::item {{
-    padding: 2px 4px;
+    padding: {pad_v}px {pad_h}px;
+    icon-size: {icon_size}px;
 }}""")
         parts.append(f"""
 {v}::item:selected {{

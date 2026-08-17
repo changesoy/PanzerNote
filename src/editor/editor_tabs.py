@@ -1469,14 +1469,19 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
     def _apply_theme_colors(self):
         # B8：tabs 消费 v2 tab recipe
-        tab_bg = v2_color(self._theme_engine, "tab", "background", "#F5F5F5")
-        active_bg = v2_color(self._theme_engine, "tab", "active_background", "#FFFFFF")
-        pane_bg = v2_color(self._theme_engine, "tab", "pane_background", "#FFFFFF")
-        tab_fg = v2_color(self._theme_engine, "tab", "text", "#757575")
-        active_fg = v2_token(self._theme_engine, "text_primary", "#212121")
-        hover_bg = v2_color(self._theme_engine, "tab", "hover_background", "#BBDEFB")
-        pressed_bg = v2_color(self._theme_engine, "tab", "pressed_background", "#E0E0E0")
-        border = v2_color(self._theme_engine, "tab", "border", "#E0E0E0")
+        # 补漏 C：统一走 resolve()（color/design 数值一次解析），消除 padding/radius 字面量
+        style = self._theme_engine.components.resolve("tab") or {}
+        tab_bg = style.get("background", "#F5F5F5")
+        active_bg = style.get("active_background", "#FFFFFF")
+        pane_bg = style.get("pane_background", "#FFFFFF")
+        tab_fg = style.get("text", "#757575")
+        active_fg = style.get("active_text", "#212121")
+        hover_bg = style.get("hover_background", "#BBDEFB")
+        pressed_bg = style.get("pressed_background", "#E0E0E0")
+        border = style.get("border", "#E0E0E0")
+        pad_v = style.get("padding_v", 8)
+        pad_h = style.get("padding_h", 15)
+        radius = style.get("radius", 3)
 
         self.setStyleSheet(f"""
     QTabWidget {{
@@ -1538,7 +1543,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         background-color: {tab_bg};
         color: {active_fg};
         border: 1px solid {border};
-        border-radius: 3px;
+        border-radius: {radius}px;
         margin: 1px;
     }}
 

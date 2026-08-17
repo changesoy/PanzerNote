@@ -216,6 +216,27 @@ Switched built-in dark theme palette to VS Code Dark Modern / Dark+ target value
 
 Light theme palette unchanged.
 
+### Wave8 深色模式遗漏修复 ✅ COMPLETED
+
+修复深色模式下浅色背景/文字遗漏（四个根因，规划书 `Wave8-深色模式修复规划书.md`）：
+
+- **根因 1**（`theme_engine.py`）：`generate_stylesheet()` 运行时改取 `svc.active_variant()`
+  （`use_active=True`），不再依赖 v1 遗留 `_active_theme_id` 推导明暗。修复后全局 QSS
+  （主窗口背景、QLabel、QSplitter::handle、QFrame[frameShape] 分隔线、QDialog/QMessageBox）
+  在运行时切换 dark 后同步变深，一处根因覆盖"主界面边框 / 分屏竖条 / 记事本设置 /
+  快捷键列表 / 新手攻略 / 使用说明"等全部弹窗与结构遗漏。
+- **根因 2**（`theme_v2/library.py` + `theme_engine.py` v1 回退）：QGroupBox 标题
+  `margin-top` 8px → 16px、`padding-top` 16px → 6px、补 `subcontrol-position: top left`，
+  修复"资源颜色（固定）"等标题与首行内容重叠。
+- **根因 3**（`theme_preview.py`）：`_apply_theme_colors` 补齐 generic 选择器
+  （QDialog/QLabel/QListWidget/QGroupBox/QPushButton/QScrollBar/QDialogButtonBox），
+  主题管理弹窗深色下色块/列表/分组标题可读。
+- **根因 4**（验证型修复）：offscreen 像素探针实测确认全局 `QFrame[frameShape]`
+  `background-color` 规则在局部样式表嵌套下仍命中，9 处原生分隔线
+  （resource_bar/status_bar/game_sidebar/file_tree）由全局规则自动覆盖，无需逐处糊样式。
+
+回归工具：`scripts/check_dark_theme_gaps.py`（本地维护，gitignored），A/B/C/D 四组全绿。
+
 ## Verification Checklist
 
 - Start app in dark theme.
@@ -228,3 +249,5 @@ Light theme palette unchanged.
 - Open find/replace bar.
 - Open find-in-files panel.
 - Toggle sidebar panels.
+- Dark mode: verify resource bar / sidebar / status bar separators are dark, not light.
+- Dark mode: open theme manager, verify swatch labels and group titles readable, no overlap.

@@ -11,6 +11,8 @@ from enum import Enum
 from types import MappingProxyType
 from typing import Any, Literal, Mapping, TypeVar
 
+from .errors import ThemeRendererError
+
 VariantId = str      # "light" / "dark"，来自 filename stem
 RecipeKey = str      # "button" / "tab" / "input" / "scrollbar" / ...（单段组件语义名）
 TokenKey = str       # "surface_primary" / "text_primary" / ...（UI 语义 token 白名单）
@@ -200,8 +202,6 @@ class RendererContract:
 
     def validate_params(self, params: Mapping[str, Any]) -> None:
         """校验 renderer_params 与契约（未知参数或类型不匹配 → ValueError）。"""
-        from .errors import ThemeRendererError
-
         unknown = [k for k in params if k not in self.accepted_params_schema]
         if unknown:
             raise ThemeRendererError(

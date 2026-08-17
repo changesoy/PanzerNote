@@ -138,7 +138,7 @@ class ThemeTransitionController(QObject):
         overlays: List[_SnapshotOverlay] = []
         for window in windows:
             pixmap: Optional[QPixmap] = window.grab()
-            if pixmap is None or pixmap.isNull() or pixmap.width() == 0 or pixmap.height() == 0:
+            if pixmap is None or pixmap.isNull():
                 pixmap = None
             else:
                 pixmap.setDevicePixelRatio(window.devicePixelRatioF())

@@ -199,7 +199,6 @@ class ViewCoordinator:
         if unsaved:
             choice = UnsavedFilesDialog.ask(
                 parent,
-                self._theme_engine,
                 [info["title"] for info in unsaved],
                 show_cancel=False,
                 window_title="关闭分屏",

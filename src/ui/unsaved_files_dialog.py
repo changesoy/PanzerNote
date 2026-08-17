@@ -19,7 +19,6 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
-from ..themes.theme_engine import ThemeEngine
 from ..utils.dpi_helper import scale
 
 
@@ -34,21 +33,19 @@ class UnsavedChoice:
 class UnsavedFilesDialog(QDialog):
     """统一「未保存文件确认」对话框（3.5.7）。
 
-    用法：`UnsavedFilesDialog.ask(parent, theme_engine, titles, ...)` 返回
+    用法：`UnsavedFilesDialog.ask(parent, titles, ...)` 返回
     UnsavedChoice.SAVE / DISCARD / CANCEL。
     """
 
     def __init__(
         self,
         parent,
-        theme_engine: ThemeEngine,
         titles: List[str],
         *,
         show_cancel: bool = False,
         window_title: str = "有未保存的文件",
     ) -> None:
         super().__init__(parent)
-        self._theme_engine = theme_engine
         self._titles = list(titles)
         self._choice = UnsavedChoice.CANCEL
         self._cancel_handled = False
@@ -118,7 +115,6 @@ class UnsavedFilesDialog(QDialog):
     @staticmethod
     def ask(
         parent,
-        theme_engine: ThemeEngine,
         titles: List[str],
         *,
         show_cancel: bool = False,
@@ -127,7 +123,6 @@ class UnsavedFilesDialog(QDialog):
         """模态询问，返回 UnsavedChoice.SAVE / DISCARD / CANCEL。"""
         dlg = UnsavedFilesDialog(
             parent,
-            theme_engine,
             titles,
             show_cancel=show_cancel,
             window_title=window_title,

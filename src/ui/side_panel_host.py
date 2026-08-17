@@ -37,7 +37,7 @@ class SidePanelHost(ThemeAwareMixin, QWidget):
         self._buttons: Dict[str, QToolButton] = {}
         self._current_panel_id: str | None = None
         self._last_width: int = 200
-        self._last_colors = None
+        self._theme_applied = False
 
         self._init_theme(theme_engine)
 
@@ -103,7 +103,7 @@ class SidePanelHost(ThemeAwareMixin, QWidget):
         # 添加到栈
         self._stack.addWidget(panel)
 
-        if self._last_colors is not None:
+        if self._theme_applied:
             self._style_button(btn)
 
     def switch_to(self, panel_id: str) -> None:

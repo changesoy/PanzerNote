@@ -18,6 +18,7 @@ from typing import Any, Mapping
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from ...utils.logger import get_logger
+from .constants import COLOR_VALUE_PATTERN
 from .errors import ThemeSchemaError
 from .loader import ThemePackageLoader
 from .renderer_registry import RendererRegistry
@@ -210,6 +211,4 @@ class ThemeV2Service(QObject):
 
 
 def _is_color_value(value: str) -> bool:
-    from .constants import COLOR_VALUE_PATTERN
-
     return bool(COLOR_VALUE_PATTERN.fullmatch(value))

@@ -51,6 +51,15 @@ def _active_package_id(engine: ThemeEngine) -> str:
     return pkg or "default"
 
 
+def _row_by_data(list_widget: QListWidget, value: str | None) -> int:
+    """按 UserRole data 查找选中行；未找到返回 0。"""
+    for i in range(list_widget.count()):
+        it = list_widget.item(i)
+        if it is not None and it.data(Qt.ItemDataRole.UserRole) == value:
+            return i
+    return 0
+
+
 #: token 色块分组（B4：直接展示 v2 token 名，不依赖 v1 字段）
 _TOKEN_SECTIONS: tuple[tuple[str, list[tuple[str, str]]], ...] = (
     ("通用颜色", [
@@ -263,13 +272,7 @@ class ThemePreviewWidget(QWidget):
             self._package_list.addItem(item)
         active = _active_package_id(self._engine)
         self._package_list.blockSignals(False)
-        row = 0
-        for i in range(self._package_list.count()):
-            it = self._package_list.item(i)
-            if it is not None and it.data(Qt.ItemDataRole.UserRole) == active:
-                row = i
-                break
-        self._package_list.setCurrentRow(row)
+        self._package_list.setCurrentRow(_row_by_data(self._package_list, active))
         self._on_package_selected(self._package_list.currentItem())
 
     def _refresh_variant_list(self, package_id: str):
@@ -287,13 +290,7 @@ class ThemePreviewWidget(QWidget):
             if active not in snapshot.variants:
                 active = next(iter(snapshot.variants))
         self._variant_list.blockSignals(False)
-        row = 0
-        for i in range(self._variant_list.count()):
-            it = self._variant_list.item(i)
-            if it is not None and it.data(Qt.ItemDataRole.UserRole) == active:
-                row = i
-                break
-        self._variant_list.setCurrentRow(row)
+        self._variant_list.setCurrentRow(_row_by_data(self._variant_list, active))
         self._on_variant_selected(self._variant_list.currentItem())
 
     def _on_package_selected(self, current: QListWidgetItem | None, previous=None):
@@ -491,7 +488,6 @@ class ThemePreviewDialog(ThemeAwareMixin, QDialog):
         dialog_bg = v2_color(self._engine, "dialog", "background", "#FFFFFF")
         text_primary = v2_token(self._engine, "text_primary", "#212121")
         text_secondary = v2_token(self._engine, "text_secondary", "#757575")
-        border = v2_token(self._engine, "border_muted", "#E0E0E0")
         self.setStyleSheet(f"""
     QDialog {{
         background-color: {dialog_bg};

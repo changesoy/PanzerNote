@@ -739,7 +739,6 @@ class MainWindow(QMainWindow):
 
         choice = UnsavedFilesDialog.ask(
             self,
-            self.theme_engine,
             [info["title"] for info in unsaved_infos],
             show_cancel=True,
             window_title="确认退出",
@@ -1563,7 +1562,7 @@ class MainWindow(QMainWindow):
             return
         self.config.set_view_setting("theme", f"{package_id}/{variant_id}")
         self._apply_theme()
-        self.secretary.show_message(f"已切换主题")
+        self.secretary.show_message("已切换主题")
 
     def _transition_windows(self) -> list:
         """参与过渡的窗口：主窗口 + 可见顶层 QDialog/QMainWindow。

@@ -12,8 +12,7 @@ Wave8 Batch C 全部删除。
 v2 加载失败 → 启动显式报错（ThemeLoadError），永不静默回退。
 """
 
-import os
-from typing import Tuple
+from pathlib import Path
 
 from PyQt6.QtCore import QObject
 
@@ -39,9 +38,7 @@ class ThemeEngine(QObject):
 
         加载失败 → 抛 ThemeLoadError（启动显式报错，永不静默回退 v1）。
         """
-        themes_dir = os.path.normpath(os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "..", "..", "themes"
-        ))
+        themes_dir = Path(__file__).resolve().parents[2] / "themes"
         self.theme_v2 = ThemeV2Service(themes_dir, parent=self)
         self.components = ThemeComponentLibrary(self.theme_v2)
         if not self.theme_v2.load_default():
@@ -51,7 +48,7 @@ class ThemeEngine(QObject):
         self.theme_manager = ThemeManager(themes_dir, self.theme_v2, parent=self)
 
     @staticmethod
-    def _parse_theme_setting(value: str) -> Tuple[str, str]:
+    def _parse_theme_setting(value: str) -> tuple[str, str]:
         """解析 config view.theme：``package/variant`` 或旧版 ``variant id``。
 
         旧值 ``light``/``dark`` 在读取时迁移为 ``("default", "light")``/``("default", "dark")``。

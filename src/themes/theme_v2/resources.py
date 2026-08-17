@@ -82,8 +82,4 @@ class ThemeResourceContract:
 
 
 def _is_within(path: Path, root: Path) -> bool:
-    try:
-        path.relative_to(root)
-        return True
-    except ValueError:
-        return False
+    return path.is_relative_to(root)

@@ -40,11 +40,6 @@ class FindReplaceBar(ThemeAwareMixin, QWidget):
         self._current_idx = -1
         self._replace_visible = False
 
-        # 高亮颜色从主题 token 取值（由 _apply_theme_colors 按主题更新）
-        self._match_bg = QColor("#FFEE58")
-        self._current_bg = QColor("#FF9800")
-        self._current_fg = QColor("#FFFFFF")
-
         self._init_ui()
         self._connect_signals()
         self._init_theme(theme_engine)

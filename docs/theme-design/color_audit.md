@@ -57,9 +57,9 @@ Excluded paths:
 | `src/editor/find_replace.py`             |     0 | Resolved (Batch C)  | search match/current match colors now read from search tokens                             |
 | `src/ui/side_panel_host.py`              |     0 | Resolved            | hardcoded colors removed; reads theme tokens                                              |
 | `src/editor/secure_markdown_renderer.py` |     8 | Resolved (Wave 1.5) | unified safe render / export entry, not legacy; layout CSS shared via MARKDOWN_LAYOUT_CSS |
-| `src/game/game_sidebar.py`               |     7 | Needs review        | likely resource/status colors                                                             |
+| `src/game/game_sidebar.py`               |     7 | Resolved           | D13/D24 游戏域独立配色，走 game_palette.json（game_* token） |
 | `src/themes/theme_preview.py`            |     4 | Low priority        | color swatches are intentionally literal                                                  |
-| `src/game/secretary_widget.py`           |     4 | Needs review        | bubble/status colors should map to theme tokens                                           |
+| `src/game/secretary_widget.py`           |     4 | Resolved           | D13/D24 游戏域独立配色，气泡/状态色走 game_palette.json（secretary_* token） |
 | `src/ui/command_palette.py`              |     3 | Low priority        | hint fallback only; themed after init                                                     |
 | `src/editor/find_in_files_panel.py`      |     2 | Low priority        | already mostly themed                                                                     |
 

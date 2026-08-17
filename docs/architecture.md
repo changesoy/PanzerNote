@@ -46,7 +46,7 @@ PanzerNote 是一款以已停服二次元游戏《战车少女》（PanzerMaiden
 | 设置系统             | ✅ 完成   | settings.json + workspace.json + savegame.json，首次运行对话框                                                                                               |
 | 安全防护体系         | ✅ 完成   | 路径验证/文件操作安全/输入验证/拖放白名单                                                                                                                    |
 | 插件系统             | ✅ 完成   | 能力声明制（capabilities→权限映射）/命名空间式 PluginContext/主线程模型/数据与事件能力/热加载，2 个示例插件 + API 文档                                       |
-| 主题系统             | ✅ 完成   | JSON/YAML 外部主题/解析引擎/QSS 生成/预览/ThemeAwareMixin 全局生效/原生标题栏深色                                                                            |
+| 主题系统             | ✅ 完成   | Theme v2（default 主题包/recipe 组件库/双变体）/全局 QSS 生成/预览/ThemeAwareMixin 全局生效/原生标题栏深色                                                        |
 | 集中式版本管理       | ✅ 完成   | `src/__init__.py` 唯一真相源 + `verify_version.py` 一致性验证                                                                                                |
 | 建造系统             | 🔲 规划中 | 详见 [roadmap.md](roadmap.md)                                                                                                                                |
 | 图鉴系统             | 🔲 规划中 | 详见 [roadmap.md](roadmap.md)                                                                                                                                |
@@ -166,9 +166,10 @@ PanzerNote/
 │   │   └── plugin_manager_dialog.py # 插件管理对话框
 │   │
 │   ├── themes/                     # ── 主题系统 ──
-│   │   ├── theme_engine.py         # 主题引擎（JSON/YAML 加载/QSS 生成）
+│   │   ├── theme_engine.py         # 主题引擎（Theme v2 装配/全局 QSS 生成）
 │   │   ├── theme_aware_mixin.py    # 主题感知混入
-│   │   └── theme_preview.py        # 主题预览对话框
+│   │   ├── theme_preview.py        # 主题预览对话框
+│   │   └── theme_v2/               # Theme v2 运行时（service/manager/loader/validator/library 等 18 个模块）
 │   │
 │   └── utils/                      # ── 工具模块 ──
 │       ├── logger.py               # 结构化日志系统

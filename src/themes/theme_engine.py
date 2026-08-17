@@ -482,11 +482,13 @@ QGroupBox {{
     color: {c.text_primary};
     border: 1px solid {c.border};
     border-radius: 4px;
-    margin-top: 8px;
-    padding-top: 16px;
+    margin-top: 2em;
+    padding-top: 6px;
 }}
 QGroupBox::title {{
     subcontrol-origin: margin;
+    subcontrol-position: top left;
+    top: 0.5em;
     left: 8px;
     padding: 0 4px;
 }}

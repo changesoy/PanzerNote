@@ -394,11 +394,13 @@ QGroupBox {{
     color: {s['text']};
     border: 1px solid {s['border']};
     border-radius: {s['radius']}px;
-    margin-top: 8px;
-    padding-top: 16px;
+    margin-top: 2em;
+    padding-top: 6px;
 }}
 QGroupBox::title {{
     subcontrol-origin: margin;
+    subcontrol-position: top left;
+    top: 0.5em;
     left: 8px;
     padding: 0 4px;
 }}

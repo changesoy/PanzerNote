@@ -352,6 +352,12 @@ class ThemePreviewWidget(QWidget):
             if child is not None:
                 w = child.widget()
                 if w is not None:
+                    # deleteLater 延迟到下次事件循环才销毁；而下方立即 addWidget 会
+                    # 在同一轮内插入新 group，旧 group 仍挂在父 widget 上被绘制，
+                    # 造成新旧两个同位置 QGroupBox 标题"双重影"的视觉bug。
+                    # setParent(None) 立即从可见层级移除，保证不参与本轮渲染。
+                    w.hide()
+                    w.setParent(None)
                     w.deleteLater()
 
         snapshot = self._load_package_snapshot(package_id)

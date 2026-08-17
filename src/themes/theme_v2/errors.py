@@ -39,3 +39,7 @@ class ThemeSwitchPlanError(ThemeError):
 
 class ThemeSwitchUnsupportedError(ThemeError):
     """切换等级不支持执行（L2 Shell rebuild 在 Wave 8 只留 Contract，executor 拒绝）。"""
+
+
+class ThemeLoadError(ThemeError):
+    """Theme v2 加载失败（default 包不可用）。Wave8 Batch C：启动显式报错，永不静默回退。"""

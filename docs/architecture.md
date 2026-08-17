@@ -471,13 +471,13 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 
 ### 4.6 代码高亮主题 (`editor/highlight_themes.py`)
 
-- **颜色来源统一**：所有语法高亮颜色从 `ThemeColorScheme` 的 24 个 `syntax_*` token 读取，不再保留独立的 `THEMES` 字典
-- **`TOKEN_MAP` 映射表**：60+ 条 `{Pygments Token → syntax_* 属性名}` 映射，覆盖 Keyword/Name/Literal/Comment/Operator/Punctuation/Text/Error/Generic 等所有 Pygments token 层级
+- **颜色来源统一**：所有语法高亮颜色从 v2 syntax palette（`themes/syntax/palettes/*.json` + 变体 override）读取，经 `v2_syntax_colors()` 消费，不再保留独立的 `THEMES` 字典
+- **`TOKEN_MAP` 映射表**：60+ 条 `{Pygments Token → syntax_* token}` 映射，覆盖 Keyword/Name/Literal/Comment/Operator/Punctuation/Text/Error/Generic 等所有 Pygments token 层级
 - **跨主题装饰**：`_TOKEN_BOLD` / `_TOKEN_ITALIC` frozenset 统一管理粗体/斜体装饰，不随主题切换变化
-- **编辑器端**：`get_editor_formats(theme_engine)` → 从当前主题的 `ThemeColorScheme` 动态构建 `{Token: QTextCharFormat}`
+- **编辑器端**：`get_editor_formats(theme_engine)` → 经 `v2_syntax_colors()` 动态构建 `{Token: QTextCharFormat}`
 - **预览端**：`highlight_code_html(code, language, theme_engine)` → 从主题颜色生成 Pygments style class，输出内联样式 HTML
 - **预览 CSS**：`get_preview_css(theme_engine)` → 从主题颜色生成代码高亮 CSS 变量，注入 Markdown 预览
-- 切换主题时语法高亮颜色无需任何额外处理——`theme_changed` 信号触发所有订阅组件重新读取 `ThemeColorScheme`，颜色自动跟随（详见 [color_audit.md](theme-design/color_audit.md)）
+- 切换主题时语法高亮颜色无需任何额外处理——manager `theme_committed` 信号触发订阅组件经 v2 token 重读，颜色自动跟随（详见 [color_audit.md](theme-design/color_audit.md)）
 
 ### 4.7 小秘书 (`game/secretary_widget.py`)
 
@@ -706,49 +706,36 @@ LOADED → on_unload() → UNLOADED
 
 #### 4.13.1 主题引擎 (`themes/theme_engine.py`)
 
-- **内置主题**：从 `themes/builtin/` 目录加载 JSON 主题文件（`light.json` / `vscode_dark.json`），零硬编码色值
-- 支持 JSON/YAML 两种格式的外部主题文件（从用户数据目录 `themes/` 加载）
-- **主题持久化**：通过 `config.get_view_setting("theme", "light")` 恢复上次保存的主题
-- **QSS 生成**：`generate_stylesheet()` 从 `ThemeColorScheme` 生成完整 QSS 样式表，覆盖所有 UI 元素（QMainWindow/QMenuBar/QMenu/QTabBar/QTreeView/QStatusBar/QLabel/QPushButton/QLineEdit 等）
+- **Theme v2 唯一运行时**（Wave8 Batch C 后 v1 遗留类型/builtin 主题/外部主题/YAML/回退路径已删除）：
+  初始化 default 主题包（`themes/default/`，含变体/recipe/design/icon 数据）与 Core Controls 组件库（`theme_v2/library.py`）
+- **QSS 生成**：`generate_stylesheet()` 以当前激活 variant 为单一真相源——结构段消费
+  variant semantic token，Core Controls 走组件库 recipe 解析，覆盖全部 UI 元素
+  （QMainWindow/QMenuBar/QTab/QTreeView/QStatusBar/QLabel/QPushButton/QLineEdit/QGroupBox/QDialog 等），整段原子切换
+- **主题持久化**：通过 `config.get_view_setting("theme", "default/light")` 恢复上次保存的主题
+  （`package/variant` 语义；旧值 `light`/`dark` 读取时迁移为 default 包）
+- **v2 加载失败 = 启动显式报错**：抛 `ThemeLoadError`，main.py 弹错误框后退出，永不静默回退
 - 主题切换即时生效，无需重启
 
-**主题文件格式（91 个 color token，按功能分组）**：
+**v2 主题包结构**（`themes/default/`）：
 
-```json
-{
-  "id": "light",
-  "name": "浅色主题",
-  "version": "2.0",
-  "is_dark": false,
-  "colors": {
-    "primary": "#2196F3",
-    "background": "#FFFFFF",
-    "surface": "#F5F5F5",
-    "editor_bg": "#FFFFFF",
-    "sidebar_bg": "#FAFAFA",
-    "syntax_keyword": "#0033B3",
-    "syntax_string": "#067D17",
-    "syntax_comment": "#8C8C8C",
-    "…": "… (共 91 个 token)"
-  }
-}
-```
-
-> token 完整列表参考 `themes/builtin/light.json` 和 `themes/builtin/vscode_dark.json` 中的 `colors` 对象。每个 token 的代码位置与影响范围见 [`themes/token_mapping.md`](../themes/token_mapping.md)。
+- `theme.json` — 包清单（包名/渲染器/变体/recipe/design 契约）
+- `variants/light.json` / `variants/dark.json` — 变体语义 token（UI 通用 11 + `editor_*`/`md_*`/`search_*` 专用）
+- `recipes.json` — 组件视觉配方（button/tab/tree_item/group_box/dialog/scrollbar 等）
+- `design.json` / `icons.json` / `motion.json` — 设计 token / 图标 / 动效
+- `syntax/palettes/*.json` — 共享语法配色 palette（light-default-v1 / dark-default-v1）
 
 #### 4.13.2 主题预览 (`themes/theme_preview.py`)
 
 - `ThemePreviewDialog` — 主题预览对话框，接入 ThemeAwareMixin，深色样式已补齐
-- 11 个颜色分组展示全部 91 个 token：通用颜色 / 编辑器颜色 / UI 区域颜色 / 资源颜色 / 交互状态 / 搜索高亮 / 书签与折叠 / 代码块 / 游戏图标 / Markdown 高亮 / 语法高亮
-- 实时预览主题效果，支持主题选择和切换
+- 多包 + 变体浏览（B8）：扫描 `themes/*/theme.json` 列出包，按包加载变体
+- 按 v2 token 分组展示色块：通用颜色 / 编辑器颜色 / UI 区域 / 搜索高亮 / 书签与折叠 / 代码块 / Markdown 高亮 等
+- 应用切换经 `theme_applied(package_id, variant_id)` 走 Snapshot Overlay 过渡
 
 #### 4.13.3 主题感知混入 (`themes/theme_aware_mixin.py`)
 
-- `ThemeAwareMixin` — 主题感知混入类，UI 组件继承后自动订阅 `theme_changed` 信号
-- 组件实现样式更新方法（`_apply_theme(theme)` 或 `_apply_theme_colors(colors)`，取决于组件类型），在主题切换时更新自身样式
+- `ThemeAwareMixin` — UI 组件继承后自动订阅 `ThemeManager.theme_committed` 信号（package/variant 语义）
+- 组件实现 `_apply_theme_colors()` 更新自身样式（经 v2 token / consumer 辅助读取）
 - 已集成组件涵盖：Editor、MarkdownPreviewWidget、EditorTabWidget、MinimapWidget、FileTreeWidget、FindReplaceBar、StatusBarWidget、SecretaryWidget、ResourceBar、GameSidebar、ShortcutPanel、ThemePreviewDialog、PluginManagerDialog、CompletionPopup 等
-
-> **注意**：`_apply_theme(theme)` 和 `_apply_theme_colors(colors)` 两种方法在代码中并存，新增组件时应参考同类型组件的实现方式。
 
 ### 4.14 存档管理器 (`core/savegame_manager.py`)
 
@@ -1035,7 +1022,7 @@ pip install mypy>=1.20                         # 类型检查
 
 ### 主题约束
 
-22. **主题全局生效**：所有需要响应主题切换的 UI 组件应继承 `ThemeAwareMixin`，实现 `_apply_theme(theme)` 或 `_apply_theme_colors(colors)` 方法。`ThemeAwareMixin` 自动订阅 `theme_changed` 信号
+22. **主题全局生效**：所有需要响应主题切换的 UI 组件应继承 `ThemeAwareMixin`，实现 `_apply_theme_colors()` 方法。`ThemeAwareMixin` 自动订阅 `ThemeManager.theme_committed` 信号
 23. **硬编码颜色迁移**：编辑器、Markdown 预览、弹窗中残留的硬编码颜色应逐步迁移到主题 token 系统，迁移方向参考 [color_audit.md](theme-design/color_audit.md)（VS Code Dark Modern / Dark+）
 
 ### 插件约束

@@ -1,7 +1,9 @@
 # 主题 Token 映射表
 
-> 本文件记录 `ThemeColorScheme` 中每个 color token 的实际使用位置，供主题作者和开发者参考。
-> 颜色定义文件：`themes/builtin/light.json` / `themes/builtin/vscode_dark.json`。
+> **⚠️ Wave8 Batch C（2026-08-17）后已过时**：v1 配色对象与 `themes/builtin/*.json`
+> 已删除，颜色统一由 Theme v2 semantic token（`themes/default/variants/*.json`）承载。
+> 本文件保留 v1 字段 → 使用位置的历史映射，作为收敛到 v2 token 的参考
+> （收敛对照见 `Wave8-V1清理迁移方案.md` 第 2 节）。
 
 ---
 

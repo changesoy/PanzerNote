@@ -115,7 +115,6 @@ class MainWindow(QMainWindow):
         self._plugin_commands: Dict[str, Tuple[str, str, Callable]] = {}
         self.editor_tabs: EditorTabWidget  # 在 _init_ui 中初始化
         self.theme_engine = ThemeEngine(self.config)
-        self.theme_engine.load_external_themes()
         self.theme_engine.initialize_active_theme()
 
         # B7：切换视觉过渡编排（启动期恢复主题不经 controller、无动画）

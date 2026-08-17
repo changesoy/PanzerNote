@@ -4,7 +4,7 @@
 显示四项资源和打字统计
 
 v1.6.4 改动：
-  - 主题感知：订阅 theme_changed 信号
+  - 主题感知：订阅 theme_committed 信号（v2 manager）
 """
 
 from PyQt6.QtWidgets import (

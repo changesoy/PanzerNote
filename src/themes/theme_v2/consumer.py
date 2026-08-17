@@ -96,7 +96,7 @@ def v2_active_variant(theme_engine: ThemeEngine) -> str | None:
 
 
 def v2_export_colors(theme_engine: ThemeEngine) -> dict[str, str]:
-    """导出 HTML/PDF 所需的 v2 色值集合（B8：替代 v1 ThemeColorScheme 传参）。"""
+    """导出 HTML/PDF 所需的 v2 色值集合（B8：替代 v1 配色对象传参）。"""
     return {
         "text_primary": v2_token(theme_engine, "text_primary", "#212121"),
         "text_secondary": v2_token(theme_engine, "text_secondary", "#757575"),

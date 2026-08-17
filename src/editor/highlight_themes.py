@@ -7,7 +7,7 @@
     编辑器：  get_editor_formats(theme_engine) → {Token: QTextCharFormat}
     预览CSS： get_preview_css(theme_engine)     → str (注入到 HTML <style>)
 
-颜色值统一由 ThemeEngine 的 ThemeColorScheme 管理。
+颜色值统一由 ThemeEngine 的 v2 syntax palette 管理。
 Token → syntax_* 映射、bold/italic 装饰在此定义。
 """
 
@@ -29,7 +29,7 @@ except ImportError:
 
 # ════════════════════════════════════════════════════════
 #  Token → syntax_* 映射表
-#  所有 Pygments Token 到 ThemeColorScheme 语义 token 属性的映射
+#  所有 Pygments Token 到 syntax_* token 的映射
 # ════════════════════════════════════════════════════════
 
 if HAS_PYGMENTS:

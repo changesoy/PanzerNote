@@ -480,11 +480,11 @@ class ThemePreviewDialog(ThemeAwareMixin, QDialog):
         layout.addWidget(self._button_box)
 
     def _apply_theme_colors(self):
-        """应用主题管理弹窗的局部样式（B5）。
+        """应用主题管理弹窗的局部样式（B5，根因 3 补全）。
 
-        只处理全局 QSS 未覆盖的结构区域：面板容器背景、次级标签、预览滚动区。
-        QDialog/QListWidget/QGroupBox/QCheckBox/QPushButton/QScrollBar/QSplitter
-        由全局 recipe（dialog/tree_item/group_box/checkbox/button/scrollbar）驱动。
+        局部 QSS 对弹窗内动态生成内容（色块行标签、hex 值、分组标题、列表、
+        按钮、滚动区）显式声明文字/背景色，深色下自洽可读；控件完整视觉
+        （按钮 hover、列表选中态、滚动条滑块等）仍由全局 recipe 驱动。
         色块 swatch 展示的是被预览主题自身的色值，属于功能内容，不在此主题化。
         """
         # B8：字面量 = v1 light 值（dialog_bg/text_primary/text_secondary/border）
@@ -493,12 +493,44 @@ class ThemePreviewDialog(ThemeAwareMixin, QDialog):
         text_secondary = v2_token(self._engine, "text_secondary", "#757575")
         border = v2_token(self._engine, "border_muted", "#E0E0E0")
         self.setStyleSheet(f"""
+    QDialog {{
+        background-color: {dialog_bg};
+        color: {text_primary};
+    }}
+
     QWidget#ThemePreviewWidget,
     QWidget#ThemePreviewLeftPanel,
     QWidget#ThemePreviewRightPanel,
     QWidget#ThemePreviewContent {{
         background-color: {dialog_bg};
         color: {text_primary};
+    }}
+
+    /* 根因 3：动态生成内容全部显式声明颜色，不依赖全局 QSS 恰好生效。 */
+    QLabel {{
+        color: {text_primary};
+    }}
+
+    QListWidget {{
+        background-color: {dialog_bg};
+        color: {text_primary};
+        border: none;
+    }}
+
+    QGroupBox {{
+        color: {text_primary};
+    }}
+
+    QPushButton {{
+        color: {text_primary};
+    }}
+
+    QScrollBar {{
+        background-color: {dialog_bg};
+    }}
+
+    QDialogButtonBox {{
+        background-color: {dialog_bg};
     }}
 
     QLabel#ThemePreviewSectionLabel,

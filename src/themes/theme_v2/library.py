@@ -296,31 +296,53 @@ QSlider::handle:horizontal:hover {{
 def _b_scrollbar(s: Mapping[str, Any]) -> str:
     w, min_len, margin = s["width"], s["min_len"], s["margin"]
     radius = w // 2
+    # Qt QSS 关键点（Windows 下双重验证）：
+    # 1) ::handle 设置 margin 会使 border-radius 被忽略（方角）→ 改 margin: 0，
+    #    用与 track 同色的 border 做内缩，圆角正常且不可见。
+    # 2) 外框 background-color 不足以覆盖 QAbstractScrollArea 的 native gutter
+    #    底色（灰竖条）→ 外框透明，groove + add/sub-page 三处统一画 track 色。
+    inset = f"border: {margin}px solid {s['track']};"
     return f"""
 QScrollBar:vertical {{
-    background-color: {s['track']};
+    background: transparent;
     width: {w}px;
     margin: 0;
 }}
+QScrollBar::groove:vertical {{
+    background-color: {s['track']};
+    border: none;
+}}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+    background-color: {s['track']};
+}}
 QScrollBar::handle:vertical {{
     background-color: {s['handle']};
+    {inset}
     border-radius: {radius}px;
     min-height: {min_len}px;
-    margin: {margin}px;
+    margin: 0;
 }}
 QScrollBar::handle:vertical:hover {{ background-color: {s['handle_hover']}; }}
 QScrollBar::handle:vertical:pressed {{ background-color: {s['handle_pressed']}; }}
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
 QScrollBar:horizontal {{
-    background-color: {s['track']};
+    background: transparent;
     height: {w}px;
     margin: 0;
 }}
+QScrollBar::groove:horizontal {{
+    background-color: {s['track']};
+    border: none;
+}}
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
+    background-color: {s['track']};
+}}
 QScrollBar::handle:horizontal {{
     background-color: {s['handle']};
+    {inset}
     border-radius: {radius}px;
     min-width: {min_len}px;
-    margin: {margin}px;
+    margin: 0;
 }}
 QScrollBar::handle:horizontal:hover {{ background-color: {s['handle_hover']}; }}
 QScrollBar::handle:horizontal:pressed {{ background-color: {s['handle_pressed']}; }}

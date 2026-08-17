@@ -54,7 +54,6 @@ from ..themes.theme_v2.consumer import (
     v2_active_variant,
     v2_color,
     v2_color_qcolor,
-    v2_style_value,
     v2_token,
 )
 
@@ -249,14 +248,8 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         ).name(QColor.NameFormat.HexArgb)
         fg = v2_token(self._theme_engine, "text_primary", "#212121")
 
-        # 编辑器 Scrollbar 走 v2 scrollbar recipe
-        sb_track = v2_color(self._theme_engine, "scrollbar", "track", "#F5F5F5")
-        sb_handle = v2_color(self._theme_engine, "scrollbar", "handle", "#E0E0E0")
-        sb_hover = v2_color(self._theme_engine, "scrollbar", "handle_hover", "#BDBDBD")
-        sb_pressed = v2_color(self._theme_engine, "scrollbar", "handle_pressed", "#757575")
-        sb_width = int(v2_style_value(self._theme_engine, "scrollbar", "width", 12))
-        sb_min_len = int(v2_style_value(self._theme_engine, "scrollbar", "min_len", 20))
-        sb_margin = int(v2_style_value(self._theme_engine, "scrollbar", "margin", 2))
+        # 编辑器 Scrollbar 走 v2 scrollbar recipe（共享 QSS 片段，与全局/弹窗同源）
+        scrollbar_qss = self._theme_engine.components.qss("scrollbar")
 
         self.setStyleSheet(f"""
             QPlainTextEdit {{
@@ -265,46 +258,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
                 selection-background-color: {sel};
                 color: {fg};
             }}
-            QScrollBar:vertical {{
-                background-color: {sb_track};
-                width: {sb_width}px;
-                margin: 0;
-            }}
-            QScrollBar::handle:vertical {{
-                background-color: {sb_handle};
-                border-radius: {sb_width // 2}px;
-                min-height: {sb_min_len}px;
-                margin: {sb_margin}px;
-            }}
-            QScrollBar::handle:vertical:hover {{
-                background-color: {sb_hover};
-            }}
-            QScrollBar::handle:vertical:pressed {{
-                background-color: {sb_pressed};
-            }}
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-                height: 0;
-            }}
-            QScrollBar:horizontal {{
-                background-color: {sb_track};
-                height: {sb_width}px;
-                margin: 0;
-            }}
-            QScrollBar::handle:horizontal {{
-                background-color: {sb_handle};
-                border-radius: {sb_width // 2}px;
-                min-width: {sb_min_len}px;
-                margin: {sb_margin}px;
-            }}
-            QScrollBar::handle:horizontal:hover {{
-                background-color: {sb_hover};
-            }}
-            QScrollBar::handle:horizontal:pressed {{
-                background-color: {sb_pressed};
-            }}
-            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
-                width: 0;
-            }}
+            {scrollbar_qss}
         """)
         # 更新高亮器的主题（3.5.8：两种高亮器均实现 set_dark_mode——Pygments
         # 走 set_dark_mode 重建 formats，不经过 set_file_type，避免摘除共享高亮）

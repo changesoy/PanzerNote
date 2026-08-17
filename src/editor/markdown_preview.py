@@ -59,7 +59,7 @@ from ..utils.logger import get_logger
 from ..utils.feature_flags import is_enabled
 from ..security.path_validator import PathValidator
 from ..themes.theme_aware_mixin import ThemeAwareMixin
-from ..themes.theme_v2.consumer import v2_color, v2_token
+from ..themes.theme_v2.consumer import v2_color, v2_style_value, v2_token
 from .highlight_themes import highlight_code_html
 from .webengine_runtime import WebEngineRuntime
 
@@ -260,18 +260,18 @@ section[data-fold-heading].folded {{
     display: none;
 }}
 
-/* ========== 滚动条（与编辑器样式一致，暗色模式下自适应） ========== */
+/* ========== 滚动条（与编辑器样式一致：同一 scrollbar recipe 供值） ========== */
 ::-webkit-scrollbar {{
-    width: 12px;
-    height: 12px;
+    width: {sb_width}px;
+    height: {sb_width}px;
 }}
 ::-webkit-scrollbar-track {{
     background: var(--scrollbar-track);
 }}
 ::-webkit-scrollbar-thumb {{
     background: var(--scrollbar-thumb);
-    border-radius: 6px;
-    border: 2px solid var(--scrollbar-track);
+    border-radius: {sb_radius}px;
+    border: {sb_margin}px solid var(--scrollbar-track);
 }}
 ::-webkit-scrollbar-thumb:hover {{
     background: var(--scrollbar-thumb-hover);
@@ -1018,11 +1018,18 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
                 page.runJavaScript(js)
         else:
             css_vars = _build_preview_css_vars(self._theme_engine)
+            # 滚动条尺寸与圆角：与 Qt 侧同一 scrollbar recipe（width/radius=w//2/margin）
+            sb_width = int(v2_style_value(self._theme_engine, "scrollbar", "width", 12))
+            sb_radius = sb_width // 2
+            sb_margin = int(v2_style_value(self._theme_engine, "scrollbar", "margin", 2))
             template = PREVIEW_HTML_TEMPLATE
             try:
                 full_html = template.format(
                     content=html_content,
                     layout_css=_MARKDOWN_LAYOUT_CSS,
+                    sb_width=sb_width,
+                    sb_radius=sb_radius,
+                    sb_margin=sb_margin,
                 ).replace(
                     "</style>", css_vars + "\n</style>", 1
                 )

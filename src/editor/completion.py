@@ -80,10 +80,8 @@ class CompletionPopup(QListWidget):
         border = v2_color(engine, "tooltip", "border", "#E0E0E0")
         hover_bg = v2_token(engine, "surface_secondary", "#F5F5F5")
         sel_bg = v2_token(engine, "accent_soft", "#BBDEFB")
-        sb_track = v2_color(engine, "scrollbar", "track", "#F5F5F5")
-        sb_handle = v2_color(engine, "scrollbar", "handle", "#E0E0E0")
-        sb_handle_hover = v2_color(engine, "scrollbar", "handle_hover",
-                                   "#BDBDBD")
+        # 滚动条复用 scrollbar recipe 生成的共享 QSS 片段（与全局/编辑器同源）
+        scrollbar_qss = engine.components.qss("scrollbar")
         self.setStyleSheet(f"""
     QListWidget#CompletionPopup {{
         background-color: {bg};
@@ -124,49 +122,7 @@ class CompletionPopup(QListWidget):
         color: {fg};
     }}
 
-    QScrollBar:vertical {{
-        background-color: {sb_track};
-        width: 10px;
-        margin: 0;
-    }}
-
-    QScrollBar::handle:vertical {{
-        background-color: {sb_handle};
-        border-radius: 5px;
-        min-height: 20px;
-        margin: 2px;
-    }}
-
-    QScrollBar::handle:vertical:hover {{
-        background-color: {sb_handle_hover};
-    }}
-
-    QScrollBar::add-line:vertical,
-    QScrollBar::sub-line:vertical {{
-        height: 0;
-    }}
-
-    QScrollBar:horizontal {{
-        background-color: {sb_track};
-        height: 10px;
-        margin: 0;
-    }}
-
-    QScrollBar::handle:horizontal {{
-        background-color: {sb_handle};
-        border-radius: 5px;
-        min-width: 20px;
-        margin: 2px;
-    }}
-
-    QScrollBar::handle:horizontal:hover {{
-        background-color: {sb_handle_hover};
-    }}
-
-    QScrollBar::add-line:horizontal,
-    QScrollBar::sub-line:horizontal {{
-        width: 0;
-    }}
+    {scrollbar_qss}
     """)
 
     # ---- 显示控制 ----

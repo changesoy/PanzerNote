@@ -99,4 +99,4 @@ def _show_error_dialog(title: str, exc: BaseException) -> None:
             title=title,
         )
     except Exception:
-        print(f"[PanzerNote] show_error_dialog 兜底失败: {exc}")
+        get_logger(__name__).error("show_error_dialog 兜底失败: %s", exc)

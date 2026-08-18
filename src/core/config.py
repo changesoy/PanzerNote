@@ -376,10 +376,12 @@ class Config:
         min_val: Any = None,
         max_val: Any = None,
         allowed_values: Any = None,
+        max_length: Any = None,
     ) -> Any:
         return self._security_manager.validate_setting_value(
             key, value, expected_type,
             min_val=min_val,
             max_val=max_val,
             allowed_values=allowed_values,
+            max_length=max_length,
         )

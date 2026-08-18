@@ -52,10 +52,12 @@ class SecurityManager:
         min_val=None,
         max_val=None,
         allowed_values=None,
+        max_length=None,
     ) -> Any:
         return self._input_validator.validate_setting(
             key, value, expected_type,
             min_val=min_val,
             max_val=max_val,
             allowed_values=allowed_values,
+            max_length=max_length,
         )

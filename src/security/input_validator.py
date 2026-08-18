@@ -82,23 +82,10 @@ class InputValidator:
             return False
         if not filename.strip():
             return False
-        if len(filename) > self.MAX_FILENAME_LENGTH:
-            self._logger.warning("文件名过长: %d > %d", len(filename), self.MAX_FILENAME_LENGTH)
+        error = self._check_filename_rules(filename)
+        if error is not None:
+            self._logger.warning("文件名验证失败: %s", error)
             return False
-        if self._FILENAME_INVALID_CHARS.search(filename):
-            self._logger.warning("文件名包含非法字符: %s", filename)
-            return False
-        name_without_ext = filename.rsplit('.', 1)[0] if '.' in filename else filename
-        if name_without_ext.upper() in self._WINDOWS_RESERVED_NAMES:
-            self._logger.warning("文件名是 Windows 保留名称: %s", filename)
-            return False
-        if filename.startswith('.') or filename.endswith('.'):
-            self._logger.warning("文件名以点号开头或结尾: %s", filename)
-            return False
-        for pattern in self._PATH_INJECTION_PATTERNS:
-            if pattern.search(filename):
-                self._logger.warning("文件名包含路径注入模式: %s", filename)
-                return False
         return True
 
     def validate_filename_strict(self, filename: str) -> str:
@@ -111,20 +98,31 @@ class InputValidator:
             raise FilenameValidationError("文件名为空或类型无效")
         if not filename.strip():
             raise FilenameValidationError("文件名为空白")
+        error = self._check_filename_rules(filename)
+        if error is not None:
+            raise FilenameValidationError(error)
+        return filename
+
+    def _check_filename_rules(self, filename: str) -> Optional[str]:
+        """共享文件名规则校验（供 validate_filename / validate_filename_strict 使用）
+
+        Returns:
+            首个违规原因；文件名合法时返回 None
+        """
         if len(filename) > self.MAX_FILENAME_LENGTH:
-            raise FilenameValidationError(f"文件名过长: {len(filename)} > {self.MAX_FILENAME_LENGTH}")
+            return f"文件名过长: {len(filename)} > {self.MAX_FILENAME_LENGTH}"
         match = self._FILENAME_INVALID_CHARS.search(filename)
         if match:
-            raise FilenameValidationError(f"文件名包含非法字符: {match.group()!r}")
+            return f"文件名包含非法字符: {match.group()!r}"
         name_without_ext = filename.rsplit('.', 1)[0] if '.' in filename else filename
         if name_without_ext.upper() in self._WINDOWS_RESERVED_NAMES:
-            raise FilenameValidationError(f"文件名是 Windows 保留名称: {filename}")
+            return f"文件名是 Windows 保留名称: {filename}"
         if filename.startswith('.') or filename.endswith('.'):
-            raise FilenameValidationError("文件名不能以点号开头或结尾")
+            return "文件名不能以点号开头或结尾"
         for pattern in self._PATH_INJECTION_PATTERNS:
             if pattern.search(filename):
-                raise FilenameValidationError("文件名包含路径注入模式")
-        return filename
+                return "文件名包含路径注入模式"
+        return None
 
     def sanitize_filename(self, filename: str) -> str:
         """清理文件名，替换非法字符

@@ -200,21 +200,16 @@ class FileGuard:
 
         chunks = []
         start = time.monotonic()
-        try:
-            with open(filepath, 'r', encoding=encoding) as f:
-                while True:
-                    chunk = f.read(_READ_CHUNK_SIZE)
-                    if not chunk:
-                        break
-                    chunks.append(chunk)
-                    if time.monotonic() - start > self._timeout:
-                        raise FileOperationTimeoutError(
-                            f"文件读取超时 ({self._timeout}秒): {filepath}"
-                        )
-        except FileOperationTimeoutError:
-            raise
-        except Exception as e:
-            raise e
+        with open(filepath, 'r', encoding=encoding) as f:
+            while True:
+                chunk = f.read(_READ_CHUNK_SIZE)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                if time.monotonic() - start > self._timeout:
+                    raise FileOperationTimeoutError(
+                        f"文件读取超时 ({self._timeout}秒): {filepath}"
+                    )
 
         return ''.join(chunks)
 
@@ -311,21 +306,16 @@ class FileGuard:
 
         chunks = []
         start = time.monotonic()
-        try:
-            with open(filepath, 'rb') as f:
-                while True:
-                    chunk = f.read(_READ_CHUNK_SIZE)
-                    if not chunk:
-                        break
-                    chunks.append(chunk)
-                    if time.monotonic() - start > self._timeout:
-                        raise FileOperationTimeoutError(
-                            f"文件读取超时 ({self._timeout}秒): {filepath}"
-                        )
-        except FileOperationTimeoutError:
-            raise
-        except Exception as e:
-            raise e
+        with open(filepath, 'rb') as f:
+            while True:
+                chunk = f.read(_READ_CHUNK_SIZE)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                if time.monotonic() - start > self._timeout:
+                    raise FileOperationTimeoutError(
+                        f"文件读取超时 ({self._timeout}秒): {filepath}"
+                    )
 
         return b''.join(chunks)
 

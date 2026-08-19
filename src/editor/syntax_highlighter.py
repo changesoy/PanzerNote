@@ -196,11 +196,11 @@ class MarkdownHighlighter(QSyntaxHighlighter):
         link_fmt = QTextCharFormat()
         link_fmt.setForeground(QColor(get_color("link_fg")))
         link_fmt.setFontUnderline(True)
-        self.inline_rules.append((re.compile(r'\[([^\]]+)\]\([^\)]+\)'), link_fmt))
+        self.inline_rules.append((re.compile(r'\[([^\]]+)]\([^)]+\)'), link_fmt))
 
         img_fmt = QTextCharFormat()
         img_fmt.setForeground(QColor(get_color("image_fg")))
-        self.inline_rules.append((re.compile(r'!\[([^\]]*)\]\([^\)]+\)'), img_fmt))
+        self.inline_rules.append((re.compile(r'!\[([^\]]*)]\([^)]+\)'), img_fmt))
 
         list_fmt = QTextCharFormat()
         list_fmt.setForeground(QColor(get_color("list_fg")))
@@ -291,7 +291,6 @@ def get_highlighter_for_file(document: QTextDocument, filepath_or_ext: str,
     Args:
         document: QTextDocument
         filepath_or_ext: 文件路径或扩展名
-        theme_name: 主题名称（None 使用默认）
         is_dark: 是否为暗色主题
         theme_engine: ThemeEngine 实例，用于 Markdown 高亮主题 token 取值
     Returns:

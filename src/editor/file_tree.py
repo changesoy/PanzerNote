@@ -470,7 +470,7 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
         msg_box.setIcon(QMessageBox.Icon.Question)
 
         yes_btn = msg_box.addButton("确定", QMessageBox.ButtonRole.AcceptRole)
-        no_btn = msg_box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+        msg_box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
 
         msg_box.exec()
 

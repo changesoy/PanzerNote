@@ -1357,8 +1357,6 @@ a {{
             self._pending_async_task = None
 
         def _replace(m):
-            code_attrs = m.group("code_attrs") or ""
-            lang = _extract_language_from_code_attrs(code_attrs)
             raw = html_module.unescape(m.group("body"))
             if raw.endswith("\n"):
                 raw = raw[:-1]
@@ -1406,8 +1404,6 @@ a {{
         block_idx = [0]
 
         def _replace_sync(m):
-            code_attrs = m.group("code_attrs") or ""
-            lang = _extract_language_from_code_attrs(code_attrs)
             raw = html_module.unescape(m.group("body"))
             if raw.endswith("\n"):
                 raw = raw[:-1]
@@ -1529,7 +1525,7 @@ a {{
                 p = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', p)
                 p = re.sub(r'\*(.+?)\*', r'<em>\1</em>', p)
                 p = re.sub(r'`(.+?)`', r'<code>\1</code>', p)
-                p = re.sub(r'\[(.+?)\]\((.+?)\)', r'<a href="\2">\1</a>', p)
+                p = re.sub(r'\[(.+?)]\((.+?)\)', r'<a href="\2">\1</a>', p)
                 html_lines.append(f'<p>{p}</p>')
             else:
                 html_lines.append('<br>')
@@ -1550,8 +1546,7 @@ a {{
         ed = self.editor
         bar = ed.verticalScrollBar()
         at_top = bar is None or bar.value() <= bar.minimum()
-        at_bottom = (bar is not None and bar.maximum() > 0
-                     and bar.value() >= bar.maximum())
+        at_bottom = (bar is not None and 0 < bar.maximum() <= bar.value())
 
         frac_line = 1.0
         try:
@@ -1590,7 +1585,7 @@ a {{
         bar = self.editor.verticalScrollBar()
         at_edge = bar is not None and (
             bar.value() <= bar.minimum()
-            or (bar.maximum() > 0 and bar.value() >= bar.maximum())
+            or (0 < bar.maximum() <= bar.value())
         )
 
         # 带后沿的节流：50ms 内最多一次 leading 同步，避免高频 runJavaScript；

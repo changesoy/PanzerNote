@@ -217,7 +217,7 @@ class DraggableTabBar(QTabBar):
             hy = max(0, min(rect.height() - 1, self._drag_start_pos.y() - rect.top()))
             drag.setHotSpot(QPoint(hx, hy))
 
-        result = drag.exec(Qt.DropAction.MoveAction | Qt.DropAction.CopyAction)
+        drag.exec(Qt.DropAction.MoveAction | Qt.DropAction.CopyAction)
         self._drag_tab_index = -1
 
     def mouseReleaseEvent(self, event):
@@ -1480,8 +1480,6 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         hover_bg = style.get("hover_background", "#BBDEFB")
         pressed_bg = style.get("pressed_background", "#E0E0E0")
         border = style.get("border", "#E0E0E0")
-        pad_v = style.get("padding_v", 8)
-        pad_h = style.get("padding_h", 15)
         radius = style.get("radius", 3)
 
         self.setStyleSheet(f"""
@@ -1778,7 +1776,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             msg_box.setIcon(QMessageBox.Icon.Question)
 
             save_btn = msg_box.addButton("保存", QMessageBox.ButtonRole.AcceptRole)
-            discard_btn = msg_box.addButton("不保存", QMessageBox.ButtonRole.DestructiveRole)
+            msg_box.addButton("不保存", QMessageBox.ButtonRole.DestructiveRole)
             cancel_btn = msg_box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
 
             msg_box.exec()

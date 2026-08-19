@@ -63,10 +63,10 @@ _CATEGORY_LABELS = {
 }
 
 _SENSITIVE_PATTERNS = [
-    re.compile(r'[A-Z]:\\[^\s]*', re.IGNORECASE),
-    re.compile(r'/home/[^\s]*'),
-    re.compile(r'/Users/[^\s]*'),
-    re.compile(r'/tmp/[^\s]*'),
+    re.compile(r'[A-Z]:\\\S*', re.IGNORECASE),
+    re.compile(r'/home/\S*'),
+    re.compile(r'/Users/\S*'),
+    re.compile(r'/tmp/\S*'),
     re.compile(r'Traceback[\s\S]*'),
     re.compile(r'File\s+"[^"]*",\s*line\s+\d+'),
     re.compile(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b'),

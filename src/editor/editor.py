@@ -1056,10 +1056,8 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
                 shared_doc.qdocument, parent=shared_doc
             )
             shared_doc._lazy_coordinator = coordinator
-        cast(DocumentLazyHighlightCoordinator, coordinator).register(self)
-        self._lazy_highlight.set_coordinator(
-            cast(DocumentLazyHighlightCoordinator, coordinator)
-        )
+        coordinator.register(self)
+        self._lazy_highlight.set_coordinator(coordinator)
         self.invalidate_word_count()
 
     def detach_shared_document(self) -> None:
@@ -1252,9 +1250,6 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         """检测点击的折叠标记并切换折叠。"""
         if self._file_type not in self._FOLD_SUPPORTED_TYPES:
             return
-
-        area_width = self.line_number_area.width()
-        marker_width = self._folding.fold_marker_width
 
         block = self.firstVisibleBlock()
         top = round(self.blockBoundingGeometry(block).translated(self.contentOffset()).top())

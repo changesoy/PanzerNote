@@ -1787,7 +1787,6 @@ class MainWindow(QMainWindow):
 
     def _plugin_open_file(self, filepath: str) -> bool:
         try:
-            from .editor.file_open_service import FileOpenSource, FileOpenSecurityError
             validated = self._file_open_service.validate_open_request(
                 filepath, FileOpenSource.PLUGIN
             )

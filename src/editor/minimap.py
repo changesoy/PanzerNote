@@ -164,7 +164,6 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
 
     def _get_viewport_rect(self) -> QRectF:
         editor = self._editor
-        doc = editor.document()
         line_h = self._get_line_height()
 
         first_block = editor.firstVisibleBlock()
@@ -285,7 +284,6 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
                                 get_logger(__name__).debug("QTextBlockFormat 无 formats/additionalFormats 属性")
 
                     segments = self._build_color_segments(text, fmt_ranges, default_color)
-                    x = float(left)
                     rect_h = max(1.0, line_h - 0.5)
                     for seg_start, seg_end, color in segments:
                         seg_x = left + seg_start * char_w

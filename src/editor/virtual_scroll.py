@@ -210,7 +210,7 @@ class LazyHighlightManager(QObject):
 
         try:
             editor.setPlainText(content)
-        except Exception as e:
+        except Exception:
             get_logger(__name__).error("延迟高亮加载失败，回退普通模式", exc_info=True)
             self._is_large_file = False
             if self._highlighter:

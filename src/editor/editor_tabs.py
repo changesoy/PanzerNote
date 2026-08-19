@@ -426,7 +426,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 return str(shared_doc.filepath)
         return None
 
-    def _get_editor_from_widget(self, widget) -> Optional[Editor]:
+    @staticmethod
+    def _get_editor_from_widget(widget) -> Optional[Editor]:
         if isinstance(widget, Editor):
             return widget
         elif isinstance(widget, MarkdownPreviewWidget):
@@ -634,7 +635,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self._update_tab_tooltip(index)
         return int(index)
 
-    def _is_markdown_file(self, filepath: str) -> bool:
+    @staticmethod
+    def _is_markdown_file(filepath: str) -> bool:
         """判断是否为Markdown文件"""
         ext = os.path.splitext(filepath)[1].lower()
         return ext in ('.md', '.markdown')
@@ -1219,7 +1221,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
         return True, 0
 
-    def _current_normalized_content(self, widget, target_eol: str) -> str:
+    @staticmethod
+    def _current_normalized_content(widget, target_eol: str) -> str:
         """当前编辑器内容（按目标 EOL 规范化），用于保存成功时的 snapshot 判定。"""
         if isinstance(widget, MarkdownPreviewWidget):
             raw = widget.editor.toPlainText()
@@ -1649,7 +1652,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         binding.attach()
         widget._doc_binding = binding
 
-    def _disconnect_doc_binding(self, widget) -> None:
+    @staticmethod
+    def _disconnect_doc_binding(widget) -> None:
         """解除 View 的 Document 信号绑定（关闭/迁移前调用，幂等）。"""
         binding = getattr(widget, "_doc_binding", None)
         if binding is not None:
@@ -1688,7 +1692,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         stripped = self._strip_tab_suffix(title)
         self.setTabText(index, name + title[len(stripped):])
 
-    def _on_view_path_changed(self, widget, path: str) -> None:
+    @staticmethod
+    def _on_view_path_changed(widget, path: str) -> None:
         """Document.pathChanged → 本 View 预览基准跟随（规格 2.8）。
 
         D3b：路径 authority 在 Document——pathChanged 由 bind_path 广播给所有
@@ -2117,7 +2122,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             # D3a：Document 已是 dirty（由 qdocument.setModified 驱动），无附加动作
             pass
 
-    def _on_save_failed(self, tab_id: int, filepath: str, exc: BaseException) -> None:
+    @staticmethod
+    def _on_save_failed(tab_id: int, filepath: str, exc: BaseException) -> None:
         basename = os.path.basename(filepath) if filepath else "未知文件"
         ErrorHandler.show_from_exception(exc, ErrorCategory.FILE, f"保存文件失败：{basename}")
 

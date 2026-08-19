@@ -207,7 +207,8 @@ class SearchService:
         self._editor.setTextCursor(cursor)
         return True
 
-    def _build_regex(self, query: str, case_sensitive: bool) -> Optional[re.Pattern]:
+    @staticmethod
+    def _build_regex(query: str, case_sensitive: bool) -> Optional[re.Pattern]:
         flags = 0
         if not case_sensitive:
             flags |= re.IGNORECASE

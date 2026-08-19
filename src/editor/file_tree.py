@@ -111,7 +111,8 @@ class DroppableTreeView(QTreeView):
                 self.setCurrentIndex(QModelIndex())
         super().mousePressEvent(event)
 
-    def _is_tab_drag(self, mime: QMimeData) -> bool:
+    @staticmethod
+    def _is_tab_drag(mime: QMimeData) -> bool:
         """标签拖拽：已保存文件（MIME_TAB_FILEPATH）或未命名标签（MIME_TAB_ID）。"""
         return mime.hasFormat(MIME_TAB_FILEPATH) or mime.hasFormat(MIME_TAB_ID)
 

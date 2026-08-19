@@ -101,7 +101,8 @@ class ThemeValidator:
         return snapshot
 
     # ------------------------------------------------------ schema validation
-    def _validate_manifest(self, manifest: Mapping[str, Any]) -> dict[str, Any]:
+    @staticmethod
+    def _validate_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
         if not isinstance(manifest, dict):
             raise ThemeSchemaError("theme.json 顶层必须是 JSON 对象")
 
@@ -164,8 +165,9 @@ class ThemeValidator:
             syntax=syntax,
         )
 
+    @staticmethod
     def _validate_color_identity(
-        self, variant_id: VariantId, raw: Any
+        variant_id: VariantId, raw: Any
     ) -> ColorIdentity:
         if not isinstance(raw, dict):
             raise ThemeSchemaError(f"variant '{variant_id}' 缺少 color_identity 对象")
@@ -211,7 +213,8 @@ class ThemeValidator:
             hue_family=hue_family,
         )
 
-    def _validate_tokens(self, variant_id: VariantId, raw: Any) -> Mapping[str, str]:
+    @staticmethod
+    def _validate_tokens(variant_id: VariantId, raw: Any) -> Mapping[str, str]:
         if not isinstance(raw, dict):
             raise ThemeSchemaError(f"variant '{variant_id}' 缺少 tokens 对象")
         if not raw:
@@ -231,8 +234,8 @@ class ThemeValidator:
             tokens[key] = value
         return tokens
 
+    @staticmethod
     def _validate_syntax(
-        self,
         variant_id: VariantId,
         raw: Any,
     ) -> SyntaxConfig:
@@ -389,7 +392,8 @@ class ThemeValidator:
             result[key] = value
         return result
 
-    def _build_motion(self, raw: Any) -> MotionConfig:
+    @staticmethod
+    def _build_motion(raw: Any) -> MotionConfig:
         if not isinstance(raw, dict):
             raise ThemeSchemaError("motion.json 顶层必须是 JSON 对象")
         if not raw:

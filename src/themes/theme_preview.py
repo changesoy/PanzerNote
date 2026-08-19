@@ -248,7 +248,8 @@ class ThemePreviewWidget(QWidget):
         self._refresh_package_list()
 
     # ──────────────────────────────────────────────── 包 / 变体浏览
-    def _scan_packages(self) -> list[tuple[str, str]]:
+    @staticmethod
+    def _scan_packages() -> list[tuple[str, str]]:
         """扫描 themes/*/theme.json → [(package_id, 包名)]，按目录名排序。"""
         packages: list[tuple[str, str]] = []
         for manifest in sorted(_THEMES_ROOT.glob("*/theme.json")):

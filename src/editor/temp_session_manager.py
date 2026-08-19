@@ -271,7 +271,8 @@ class TempSessionManager:
             get_logger(__name__).error("读取 autosave 失败: %s, %s", autosave_path, e)
             return None
 
-    def remove_recovered_session(self, session_dir: str) -> None:
+    @staticmethod
+    def remove_recovered_session(session_dir: str) -> None:
         """恢复完成后删除指定会话目录"""
         if os.path.isdir(session_dir):
             try:

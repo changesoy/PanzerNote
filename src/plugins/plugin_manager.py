@@ -328,7 +328,8 @@ class PluginManager:
             return "SAFE_MODE"
         return PluginState.UNLOADED.name
 
-    def _load_manifest(self, manifest_path: str) -> Dict:
+    @staticmethod
+    def _load_manifest(manifest_path: str) -> Dict:
         with open(manifest_path, 'r', encoding='utf-8') as fh:
             return cast(Dict[str, Any], json.load(fh))
 

@@ -1119,7 +1119,8 @@ class MainWindow(QMainWindow):
         """切换快捷键提示面板（委托 ViewCoordinator）"""
         self.view_coordinator.toggle_shortcut_panel()
 
-    def _on_shortcut_edited(self, action_id: str, new_shortcut: str):
+    @staticmethod
+    def _on_shortcut_edited(action_id: str, new_shortcut: str):
         """快捷键编辑回调"""
         from .utils.logger import get_logger
         get_logger(__name__).info("快捷键已更新: %s -> %s", action_id, new_shortcut)
@@ -1292,7 +1293,8 @@ class MainWindow(QMainWindow):
         for tabs in [self.editor_tabs, *self.view_coordinator.split_tabs]:
             tabs.close_tabs_of_deleted_path(path, is_dir)
 
-    def _on_untitled_save_from_tree(self, source_tabs, tab_id: int, dest_folder: str):
+    @staticmethod
+    def _on_untitled_save_from_tree(source_tabs, tab_id: int, dest_folder: str):
         """3.5.11：未命名标签拖到文件树 → 落盘保存（一行委托）"""
         source_tabs.save_untitled_to_folder(tab_id, dest_folder)
 
@@ -1877,7 +1879,8 @@ class MainWindow(QMainWindow):
         )
         self._plugin_menu.addAction(action)
 
-    def _safe_plugin_callback(self, label: str, handler) -> None:
+    @staticmethod
+    def _safe_plugin_callback(label: str, handler) -> None:
         """命令/菜单/事件回调异常 → 仅 log，插件保持 ACTIVE（D7）"""
         try:
             handler()

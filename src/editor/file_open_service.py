@@ -137,7 +137,8 @@ class FileOpenService:
         else:
             raise FileOpenSecurityError(f"未知的文件打开来源: {source}")
 
-    def _norm(self, filepath: str) -> str:
+    @staticmethod
+    def _norm(filepath: str) -> str:
         try:
             return os.path.realpath(filepath)
         except (OSError, ValueError):
@@ -217,7 +218,8 @@ class FileOpenService:
                 f"会话恢复路径不在允许范围内: {filepath}"
             )
 
-    def _validate_settings_import(self, filepath: str) -> str:
+    @staticmethod
+    def _validate_settings_import(filepath: str) -> str:
         ext = os.path.splitext(filepath)[1].lower()
         if ext != '.json':
             raise FileOpenSecurityError("设置导入只支持 .json 文件")

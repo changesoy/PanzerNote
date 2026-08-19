@@ -20,7 +20,8 @@ FONT_STACK: Mapping[str, str] = {
 class TypographyLoader:
     """字体加载接口：注册字体并返回 family 名 → 注册后 family id 映射。"""
 
-    def register_fonts(self) -> Mapping[str, str]:
+    @staticmethod
+    def register_fonts() -> Mapping[str, str]:
         """B1 阶段返回声明的字体栈（未实际加载）。
 
         B2 起在此接入 QFontDatabase.addApplicationFont 与真实字体文件，

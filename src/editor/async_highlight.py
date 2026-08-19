@@ -87,7 +87,8 @@ class AsyncHighlightRenderer(QObject):
             return self.render_sync(code, language, theme_engine)
         return self.render_async(code, language, theme_engine, priority, callback)
 
-    def render_sync(self, code: str, language: str,
+    @staticmethod
+    def render_sync(code: str, language: str,
                     theme_engine) -> str:
         from .highlight_themes import highlight_code_html
         return str(highlight_code_html(code, language, theme_engine))

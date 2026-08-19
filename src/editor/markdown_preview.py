@@ -1094,7 +1094,8 @@ a {{
         # 同步当前折叠状态到预览
         self._sync_folds_to_preview()
 
-    def _create_md_parser(self):
+    @staticmethod
+    def _create_md_parser():
         if not HAS_MARKDOWN_IT:
             return None
         md = _MarkdownIt("commonmark", {"html": False})
@@ -1228,7 +1229,8 @@ a {{
 
     # ──────────── 折叠 section 包裹 ────────────
 
-    def _wrap_fold_sections(self, html: str, text: str) -> str:
+    @staticmethod
+    def _wrap_fold_sections(html: str, text: str) -> str:
         """在 Markdown 标题的 DOM 节点外包裹 <section data-fold-heading="N">。
 
         折叠区间计算与 FoldingManager 一致，确保编辑器和预览折叠对应。
@@ -1488,7 +1490,8 @@ a {{
 
     # ──────────── 基础渲染（无 markdown 库回退） ────────────
 
-    def _basic_md_to_html(self, text: str) -> str:
+    @staticmethod
+    def _basic_md_to_html(text: str) -> str:
         lines = text.split('\n')
         html_lines = []
         in_code = False
@@ -1673,7 +1676,8 @@ a {{
             return
         self._scroll_editor_to_line(frac_line)
 
-    def _open_external_link(self, url: str) -> None:
+    @staticmethod
+    def _open_external_link(url: str) -> None:
         """预览链接点击 → 系统外部浏览器打开（与 QTextBrowser 回退路径一致）。"""
         if not url:
             return

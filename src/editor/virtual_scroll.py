@@ -113,7 +113,8 @@ class DocumentLazyHighlightCoordinator(QObject):
                     highlighter.rehighlightBlock(block)
                     self._highlighted_blocks.add(i)
 
-    def _visible_range(self, view, block_count: int):
+    @staticmethod
+    def _visible_range(view, block_count: int):
         """返回 view 可视区 ± buffer 的 [start, end) 行区间。"""
         first_block = view.firstVisibleBlock()
         first_line = first_block.blockNumber()
@@ -175,7 +176,8 @@ class LazyHighlightManager(QObject):
         if self._coordinator is not None:
             self._coordinator.set_highlighter(highlighter)
 
-    def _lazy_enabled(self) -> bool:
+    @staticmethod
+    def _lazy_enabled() -> bool:
         """E4：lazy 高亮激活条件——显式 lazy_highlight flag，或大文件模式
         （large_file_mode 开启时达阈值文件自动启用，无需手动开 flag）。
         flag 默认值不写死 True（实施方案约束），仅运行时按需判定；

@@ -818,7 +818,8 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
     # 仅拦截"本地文件"URL 拖放并 event.ignore() 冒泡给 MainWindow 打开文件；
     # 文本/纯链接拖放（如浏览器拖 URL 粘贴）保留默认行为。
 
-    def _has_local_file_urls(self, mime) -> bool:
+    @staticmethod
+    def _has_local_file_urls(mime) -> bool:
         if not mime.hasUrls():
             return False
         return any(url.isLocalFile() for url in mime.urls())

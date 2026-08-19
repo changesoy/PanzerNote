@@ -98,7 +98,8 @@ class CapabilityRegistry:
     def has(self, cap_id: str) -> bool:
         return cap_id in self._capabilities
 
-    def resolve_permissions(self, capabilities: List[str]) -> Set[PluginPermission]:
+    @staticmethod
+    def resolve_permissions(capabilities: List[str]) -> Set[PluginPermission]:
         """将 manifest 中的能力列表换算为内部权限集合"""
         perms: Set[PluginPermission] = set()
         for cap in capabilities:

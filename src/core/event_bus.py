@@ -25,7 +25,8 @@ class EventBus(QObject):
         self._config = config
         self._logger = get_logger(__name__)
 
-    def connect_signals(self, main_window: Any) -> None:
+    @staticmethod
+    def connect_signals(main_window: Any) -> None:
         """连接主窗口的所有信号
 
         Args:

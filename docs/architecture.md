@@ -60,8 +60,7 @@ PanzerNote 是一款以已停服二次元游戏《战车少女》（PanzerMaiden
 ```
 PanzerNote/
 ├── main.py                         # 程序入口（高DPI、字体、图标、首次运行引导、启动分析、版本一致性检查）
-├── requirements.txt                # 运行依赖
-├── pyproject.toml                  # 项目配置（pytest/mypy/依赖/动态版本引用）
+├── pyproject.toml                  # 项目配置（构建/依赖/pytest/mypy/动态版本引用）
 ├── .gitignore                      # Git 忽略规则
 ├── .gitattributes                  # Git 属性（* text=auto eol=lf 行尾符统一）
 ├── user_data_path.txt              # 持久化用户数据路径

@@ -14,15 +14,15 @@ from typing import Optional
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QTreeView, QLabel, QMenu,
     QInputDialog, QMessageBox,
-    QHeaderView, QFrame, QScrollArea, QStyledItemDelegate, QAbstractItemView
+    QFrame, QAbstractItemView
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QDir, QModelIndex, QMimeData, QSortFilterProxyModel, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal, QModelIndex, QMimeData, QTimer
 from PyQt6.QtGui import QFont, QAction, QFileSystemModel
 
 from ..core.config import Config
 from ..utils.logger import get_logger
 from ..utils.error_handler import ErrorHandler, ErrorCategory
-from ..security.input_validator import InputValidator, FilenameValidationError
+from ..security.input_validator import FilenameValidationError
 from ..themes.theme_aware_mixin import ThemeAwareMixin
 from ..themes.theme_v2.consumer import v2_token
 

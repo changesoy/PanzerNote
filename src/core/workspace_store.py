@@ -14,7 +14,7 @@ import os
 from typing import Dict, Any, List, Optional, cast
 
 from ..security.file_guard import FileGuard
-from .path_resolver import PathResolver, load_json, save_json, merge_dicts, INTERNAL_CONFIG_CTX
+from .path_resolver import PathResolver, load_json, save_json, merge_dicts
 
 
 class WorkspaceStore:

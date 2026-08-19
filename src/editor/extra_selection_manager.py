@@ -6,10 +6,9 @@
 导致互相覆盖。支持按层名注册/清除选区，最终合并后一次性设置。
 """
 
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 from PyQt6.QtWidgets import QTextEdit
-from PyQt6.QtGui import QColor, QTextCursor, QTextFormat
 
 
 class ExtraSelectionManager:

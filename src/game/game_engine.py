@@ -6,7 +6,7 @@
 
 import math
 from datetime import datetime
-from typing import Optional, Callable
+from typing import Optional
 
 from ..core.config import Config
 from ..utils.logger import get_logger

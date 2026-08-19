@@ -15,7 +15,6 @@ v1.6.6 性能改造：
 
 from typing import Any
 
-from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeyEvent, QTextCursor
 
 from ..utils.logger import get_logger

@@ -8,16 +8,15 @@ v1.5.4 新增
 
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLineEdit,
-    QPushButton, QLabel, QCheckBox, QToolButton, QSizePolicy
+    QPushButton, QLabel, QCheckBox, QToolButton
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import (
     QColor, QTextCursor
 )
 
 from ..themes.theme_aware_mixin import ThemeAwareMixin
 from ..themes.theme_v2.consumer import v2_color, v2_token
-from ..utils.logger import get_logger
 from .search_service import SearchService
 
 

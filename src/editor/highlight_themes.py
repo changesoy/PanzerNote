@@ -11,7 +11,7 @@
 Token → syntax_* 映射、bold/italic 装饰在此定义。
 """
 
-from typing import Optional, cast
+from typing import cast
 
 from PyQt6.QtGui import QTextCharFormat, QColor, QFont
 

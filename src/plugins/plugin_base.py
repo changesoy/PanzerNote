@@ -19,7 +19,6 @@ from enum import Enum, auto
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from .. import __version__ as _app_version
-from ..utils.logger import get_logger
 
 if TYPE_CHECKING:
     from .plugin_context import PluginContext

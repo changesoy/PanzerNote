@@ -10,8 +10,8 @@
 
 from typing import Optional
 
-from PyQt6.QtCore import QObject, QTimer, Qt
-from PyQt6.QtGui import QTextCursor, QTextBlock, QSyntaxHighlighter, QTextDocument
+from PyQt6.QtCore import QObject, QTimer
+from PyQt6.QtGui import QSyntaxHighlighter, QTextDocument
 from PyQt6.QtWidgets import QPlainTextEdit
 
 from ..utils.logger import get_logger

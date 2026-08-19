@@ -12,7 +12,6 @@ import re
 from typing import List, Optional, Tuple, cast
 
 from PyQt6.QtGui import QTextCursor, QTextDocument
-from PyQt6.QtCore import Qt
 
 from ..utils.logger import get_logger
 

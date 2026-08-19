@@ -12,10 +12,7 @@
 关闭时行为：QWebEngineView 通过 printToPdf 回调完成后 deleteLater 自动清理
 """
 
-import os
-
 from ..security.file_access_context import FileAccessContext
-from ..utils.logger import get_logger
 from .secure_markdown_renderer import (
     render_markdown_to_safe_html,
     render_plain_text_to_safe_html,

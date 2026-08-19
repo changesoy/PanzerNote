@@ -11,10 +11,10 @@ v1.7.0 改动：
 
 import copy
 import os
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 from ..security.file_guard import FileGuard
-from .path_resolver import PathResolver, load_json, save_json, merge_dicts, INTERNAL_CONFIG_CTX
+from .path_resolver import PathResolver, load_json, save_json, merge_dicts
 
 
 class SettingsStore:

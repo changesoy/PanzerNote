@@ -28,7 +28,7 @@ import time
 from typing import Optional
 
 from ..utils.logger import get_logger
-from .path_validator import PathValidator, PathSecurityError
+from .path_validator import PathValidator
 from .file_access_context import FileAccessContext
 
 

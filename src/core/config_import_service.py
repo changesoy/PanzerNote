@@ -8,7 +8,7 @@
 """
 
 import json as json_module
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple
 
 from ..utils.logger import get_logger
 from .workspace_store import WorkspaceStore

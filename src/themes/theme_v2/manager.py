@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 from enum import Enum
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Mapping
 
 from PyQt6.QtCore import QMetaObject, QObject, pyqtSignal
 

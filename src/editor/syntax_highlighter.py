@@ -19,7 +19,7 @@ try:
 except ImportError:
     HAS_PYGMENTS = False
 
-from .highlight_themes import get_editor_formats, build_format
+from .highlight_themes import get_editor_formats
 
 
 # md_* v1 token → v2 markdown recipe style 键映射（B2）

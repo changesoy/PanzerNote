@@ -32,7 +32,6 @@
     ErrorHandler.register_handler(ErrorCategory.NETWORK, my_network_handler)
 """
 
-import os
 import re
 from enum import Enum, auto
 from typing import Callable, Dict, Optional

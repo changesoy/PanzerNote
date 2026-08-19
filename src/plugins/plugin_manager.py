@@ -27,7 +27,7 @@ from typing import Any, Callable, Dict, List, Optional, Type, cast
 
 from ..utils.logger import get_logger
 from .capability_registry import CapabilityRegistry
-from .plugin_base import PluginBase, PluginMeta, PluginPermission, PluginState
+from .plugin_base import PluginBase, PluginState
 from .plugin_context import PluginContext
 
 

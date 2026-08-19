@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from typing import Any, Mapping
 
-from .compat import resolve_renderer_map, signature_for
+from .compat import signature_for
 from .constants import (
     CHROME_MODES,
     COLOR_IDENTITY_STRATEGIES,

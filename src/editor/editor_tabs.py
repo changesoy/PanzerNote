@@ -11,17 +11,16 @@ v1.5.4 改动：
 
 import os
 import shutil
-from datetime import datetime
 from typing import Optional, List, Dict, Tuple, Set, cast
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QTabWidget, QTabBar, QMessageBox,
-    QFileDialog, QPlainTextEdit, QTextEdit, QMenu,
+    QFileDialog, QMenu,
     QInputDialog, QLabel, QDialog, QHBoxLayout, QComboBox,
-    QPushButton, QLineEdit, QFormLayout, QApplication, QToolButton
+    QPushButton, QLineEdit, QApplication, QToolButton
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QMimeData, QPoint, QByteArray
-from PyQt6.QtGui import QFont, QTextCursor, QColor, QTextCharFormat, QDrag, QAction, QImage, QPainter, QPixmap
+from PyQt6.QtCore import Qt, pyqtSignal, QMimeData, QPoint
+from PyQt6.QtGui import QColor, QDrag, QAction, QImage, QPainter, QPixmap
 
 from ..core.config import Config
 from ..core import workspace_entries
@@ -33,9 +32,8 @@ from ..utils.error_handler import ErrorHandler, ErrorCategory
 from ..utils.feature_flags import is_enabled
 from ..security.file_guard import FileSizeExceededError, FileOperationTimeoutError
 from ..security.file_access_context import FileAccessContext
-from ..security.input_validator import InputValidator
 from ..themes.theme_aware_mixin import ThemeAwareMixin
-from ..themes.theme_v2.consumer import v2_color, v2_export_colors, v2_token
+from ..themes.theme_v2.consumer import v2_color, v2_export_colors
 from .editor import Editor
 from .markdown_preview import MarkdownPreviewWidget
 from .find_replace import FindReplaceBar

@@ -57,7 +57,6 @@ from ..core.config import Config
 from ..editor.editor import Editor
 from ..utils.logger import get_logger
 from ..utils.feature_flags import is_enabled
-from ..security.path_validator import PathValidator
 from ..themes.theme_aware_mixin import ThemeAwareMixin
 from ..themes.theme_v2.consumer import v2_color, v2_style_value, v2_token
 from .highlight_themes import highlight_code_html

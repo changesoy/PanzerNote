@@ -13,10 +13,9 @@
 
 import os
 from enum import Enum
-from typing import List, Optional, Set
+from typing import Set
 
 from ..utils.logger import get_logger
-from ..security.file_access_context import FileAccessContext
 from ..security.path_validator import PathValidator, PathSecurityError
 
 

@@ -18,7 +18,7 @@
 
 import os
 import re
-from typing import List, Optional, Set
+from typing import Optional, Set
 
 from ..utils.logger import get_logger
 

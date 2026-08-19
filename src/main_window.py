@@ -10,18 +10,17 @@ v1.5.4 改动：
 """
 
 import os
-import html as html_module
 import gc
 from functools import partial
-import shiboken6  # type: ignore[import-not-found]  # 显式依赖（requirements.txt），mypy 无 stub
+import shiboken6  # type: ignore[import-not-found]  # 显式依赖（pyproject.toml dependencies），mypy 无 stub
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QSplitter, QMenuBar, QMenu, QStatusBar,
-    QLabel, QMessageBox, QTabWidget,
-    QToolButton, QFrame, QSizePolicy, QApplication,
-    QLineEdit, QDialog
+    QMainWindow,
+    QMenu,
+    QMessageBox,
+    QApplication,
+    QDialog
 )
-from PyQt6.QtCore import Qt, QTimer, QEvent, pyqtSignal, QPoint, QRect, QEasingCurve
+from PyQt6.QtCore import Qt, QTimer, QEvent, QPoint, QRect, QEasingCurve
 from PyQt6.QtGui import QIcon, QCloseEvent, QAction
 from typing import Any, Callable, Dict, Optional, Tuple, cast
 
@@ -56,9 +55,8 @@ from .themes.theme_v2.transition_controller import ThemeTransitionController, ea
 from .themes.theme_v2.types import ThemeSwitchLevel
 from .ui.command_palette import CommandPalette
 from .utils.logger import get_logger
-from .utils.error_handler import ErrorHandler, ErrorCategory
 from .utils.feature_flags import is_enabled
-from .utils.dpi_helper import scale, scale_size
+from .utils.dpi_helper import scale
 from .utils.window_theme import (
     apply_native_dark_titlebar,
     install_native_titlebar_theme_filter,

@@ -10,7 +10,6 @@ v1.6.4 改动：
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QLabel, QFrame
 )
-from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
 from ..core.config import Config

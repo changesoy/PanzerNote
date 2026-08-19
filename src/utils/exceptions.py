@@ -33,7 +33,6 @@
 """
 
 import functools
-import traceback
 from typing import Any, Callable, Optional, Tuple, Type, Union
 
 from .logger import get_logger

@@ -16,15 +16,12 @@ v1.6 改动：
   - 新增JSON/XML格式化功能：右键菜单"格式化文档"
 """
 
-import os
-import json
 import re
-import xml.dom.minidom as minidom
 from contextlib import contextmanager
 from typing import Generator, Optional, Set, cast
 from PyQt6.QtWidgets import (
-    QPlainTextEdit, QWidget, QTextEdit, QVBoxLayout,
-    QMenu, QMessageBox, QPlainTextDocumentLayout
+    QPlainTextEdit, QWidget, QTextEdit,
+    QMenu, QPlainTextDocumentLayout
 )
 from PyQt6.QtCore import Qt, QRect, QSize, QTimer, QPointF, pyqtSignal
 from PyQt6.QtGui import (

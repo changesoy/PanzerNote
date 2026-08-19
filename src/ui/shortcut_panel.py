@@ -12,7 +12,7 @@ v1.6.4 改动：
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QLineEdit, QTreeWidget, QTreeWidgetItem,
-    QPushButton, QFrame, QSizePolicy, QHeaderView,
+    QPushButton, QHeaderView,
     QDialog, QKeySequenceEdit
 )
 from PyQt6.QtCore import Qt, pyqtSignal

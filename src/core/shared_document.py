@@ -15,7 +15,7 @@ SaveSnapshot：每次异步保存捕获的内容快照。
 """
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Callable, Optional, Set
 

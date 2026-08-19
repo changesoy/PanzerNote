@@ -20,7 +20,6 @@ from .editor_tabs import EditorTabWidget
 from .file_open_service import (
     FileOpenService,
     FileOpenSource,
-    FileOpenSecurityError,
     _is_inside_root,
 )
 

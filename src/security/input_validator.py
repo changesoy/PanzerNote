@@ -17,7 +17,7 @@
 """
 
 import re
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Type, Union
 
 from ..utils.logger import get_logger
 

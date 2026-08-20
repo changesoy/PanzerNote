@@ -44,11 +44,8 @@ class EditorActionsMixin:
     def _get_config_indent(self) -> int:
         """获取编辑器缩进大小配置，使用默认值兜底"""
         from .indentation import get_indent_width
-        try:
-            if hasattr(self, 'config') and self.config is not None:
-                return get_indent_width(self.config)
-        except Exception:
-            pass
+        if hasattr(self, 'config') and self.config is not None:
+            return get_indent_width(self.config)
         return 4
 
     # ═══════════════════ 行操作 ═══════════════════

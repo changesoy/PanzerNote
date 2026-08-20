@@ -86,7 +86,7 @@ def _is_binary_file(filepath: str) -> bool:
         if b'\x00' in chunk:
             return True
         return False
-    except Exception:
+    except OSError:
         return True
 
 

@@ -2,6 +2,23 @@
 
 本文件记录 PanzerNote 各版本的变更。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
 
+## v2.1.0
+
+**Wave 8 主题体系（Theme v2 迁移完成）**
+
+- **主题 v2 契约层**：`src/themes/theme_v2/` 新增 validator（六阶段校验：结构/命名/颜色身份/语法/资源/配方）、types/constants/errors/compat 契约模型、Compatibility Signature 兼容性签名；主题加载/校验/激活在运行时前置完成
+- **组件 Recipe 体系**：`recipes.json` 定义组件配方（editor/tab/scrollbar/input/button/statusbar/tree_item 等），`library.py` 按配方生成全局 QSS；统一 spacing/radius 设计变量（design.json），消除各页面 magic spacing 硬编码
+- **消费点全量迁移**：15 个模块 76 处 v1 API → v2 token；编辑器垂直切片（B2）、核心控件（B3）、导航表面/文件树/命令面板/搜索（B4）、次级表面/对话框（B5）、交互状态 hover/pressed/拖拽（B6）全部接入 Theme v2；语法高亮与 Markdown 预览配色统一从 v2 调色板读取
+- **切换执行器与动效（B7）**：prepare→commit 事务状态机、Snapshot Overlay 过渡、reduced-motion 三档设置、主题切换运行时全局 QSS 使用 v2 激活变体
+- **Window Chrome C0**：Windows 原生标题栏深浅色（DWM 检测 + 降级链）；新增 Bootstrap/Pre-Main 外观，首次运行对话框主题化
+- **删除 v1 主题系统**：v1 主题引擎与外部主题（JSON/YAML）加载全部移除，Theme v2 成为唯一运行时；内置主题迁移为 v2 格式（theme.json + variants/dark|light + recipes + design + motion + syntax palettes）
+- **深色模式修复**：当前行高亮、Markdown 代码块（预览与导出统一）、tab hover、滚动条 hover、行号色双变体 token 化；深色 surface 层级调整（#181818/#252526/#2B2B2B）；tab 栏左缘无边框对齐
+- **补漏收尾**：statusbar recipe、find_replace 局部 QSS 收敛、minimap viewport 接线、theme resource 存在性检查、recipe key 单段命名约束、NativeTitleBarThemeFilter 行为测试等
+- **代码卫生**：清理未使用 import、staticmethod 标注、冗余括号/死代码/冗余转义、收窄可安全改进的异常捕获
+- **依赖**：补充 shiboken6 依赖声明
+
+> 说明：本版本定位 MINOR（向后兼容）：内置主题已全量迁移，不破坏用户数据与插件 API。Wave 8 后续（B8 图标集、剩余 P2 加固项、游戏侧视觉域）见 `docs/roadmap.md`。
+
 ## v2.0.0
 
 **Wave 5 插件能力接口（破坏性变更）**

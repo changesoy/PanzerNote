@@ -65,6 +65,7 @@ from .ui.main_window_ui import MainWindowUIBuilder
 from .ui.selection_clear_filter import SelectionClearFilter
 from .ui.view_coordinator import ViewCoordinator
 from .ui.unsaved_files_dialog import UnsavedChoice, UnsavedFilesDialog
+from .ui.help_dialog import HelpDialog
 
 
 class MainWindow(QMainWindow):
@@ -1354,11 +1355,15 @@ class MainWindow(QMainWindow):
 
     def _show_guide(self):
         """显示新手攻略"""
-        QMessageBox.information(self, "提示", "该功能尚在开发中")
+        HelpDialog(
+            self.config.get_app_dir(), self.theme_engine, "guide", self
+        ).exec()
 
     def _show_manual(self):
         """显示使用说明"""
-        QMessageBox.information(self, "提示", "该功能尚在开发中")
+        HelpDialog(
+            self.config.get_app_dir(), self.theme_engine, "manual", self
+        ).exec()
 
     def _show_about(self):
         """显示关于对话框"""

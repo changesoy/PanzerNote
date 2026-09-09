@@ -2,6 +2,10 @@
 
 本文件记录 PanzerNote 各版本的变更。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
 
+## Unreleased
+
+- **帮助中心**：帮助菜单"使用说明"/"新手攻略"从占位提示升级为完整的帮助中心对话框（`src/ui/help_dialog.py`，双页签）；内容以 Markdown 存放于 `data/help/`（manual.md、guide.md），实现内容与代码分离，经安全渲染后展示；界面颜色全部取自 Theme v2 token，深浅色模式自动跟随
+
 ## v2.1.0
 
 **Wave 8 主题体系（Theme v2 迁移完成）**

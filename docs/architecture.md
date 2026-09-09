@@ -48,6 +48,7 @@ PanzerNote 是一款以已停服二次元游戏《战车少女》（PanzerMaiden
 | 插件系统             | ✅ 完成   | 能力声明制（capabilities→权限映射）/命名空间式 PluginContext/主线程模型/数据与事件能力/热加载，2 个示例插件 + API 文档                                       |
 | 主题系统             | ✅ 完成   | Theme v2（default 主题包/recipe 组件库/双变体）/全局 QSS 生成/预览/ThemeAwareMixin 全局生效/原生标题栏深色                                                   |
 | 集中式版本管理       | ✅ 完成   | `src/__init__.py` 唯一真相源 + `verify_version.py` 一致性验证                                                                                                |
+| 帮助中心             | ✅ 完成   | 帮助对话框（使用说明 + 新手攻略双页签）；内容存于 `data/help/*.md`，安全渲染；主题跟随 Theme v2 token（深浅色自适应）                                        |
 | 建造系统             | 🔲 规划中 | 详见 [roadmap.md](roadmap.md)                                                                                                                                |
 | 图鉴系统             | 🔲 规划中 | 详见 [roadmap.md](roadmap.md)                                                                                                                                |
 | 车库系统             | 🔲 规划中 | 详见 [roadmap.md](roadmap.md)                                                                                                                                |
@@ -147,7 +148,8 @@ PanzerNote/
 │   │   ├── first_run_dialog.py     # 首次运行对话框
 │   │   ├── command_palette.py      # 命令面板（Ctrl+Shift+P / F1 唤起，搜索并执行命令）
 │   │   ├── side_panel_host.py      # 侧栏面板宿主（管理多面板注册/切换/持久化）
-│   │   └── shortcut_panel.py       # 快捷键提示面板
+│   │   ├── shortcut_panel.py       # 快捷键提示面板
+│   │   └── help_dialog.py          # 帮助对话框（双页签：使用说明/新手攻略；Markdown 内容 + Theme v2 主题适配）
 │   │
 │   ├── security/                   # ── 安全模块 ──
 │   │   ├── __init__.py             # 安全模块导出与异常定义
@@ -193,6 +195,9 @@ PanzerNote/
 │   ├── assets/
 │   │   ├── icons/
 │   │   └── portraits/              # 角色立绘
+│   ├── help/
+│   │   ├── manual.md               # 使用说明（帮助对话框"使用说明"页签内容）
+│   │   └── guide.md                # 新手攻略（帮助对话框"新手攻略"页签内容）
 │   └── gamedata/
 │       ├── characters.json         # 角色数据库
 │       └── secretary_lines.json    # 小秘书台词配置

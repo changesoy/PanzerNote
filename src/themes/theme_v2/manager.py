@@ -21,7 +21,7 @@ from PyQt6.QtCore import QMetaObject, QObject, pyqtSignal
 
 from ...utils.logger import get_logger
 from .compat import signature_for
-from .errors import ThemeError, ThemeSchemaError, ThemeSwitchPlanError, ThemeSwitchUnsupportedError
+from .errors import ThemeError, ThemeParseError, ThemeSchemaError, ThemeSwitchPlanError, ThemeSwitchUnsupportedError
 from .hosts import HostRegistry, ReplacementSafety, RendererHost
 from .loader import ThemePackageLoader
 from .renderer_registry import RendererRegistry
@@ -223,7 +223,14 @@ class ThemeManager(QObject):
         registry = PaletteRegistry()
         for filepath in sorted(palette_dir.glob("*.json")):
             palette_id = filepath.stem
-            data = json.loads(filepath.read_text(encoding="utf-8"))
+            try:
+                data = json.loads(filepath.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                # F-1（review）：损坏/不可读/编码异常的 palette 包装为 ThemeError，
+                # 保证 request() 统一走 theme_commit_failed，不穿透事务层。
+                raise ThemeParseError(
+                    f"palette 读取/解析失败: {filepath}: {exc}"
+                ) from exc
             if not isinstance(data, dict):
                 raise ThemeSchemaError(f"palette '{palette_id}' 必须是对象")
             palettes[palette_id] = dict(data)

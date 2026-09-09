@@ -272,6 +272,10 @@ class MainWindow(QMainWindow):
             theme_manager.theme_committed.connect(
                 lambda _pkg, variant: self._plugin_event_bus.emit("theme.changed", variant)
             )
+            # F-5（review）：prepare/commit 失败时给出可见反馈，避免"点了没反应"
+            theme_manager.theme_commit_failed.connect(
+                lambda _pkg, error: self.secretary.show_message(f"主题切换失败：{error}")
+            )
         self.file_tree.tree_changed.connect(
             lambda: self._plugin_event_bus.emit("file_tree.changed")
         )

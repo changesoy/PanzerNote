@@ -96,7 +96,8 @@ def build_plan(
         host_list = hosts.hosts_for(key)
         if not host_list:
             raise ThemeSwitchPlanError(
-                f"组件 '{key}' 需要 renderer 替换（{old_map.get(key)} → {new_map[key]}），"
+                f"组件 '{key}' 需要 renderer 替换"
+                f"（{old_map.get(key, '')} → {new_map.get(key, '')}），"
                 "但无注册宿主"
             )
         for host in host_list:
@@ -104,7 +105,7 @@ def build_plan(
                 RendererReplacementStep(
                     recipe_key=key,
                     old_renderer_id=old_map.get(key, ""),
-                    new_renderer_id=new_map[key],
+                    new_renderer_id=new_map.get(key, ""),
                     host=host,
                 )
             )

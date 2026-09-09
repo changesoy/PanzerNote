@@ -99,5 +99,12 @@ module = "src.editor.auto_pair_handler"
 disallow_untyped_defs = true
 disable_error_code = ["attr-defined", "arg-type", "misc"]
 
+[tool.setuptools]
+package-dir = {"" = "."}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
 [tool.setuptools.dynamic]
 version = {attr = "src.__version__"}

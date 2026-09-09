@@ -16,6 +16,7 @@
 - **补漏收尾**：statusbar recipe、find_replace 局部 QSS 收敛、minimap viewport 接线、theme resource 存在性检查、recipe key 单段命名约束、NativeTitleBarThemeFilter 行为测试等
 - **代码卫生**：清理未使用 import、staticmethod 标注、冗余括号/死代码/冗余转义、收窄可安全改进的异常捕获
 - **依赖**：补充 shiboken6 依赖声明
+- **修复：窗口无法拖动**：保存的窗口坐标落在屏幕外（如副屏移除或历史脏数据）时，新增检测逻辑，自动将窗口回退到主屏居中位置，确保窗口可见、可拖动且可正常还原位置
 
 > 说明：本版本定位 MINOR（向后兼容）：内置主题已全量迁移，不破坏用户数据与插件 API。Wave 8 后续（B8 图标集、剩余 P2 加固项、游戏侧视觉域）见 `docs/roadmap.md`。
 

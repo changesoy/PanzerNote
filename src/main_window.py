@@ -338,6 +338,18 @@ class MainWindow(QMainWindow):
             state |= Qt.WindowState.WindowMaximized
             self.setWindowState(state)
         else:
+            # 标题栏锚点（窗口顶部居中向下 20px 处）若不在任何已连接屏幕内，
+            # 说明保存的位置已落在屏幕外（副屏移除 / 历史脏数据），直接恢复
+            # 会导致标题栏不可见、窗口无法拖动也无法还原。此时回退到主屏居中。
+            screen = QApplication.screenAt(QPoint(x + width // 2, y + 20))
+            if screen is None:
+                screen = QApplication.primaryScreen()
+                if screen is not None:
+                    avail = screen.availableGeometry()
+                    width = min(width, avail.width())
+                    height = min(height, avail.height())
+                    x = avail.left() + (avail.width() - width) // 2
+                    y = avail.top() + (avail.height() - height) // 2
             self.setGeometry(x, y, width, height)
 
     def _restore_state(self):

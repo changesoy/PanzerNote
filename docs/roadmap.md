@@ -47,11 +47,12 @@ Wave 8（B1~B8）完成主题系统重构为 Theme v2：删除 v1 主题引擎�
 - ✅ 编辑器硬编码颜色 → 主题 token
 - ✅ Markdown 预览代码块配色 → 主题 token
 - ✅ 弹窗与浮窗深色样式补全
-- ~~外部主题作者指南（`docs/theme_system.md`）~~：外部主题机制已随 v1 删除，不再规划
+- ✅ 主题作者指南：Theme v2 主题包格式与校验规则见 [theme_authoring.md](theme-design/theme_authoring.md)（B9 B6）
+- ~~外部主题作者指南（`docs/theme_system.md`）~~：外部主题机制已随 v1 删除；v2 主题制作文档已由 theme_authoring.md 承接
 
 ## 文档完善
 
 - `docs/user_guide.md`：面向终端用户的使用指南
 - `docs/developer_guide.md`：开发、测试、提交规范
-- `docs/theme_system.md`：主题系统与外部主题格式
 - `docs/branch_recovery.md`：分支事故与稳定基线记录（短期）
+- ✅ `docs/theme_system.md`：v1 外部主题格式文档已随 v1 机制删除；Theme v2 主题包文档由 `docs/theme-design/theme_authoring.md` 承接

@@ -8,6 +8,14 @@
 
 - **帮助中心**：帮助菜单"使用说明"/"新手攻略"从占位提示升级为完整的帮助中心对话框（`src/ui/help_dialog.py`，双页签）；内容以 Markdown 存放于 `data/help/`（manual.md、guide.md），实现内容与代码分离，经安全渲染后展示；界面颜色全部取自 Theme v2 token，深浅色模式自动跟随
 
+**主题 v2 加固（B9 收尾）**
+
+- **性能审计**：新增 `scripts/bench_theme_switch.py` 主题切换基准；实测 cold load 10ms、L0 切换 ~0.04ms，同步实现满足设计稿 4.4 约定，无需移出 GUI thread（结论见 `docs/theme-design/color_audit.md` 性能审计段）
+- **构建打包**：新增 `scripts/build_package.py` 源码发布包构建（产出 `dist/PanzerNote-<ver>-src.zip`，含源码/资源/依赖清单）
+- **许可证合规**：新增 `THIRD_PARTY_NOTICES.md`，登记运行时/可选/开发依赖许可证与未引入资产的声明
+- **主题作者文档**：新增 `docs/theme-design/theme_authoring.md`（v2 主题包格式、token 白名单、recipe、校验流水线、资源边界）；验收记录见 `docs/theme-design/wave8_acceptance.md`
+- **稳定性加固**：主题切换对 palette 读取解析异常统一包装为 ThemeError（避免 Snapshot Overlay 残留）、跨包切换规避组件 key 缺失 KeyError；主题切换失败经 `theme_commit_failed` 给出可见提示
+
 > 说明：本版本定位 MINOR（向后兼容）：新增用户可见功能，不改变既有行为与数据格式。
 
 ## v2.1.0

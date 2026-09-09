@@ -183,13 +183,19 @@ PanzerNote/
 │       └── perf_probe.py           # 运行时性能探针（Wave 4 E1：大文件加载/首屏/滚动热路径计时）
 │
 ├── scripts/
-│   └── verify_version.py           # 版本一致性验证工具
+│   ├── verify_version.py           # 版本一致性验证工具
+│   ├── build_package.py            # 源码发布包构建（dist/PanzerNote-<ver>-src.zip）
+│   └── bench_theme_switch.py       # 主题切换性能基准（B9：cold load / L0 / QSS 重建）
 │
 ├── docs/                           # 文档
 │   ├── architecture.md             # 本文件
 │   ├── roadmap.md                  # 未完成规划
-│   └── theme-design/               # 主题设计（color_audit.md、候选风格参考）
-│       └── color_audit.md          # 硬编码颜色审计
+│   └── theme-design/               # 主题设计
+│       ├── color_audit.md          # 硬编码颜色审计 + 性能审计（B9）
+│       ├── wave8_acceptance.md     # Wave 8 验收记录（Golden Paths + Coverage Matrix + review 结论）
+│       └── theme_authoring.md      # Theme v2 主题作者指南（主题包格式与校验规则）
+│
+├── THIRD_PARTY_NOTICES.md          # 第三方依赖许可证清单（B9 license 合规）
 │
 ├── data/                           # 数据 & 资源（程序目录）
 │   ├── assets/
@@ -768,7 +774,7 @@ LOADED → on_unload() → UNLOADED
 **版本传播链路**：
 
 ```
-src/__init__.py (__version__ = "2.1.0")
+src/__init__.py (__version__ = "2.2.0")
   ├─→ main.py                    (from src import __version__)
   ├─→ src/main_window.py         (from . import __version__)
   ├─→ src/plugins/plugin_base.py (from .. import __version__ as _app_version)
@@ -1068,4 +1074,4 @@ pip install mypy>=1.20                         # 类型检查
 
 ---
 
-_本文档基于 PanzerNote v2.1.0 源码整理。版本变更见 [../CHANGELOG.md](../CHANGELOG.md)，未完成规划见 [roadmap.md](roadmap.md)。_
+_本文档基于 PanzerNote v2.2.0 源码整理。版本变更见 [../CHANGELOG.md](../CHANGELOG.md)，未完成规划见 [roadmap.md](roadmap.md)。_

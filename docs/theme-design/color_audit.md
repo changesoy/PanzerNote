@@ -49,19 +49,37 @@ Excluded paths:
 
 ## Summary
 
-| File                                     | Count | Status              | Notes                                                                                     |
-| ---------------------------------------- | ----: | ------------------- | ----------------------------------------------------------------------------------------- |
-| `src/editor/markdown_preview.py`         |    49 | Mostly allowed      | HTML template CSS and dark map; monitor carefully                                         |
-| `src/editor/editor.py`                   |     0 | Resolved (Batch B)  | gutter bookmark/fold colors now read from theme tokens                                    |
-| `src/editor/minimap.py`                  |    13 | Low priority        | most colors are fallback; theme path exists                                               |
-| `src/editor/find_replace.py`             |     0 | Resolved (Batch C)  | search match/current match colors now read from search tokens                             |
-| `src/ui/side_panel_host.py`              |     0 | Resolved            | hardcoded colors removed; reads theme tokens                                              |
-| `src/editor/secure_markdown_renderer.py` |     8 | Resolved (Wave 1.5) | unified safe render / export entry, not legacy; layout CSS shared via MARKDOWN_LAYOUT_CSS |
-| `src/game/game_sidebar.py`               |     7 | Resolved            | D13/D24 游戏域独立配色，走 game*palette.json（game*\* token）                             |
-| `src/themes/theme_preview.py`            |     4 | Low priority        | color swatches are intentionally literal                                                  |
-| `src/game/secretary_widget.py`           |     4 | Resolved            | D13/D24 游戏域独立配色，气泡/状态色走 game*palette.json（secretary*\* token）             |
-| `src/ui/command_palette.py`              |     3 | Low priority        | hint fallback only; themed after init                                                     |
-| `src/editor/find_in_files_panel.py`      |     2 | Low priority        | already mostly themed                                                                     |
+口径说明：以下计数为 **2026-09-09 B9 B2 复核实测**（`#[0-9a-fA-F]{3,8}` 含色行数，非旧基线
+"处"数）。审计结论：**全库无绕过主题系统的裸硬编码色**——所有 hex 字面量均属下述
+allowed 类别之一（v2 解析回退默认值 / 设计常量 / 游戏域常量 / 注释与降级路径）。
+
+| File                                           | Count | Status             | Notes                                                                         |
+| ---------------------------------------------- | ----: | ------------------ | ----------------------------------------------------------------------------- |
+| `src/editor/markdown_preview.py`               |    28 | Allowed (fallback) | 全部为 v2_token/v2_color 回退默认值 + 模板失败降级 HTML 字面量（B8 注释标明） |
+| `src/themes/bootstrap.py`                      |    18 | Allowed (design)   | BootstrapAppearance 色板常量（Layer 0，刻意不解析 Theme v2，见 4.8）          |
+| `src/editor/syntax_highlighter.py`             |    17 | Allowed            | Markdown 语义色板（allowed 清单）；Pygments 语法色走共享 syntax palette       |
+| `src/themes/theme_v2/consumer.py`              |    11 | Allowed (fallback) | v2_token/v2_color/v2_export_colors 的回退默认值（v2 不可用时才生效）          |
+| `src/editor/editor.py`                         |    13 | Allowed (fallback) | gutter 书签/折叠等均为 v2 回退默认值（Batch B 已迁移 token 消费）             |
+| `src/ui/shortcut_panel.py`                     |    10 | Allowed (fallback) | v2 回退默认值                                                                 |
+| `src/editor/find_replace.py`                   |    10 | Allowed (fallback) | 搜索 match/current 已走 search 专用 token（Batch C），余下为回退默认值        |
+| `src/game/game_sidebar.py`                     |     9 | Allowed (game)     | D13/D24 游戏域独立配色，走 game*palette.json（game*\* token）                 |
+| `src/editor/editor_tabs.py`                    |     9 | Allowed (fallback) | v2 回退默认值                                                                 |
+| `src/themes/theme_preview.py`                  |     8 | Allowed            | 色板 swatch 展示被预览主题的色值（`.get(key, "#000000")` 缺省），border 走 v2 |
+| `src/ui/help_dialog.py`                        |     7 | Allowed (fallback) | v2 回退默认值                                                                 |
+| `src/ui/side_panel_host.py`                    |     7 | Allowed (fallback) | 硬编码已移除（Batch C），余下为 v2 回退默认值                                 |
+| `src/game/secretary_widget.py`                 |     5 | Allowed (game)     | D13/D24 游戏域独立配色，气泡/状态色走 game*palette.json（secretary*\* token） |
+| `src/ui/command_palette.py`                    |     5 | Allowed (fallback) | hint/dialog/input 均 v2 回退默认值；QListWidget 由全局 tree_item recipe 驱动  |
+| `src/editor/completion.py`                     |     5 | Allowed (fallback) | 容器/滚动条已迁 v2 recipe（补漏），选中色走 accent_soft token                 |
+| `src/editor/minimap.py`                        |     4 | Allowed (fallback) | 半透明 alpha 为绘制细节，颜色来源走 recipe `viewport` 键（2026-08-17 修正）   |
+| `src/game/resource_bar.py`                     |     4 | Allowed (game)     | D13/D24 游戏域独立配色                                                        |
+| `src/editor/status_bar.py`                     |     4 | Allowed (fallback) | statusbar recipe 已收敛（补漏 C），余下为 v2 回退默认值                       |
+| `src/main_window.py`                           |     3 | Allowed (fallback) | v2 回退默认值                                                                 |
+| `src/editor/find_in_files_panel.py`            |     1 | Allowed (fallback) | text_secondary v2 回退；输入/下拉/结果树由 B3 全局 recipe 驱动                |
+| `src/themes/theme_v2/transition_controller.py` |     1 | Allowed (fallback) | v2 回退默认值                                                                 |
+| `src/ui/main_window_ui.py`                     |     1 | Allowed (fallback) | v2 回退默认值                                                                 |
+
+> 复核方法：全库 `src/` 正则扫描 `#[0-9a-fA-F]{3,8}` + 逐文件分类；仅命中 1 处
+> `QColor("#...")`/裸 QSS 色（`resource_bar.py` 分隔线，仍为 v2_token 回退）。
 
 ## Unreasonable Color Arrangements
 
@@ -274,6 +292,7 @@ minimap_viewport` 等遗留专用 token 保留在变体与白名单中，消费�
   如需让某专用 token 生效，应改 recipe 引用（如补漏 A 的做法），而非在消费端直读 token。
 
 **2026-08-17 用户实测修正（补漏 D 后续）**：
+
 - 深色层级修正采用 **A 方案**：dark `surface_secondary` #181818 → **#252526**。
   原因：dark 变体 `surface_primary` 与 `surface_secondary` 原均为 #181818，导致
   标签栏/非活动 tab/文件树侧栏/状态栏/查找栏等"第二级表面"与正文无法区分；
@@ -287,6 +306,30 @@ minimap_viewport` 等遗留专用 token 保留在变体与白名单中，消费�
   （半透明是绘制细节，颜色来源仍走 recipe `viewport` 键）；`minimap_viewport`
   值调整使半透明叠加后双变体均可见——dark `#3C3C3C` → `#6E6E6E`、light
   `#E0E0E0` → `#9E9E9E`。
+
+## 性能审计（B9 B1-1，2026-09-09）
+
+基准脚本：`scripts/bench_theme_switch.py`（offscreen，`--iter N` 可调）。测量结果（本机，iter=20）：
+
+| 环节                                                             | 耗时     |
+| ---------------------------------------------------------------- | -------- |
+| cold load（默认包加载 + 全量校验，启动期单次）                   | 10.0 ms  |
+| L0 prepare（同包变体切换，复用当前 snapshot）                    | ~0.00 ms |
+| L0 commit（激活事务，无 QWidget 副作用）                         | ~0.00 ms |
+| QSS rebuild（ThemeComponentLibrary.all_qss，\_apply_theme 主体） | 0.04 ms  |
+| 单次 L0 切换合计（prepare + commit + qss rebuild）               | ~0.04 ms |
+
+**结论（对应设计稿 4.4）**：同步实现满足"第一版同步实现，仅 profiling 证明必要时才把纯数据
+解析移出 GUI thread"的约定，**无需异步化**。理由：
+
+- 生产路径恒 L0（产品注册 0 个 RendererHost），prepare 复用当前 snapshot 且只校验
+  variant 存在，数据解析成本可忽略；
+- 跨包流水线（loader + validator 六阶段）是 L1/新包路径，当前仓库仅 default 单包、
+  生产不触发，且 B8 第二视觉语言已延后——待真实第二包出现时再测该路径；
+- 全局 QSS 重建 0.04 ms 远低于一帧预算（16 ms @60fps），repaint 成本不构成卡顿。
+
+风险留档：若未来 B8 引入第二视觉语言（跨包 L1 路径），prepare 将首次经过完整
+loader/validator 流水线，需按同脚本复测；若测得单次 >16ms 再评估异步化。
 
 ## Verification Checklist
 

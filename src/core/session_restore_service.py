@@ -41,7 +41,8 @@ class SessionRestoreService:
 
     # === 常规会话恢复 ===
 
-    def build_restore_plan(self, open_files: list) -> Tuple[list, list]:
+    @staticmethod
+    def build_restore_plan(open_files: list) -> Tuple[list, list]:
         """构建会话恢复计划
 
         返回 (pre_show_entries, deferred_entries)
@@ -140,7 +141,8 @@ class SessionRestoreService:
 
         return bool(self._pending_files)
 
-    def restore_cursor(self, editor_tabs, file_info: dict, tab_index: int) -> None:
+    @staticmethod
+    def restore_cursor(editor_tabs, file_info: dict, tab_index: int) -> None:
         """恢复指定索引标签的光标/滚动位置（分屏会话恢复亦复用此方法）"""
         cursor_pos = file_info.get("cursor_position")
         scroll_pos = file_info.get("scroll_position")
@@ -183,7 +185,8 @@ class SessionRestoreService:
 
     # === 崩溃恢复 ===
 
-    def check_crash_recovery(self, session_manager: TempSessionManager) -> Optional[dict]:
+    @staticmethod
+    def check_crash_recovery(session_manager: TempSessionManager) -> Optional[dict]:
         """查找可恢复的异常退出会话
 
         无 recoverable 会话时清理干净会话并返回 None。
@@ -202,7 +205,8 @@ class SessionRestoreService:
 
         return session
 
-    def describe_crash_files(self, session: dict) -> List[str]:
+    @staticmethod
+    def describe_crash_files(session: dict) -> List[str]:
         """生成崩溃会话的文件名列表（供 UI 弹窗显示）"""
         files = session.get("files", [])
         file_names = []

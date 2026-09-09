@@ -50,7 +50,8 @@ class DocumentRegistry:
 
     # ═══════════════ 创建 ═══════════════
 
-    def _new_document_id(self) -> str:
+    @staticmethod
+    def _new_document_id() -> str:
         return uuid.uuid4().hex
 
     def create_untitled(

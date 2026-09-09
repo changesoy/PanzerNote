@@ -10,18 +10,17 @@ v1.5.4 改动：
 """
 
 import os
-import html as html_module
 import gc
 from functools import partial
-import shiboken6  # type: ignore[import-not-found]  # 显式依赖（requirements.txt），mypy 无 stub
+import shiboken6  # type: ignore[import-not-found]  # 显式依赖（pyproject.toml dependencies），mypy 无 stub
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QSplitter, QMenuBar, QMenu, QStatusBar,
-    QLabel, QMessageBox, QTabWidget,
-    QToolButton, QFrame, QSizePolicy, QApplication,
-    QLineEdit
+    QMainWindow,
+    QMenu,
+    QMessageBox,
+    QApplication,
+    QDialog
 )
-from PyQt6.QtCore import Qt, QTimer, QEvent, pyqtSignal, QPoint, QRect
+from PyQt6.QtCore import Qt, QTimer, QEvent, QPoint, QRect, QEasingCurve
 from PyQt6.QtGui import QIcon, QCloseEvent, QAction
 from typing import Any, Callable, Dict, Optional, Tuple, cast
 
@@ -50,11 +49,14 @@ from .plugins.capability_registry import PluginCapabilityError
 from .plugins.plugin_event_bus import PluginEventBus
 from .themes.theme_engine import ThemeEngine
 from .themes.theme_preview import ThemePreviewDialog
+from .themes.theme_v2.consumer import v2_active_variant, v2_token
+from .themes.theme_v2.transition import CommitResult
+from .themes.theme_v2.transition_controller import ThemeTransitionController, easing_for
+from .themes.theme_v2.types import ThemeSwitchLevel
 from .ui.command_palette import CommandPalette
 from .utils.logger import get_logger
-from .utils.error_handler import ErrorHandler, ErrorCategory
 from .utils.feature_flags import is_enabled
-from .utils.dpi_helper import scale, scale_size
+from .utils.dpi_helper import scale
 from .utils.window_theme import (
     apply_native_dark_titlebar,
     install_native_titlebar_theme_filter,
@@ -63,6 +65,7 @@ from .ui.main_window_ui import MainWindowUIBuilder
 from .ui.selection_clear_filter import SelectionClearFilter
 from .ui.view_coordinator import ViewCoordinator
 from .ui.unsaved_files_dialog import UnsavedChoice, UnsavedFilesDialog
+from .ui.help_dialog import HelpDialog
 
 
 class MainWindow(QMainWindow):
@@ -111,12 +114,14 @@ class MainWindow(QMainWindow):
         self._plugin_commands: Dict[str, Tuple[str, str, Callable]] = {}
         self.editor_tabs: EditorTabWidget  # 在 _init_ui 中初始化
         self.theme_engine = ThemeEngine(self.config)
-        self.theme_engine.load_external_themes()
         self.theme_engine.initialize_active_theme()
+
+        # B7：切换视觉过渡编排（启动期恢复主题不经 controller、无动画）
+        self._theme_transition = ThemeTransitionController(self)
 
         self._native_titlebar_filter = install_native_titlebar_theme_filter(
             cast(QApplication, QApplication.instance()),
-            lambda: self.theme_engine.get_active_theme().is_dark,
+            lambda: v2_active_variant(self.theme_engine) == "dark",
             parent=self,
         )
 
@@ -261,10 +266,16 @@ class MainWindow(QMainWindow):
         self.outline_panel.heading_clicked.connect(self._on_outline_heading_clicked)
         self.find_in_files_panel.result_clicked.connect(self._on_find_in_files_result)
         self.shortcut_panel.set_edit_callback(self._on_shortcut_edited)
-        # Batch 4：主题切换 / 文件树变化 → 插件事件
-        self.theme_engine.theme_changed.connect(
-            lambda theme_id: self._plugin_event_bus.emit("theme.changed", theme_id)
-        )
+        # Batch 4：主题切换 / 文件树变化 → 插件事件（B8：订阅 manager 信号）
+        theme_manager = getattr(self.theme_engine, "theme_manager", None)
+        if theme_manager is not None:
+            theme_manager.theme_committed.connect(
+                lambda _pkg, variant: self._plugin_event_bus.emit("theme.changed", variant)
+            )
+            # F-5（review）：prepare/commit 失败时给出可见反馈，避免"点了没反应"
+            theme_manager.theme_commit_failed.connect(
+                lambda _pkg, error: self.secretary.show_message(f"主题切换失败：{error}")
+            )
         self.file_tree.tree_changed.connect(
             lambda: self._plugin_event_bus.emit("file_tree.changed")
         )
@@ -332,6 +343,18 @@ class MainWindow(QMainWindow):
             state |= Qt.WindowState.WindowMaximized
             self.setWindowState(state)
         else:
+            # 标题栏锚点（窗口顶部居中向下 20px 处）若不在任何已连接屏幕内，
+            # 说明保存的位置已落在屏幕外（副屏移除 / 历史脏数据），直接恢复
+            # 会导致标题栏不可见、窗口无法拖动也无法还原。此时回退到主屏居中。
+            screen = QApplication.screenAt(QPoint(x + width // 2, y + 20))
+            if screen is None:
+                screen = QApplication.primaryScreen()
+                if screen is not None:
+                    avail = screen.availableGeometry()
+                    width = min(width, avail.width())
+                    height = min(height, avail.height())
+                    x = avail.left() + (avail.width() - width) // 2
+                    y = avail.top() + (avail.height() - height) // 2
             self.setGeometry(x, y, width, height)
 
     def _restore_state(self):
@@ -610,8 +633,7 @@ class MainWindow(QMainWindow):
 
         def apply_later() -> None:
             try:
-                theme = self.theme_engine.get_active_theme()
-                self._update_title_bar_theme(theme.is_dark)
+                self._update_title_bar_theme(v2_active_variant(self.theme_engine) == "dark")
             except Exception:
                 pass
 
@@ -732,7 +754,6 @@ class MainWindow(QMainWindow):
 
         choice = UnsavedFilesDialog.ask(
             self,
-            self.theme_engine,
             [info["title"] for info in unsaved_infos],
             show_cancel=True,
             window_title="确认退出",
@@ -1115,7 +1136,8 @@ class MainWindow(QMainWindow):
         """切换快捷键提示面板（委托 ViewCoordinator）"""
         self.view_coordinator.toggle_shortcut_panel()
 
-    def _on_shortcut_edited(self, action_id: str, new_shortcut: str):
+    @staticmethod
+    def _on_shortcut_edited(action_id: str, new_shortcut: str):
         """快捷键编辑回调"""
         from .utils.logger import get_logger
         get_logger(__name__).info("快捷键已更新: %s -> %s", action_id, new_shortcut)
@@ -1288,7 +1310,8 @@ class MainWindow(QMainWindow):
         for tabs in [self.editor_tabs, *self.view_coordinator.split_tabs]:
             tabs.close_tabs_of_deleted_path(path, is_dir)
 
-    def _on_untitled_save_from_tree(self, source_tabs, tab_id: int, dest_folder: str):
+    @staticmethod
+    def _on_untitled_save_from_tree(source_tabs, tab_id: int, dest_folder: str):
         """3.5.11：未命名标签拖到文件树 → 落盘保存（一行委托）"""
         source_tabs.save_untitled_to_folder(tab_id, dest_folder)
 
@@ -1336,11 +1359,15 @@ class MainWindow(QMainWindow):
 
     def _show_guide(self):
         """显示新手攻略"""
-        QMessageBox.information(self, "提示", "该功能尚在开发中")
+        HelpDialog(
+            self.config.get_app_dir(), self.theme_engine, "guide", self
+        ).exec()
 
     def _show_manual(self):
         """显示使用说明"""
-        QMessageBox.information(self, "提示", "该功能尚在开发中")
+        HelpDialog(
+            self.config.get_app_dir(), self.theme_engine, "manual", self
+        ).exec()
 
     def _show_about(self):
         """显示关于对话框"""
@@ -1504,14 +1531,14 @@ class MainWindow(QMainWindow):
     def _apply_theme(self):
         stylesheet = self.theme_engine.generate_stylesheet()
         self.setStyleSheet(stylesheet)
-        theme = self.theme_engine.get_active_theme()
-        colors = theme.colors
-        self._game_placeholder.setStyleSheet(f"color: {colors.text_disabled}; font-size: 18px;")
-        self.line1.setStyleSheet(f"background-color: {colors.border};")
-        self.line2.setStyleSheet(f"background-color: {colors.border};")
+        text_disabled = v2_token(self.theme_engine, "text_muted", "#BDBDBD")
+        border = v2_token(self.theme_engine, "border_muted", "#E0E0E0")
+        self._game_placeholder.setStyleSheet(f"color: {text_disabled}; font-size: 18px;")
+        self.line1.setStyleSheet(f"background-color: {border};")
+        self.line2.setStyleSheet(f"background-color: {border};")
 
         # Windows 下设置标题栏暗色模式（DWM API）
-        self._update_title_bar_theme(theme.is_dark)
+        self._update_title_bar_theme(v2_active_variant(self.theme_engine) == "dark")
 
     def _update_title_bar_theme(self, is_dark: bool):
         """更新当前主窗口原生标题栏深/浅色。"""
@@ -1529,9 +1556,78 @@ class MainWindow(QMainWindow):
         dialog.theme_applied.connect(self._on_theme_applied)
         dialog.exec()
 
-    def _on_theme_applied(self, theme_id: str):
+    def _on_theme_applied(self, package_id: str, variant_id: str):
+        """B7：唯一切换编排点（设计文档 9.2）。
+
+        包一层 Snapshot Overlay 过渡：逐窗口 grab 旧帧 → 同步执行真实切换 →
+        淡出。motion off / 大文件模式下恒瞬时（allow_animation=False）。
+        B8：theme_preview 已多包化，切换参数为 (package_id, variant_id)。
+        """
+        self._theme_transition.run(
+            self._transition_windows(),
+            lambda: self._switch_theme_now(package_id, variant_id),
+            level=ThemeSwitchLevel.L0,  # B7 生产路径恒 L0（同包变体切换）
+            motion_level=self._motion_level(),
+            allow_animation=self._animations_allowed(),
+            veil_color=self._transition_veil_color(),
+            easing=self._transition_easing(),
+        )
+
+    def _switch_theme_now(self, package_id: str, variant_id: str) -> None:
+        """过渡 callable：经 manager 完成 v2 事务（同包变体切换）
+        + 持久化 view.theme（package/variant）+ _apply_theme（全局 QSS
+        重涂 + DWM 标题栏）——全部同步完成。
+        """
+        manager = getattr(self.theme_engine, "theme_manager", None)
+        if manager is None or manager.request(package_id, variant_id) is not CommitResult.COMMITTED:
+            return
+        self.config.set_view_setting("theme", f"{package_id}/{variant_id}")
         self._apply_theme()
-        self.secretary.show_message(f"已切换主题: {self.theme_engine.get_active_theme().name}")
+        self.secretary.show_message("已切换主题")
+
+    def _transition_windows(self) -> list:
+        """参与过渡的窗口：主窗口 + 可见顶层 QDialog/QMainWindow。
+
+        瞬时浮层（tooltip/menu/命令面板等）排除：CommandPalette 是 QDialog
+        需显式跳过，QMenu/QToolTip 非 QDialog/QMainWindow 天然排除。
+        """
+        windows: list = [self]
+        app = cast(QApplication, QApplication.instance())
+        if app is None:
+            return windows
+        for widget in app.topLevelWidgets():
+            if widget is self or not widget.isVisible():
+                continue
+            if isinstance(widget, (QDialog, QMainWindow)) and not isinstance(widget, CommandPalette):
+                windows.append(widget)
+        return windows
+
+    def _motion_level(self) -> str:
+        return str(self.config.get_view_setting("motion_level", "normal"))
+
+    def _animations_allowed(self) -> bool:
+        """D11 force Off：motion off 或当前编辑器大文件模式下禁用动画。"""
+        if self._motion_level() == "off":
+            return False
+        widget = self.editor_tabs.currentWidget()
+        editor = getattr(widget, "editor", None)
+        if editor is not None and getattr(editor, "is_large_file_mode", lambda: False)():
+            return False
+        return True
+
+    def _transition_veil_color(self) -> str:
+        """overlay 降级遮罩纯色 = 当前变体 surface_primary（旧主题色）。"""
+        return v2_token(self.theme_engine, "surface_primary", "#FFFFFF")
+
+    def _transition_easing(self) -> QEasingCurve.Type:
+        """缓动取自 motion.json（motion_level 档位不写 motion.json）。"""
+        svc = getattr(self.theme_engine, "theme_v2", None)
+        if svc is None:
+            return QEasingCurve.Type.OutCubic
+        snapshot = svc.snapshot()
+        if snapshot is None:
+            return QEasingCurve.Type.OutCubic
+        return easing_for(snapshot.motion.easing)
 
     # === 插件管理 ===
 
@@ -1712,7 +1808,6 @@ class MainWindow(QMainWindow):
 
     def _plugin_open_file(self, filepath: str) -> bool:
         try:
-            from .editor.file_open_service import FileOpenSource, FileOpenSecurityError
             validated = self._file_open_service.validate_open_request(
                 filepath, FileOpenSource.PLUGIN
             )
@@ -1804,7 +1899,8 @@ class MainWindow(QMainWindow):
         )
         self._plugin_menu.addAction(action)
 
-    def _safe_plugin_callback(self, label: str, handler) -> None:
+    @staticmethod
+    def _safe_plugin_callback(label: str, handler) -> None:
         """命令/菜单/事件回调异常 → 仅 log，插件保持 ACTIVE（D7）"""
         try:
             handler()

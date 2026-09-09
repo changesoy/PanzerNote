@@ -1,0 +1,5 @@
+{
+  "duration_fast": 100,
+  "duration_normal": 200,
+  "easing": "ease-out"
+}

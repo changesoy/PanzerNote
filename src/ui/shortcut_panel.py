@@ -6,13 +6,13 @@
 支持按功能模块分类展示，支持搜索过滤。
 
 v1.6.4 改动：
-  - 主题感知：订阅 theme_changed 信号
+  - 主题感知：订阅 theme_committed 信号（v2 manager）
 """
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QLineEdit, QTreeWidget, QTreeWidgetItem,
-    QPushButton, QFrame, QSizePolicy, QHeaderView,
+    QPushButton, QHeaderView,
     QDialog, QKeySequenceEdit
 )
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -20,6 +20,7 @@ from PyQt6.QtGui import QFont, QKeySequence
 
 from ..utils.dpi_helper import scale, scale_stylesheet
 from ..themes.theme_aware_mixin import ThemeAwareMixin
+from ..themes.theme_v2.consumer import v2_color, v2_style_value, v2_token
 
 
 class ShortcutEditDialog(ThemeAwareMixin, QDialog):
@@ -88,45 +89,28 @@ class ShortcutEditDialog(ThemeAwareMixin, QDialog):
 
         self._init_theme(theme_engine)
 
-    def _apply_theme_colors(self, colors):
+    def _apply_theme_colors(self):
+        # B5：QDialog/QLabel/QPushButton 由全局 QSS（dialog/button recipe）驱动；
+        # QKeySequenceEdit 不在全局覆盖清单，消费 input recipe 色值，无 v1 回退。
+        bg = v2_color(self._theme_engine, "input", "background", "#FFFFFF")
+        text = v2_color(self._theme_engine, "input", "text", "#212121")
+        border = v2_color(self._theme_engine, "input", "border", "#E0E0E0")
+        focus_border = v2_color(self._theme_engine, "input", "focus_border", "#2196F3")
+        selection = v2_color(self._theme_engine, "input", "selection_bg", "#BBDEFB")
+        radius = v2_style_value(self._theme_engine, "input", "radius", 4)
+        pad = v2_style_value(self._theme_engine, "input", "padding", 6)
         self.setStyleSheet(scale_stylesheet(f"""
-        QDialog {{
-            background-color: {colors.dialog_bg};
-            color: {colors.text_primary};
-        }}
-
-        QLabel {{
-            color: {colors.text_primary};
-        }}
-
         QKeySequenceEdit {{
-            background-color: {colors.card};
-            color: {colors.text_primary};
-            border: 1px solid {colors.border};
-            border-radius: 4px;
-            padding: 6px 8px;
-            selection-background-color: {colors.primary_light};
+            background-color: {bg};
+            color: {text};
+            border: 1px solid {border};
+            border-radius: {radius}px;
+            padding: {pad}px 8px;
+            selection-background-color: {selection};
         }}
 
         QKeySequenceEdit:focus {{
-            border-color: {colors.primary};
-        }}
-
-        QPushButton {{
-            background-color: {colors.primary};
-            color: white;
-            border: 1px solid {colors.primary_dark};
-            border-radius: 4px;
-            padding: 6px 14px;
-            min-height: 24px;
-        }}
-
-        QPushButton:hover {{
-            background-color: {colors.primary_dark};
-        }}
-
-        QPushButton:pressed {{
-            background-color: {colors.primary_dark};
+            border-color: {focus_border};
         }}
         """))
 
@@ -228,103 +212,42 @@ class ShortcutPanel(ThemeAwareMixin, QWidget):
 
         self._populate_tree()
 
-    def _apply_theme_colors(self, colors):
+    def _apply_theme_colors(self):
+        # B5：QWidget 面板背景与 QLabel 消费 v2 token；QLineEdit/QTreeWidget/
+        # QScrollBar 由全局 recipe（input/tree_item/scrollbar）驱动。
+        # QHeaderView 不在全局覆盖清单，token 化保留。无 v1 回退。
+        panel_bg = v2_token(self._theme_engine, "surface_secondary", "#FFFFFF")
+        surface = v2_token(self._theme_engine, "surface_primary", "#F5F5F5")
+        text_primary = v2_token(self._theme_engine, "text_primary", "#212121")
+        text_secondary = v2_token(self._theme_engine, "text_secondary", "#757575")
+        border = v2_token(self._theme_engine, "border_muted", "#E0E0E0")
         self.setStyleSheet(scale_stylesheet(f"""
         QWidget#ShortcutPanel {{
-            background-color: {colors.dialog_bg};
-            color: {colors.text_primary};
+            background-color: {panel_bg};
+            color: {text_primary};
         }}
 
         QLabel#ShortcutTitleLabel {{
-            color: {colors.text_primary};
+            color: {text_primary};
             background: transparent;
         }}
 
         QLabel#ShortcutHintLabel,
         QLabel#ShortcutFooterLabel {{
-            color: {colors.text_secondary};
+            color: {text_secondary};
             background: transparent;
         }}
 
-        QLineEdit#ShortcutSearchInput {{
-            background-color: {colors.card};
-            color: {colors.text_primary};
-            border: 1px solid {colors.border};
-            border-radius: 4px;
-            padding: 6px 8px;
-            selection-background-color: {colors.primary_light};
-        }}
-
-        QLineEdit#ShortcutSearchInput:focus {{
-            border-color: {colors.primary};
-        }}
-
-        QTreeWidget#ShortcutTree {{
-            font-family: "Microsoft YaHei";
-            font-size: 13px;
-            background-color: {colors.card};
-            color: {colors.text_primary};
-            border: 1px solid {colors.border};
-            border-radius: 4px;
-            outline: none;
-            alternate-background-color: {colors.surface};
-        }}
-
-        QTreeWidget#ShortcutTree::item {{
-            color: {colors.text_primary};
-            padding: 4px 8px;
-            border-bottom: 1px solid {colors.divider};
-        }}
-
-        QTreeWidget#ShortcutTree::item:hover {{
-            background-color: {colors.surface};
-        }}
-
-        QTreeWidget#ShortcutTree::item:selected {{
-            background-color: {colors.editor_selection};
-            color: {colors.text_primary};
-        }}
-
-        QTreeWidget#ShortcutTree::branch {{
-            background-color: {colors.card};
-        }}
-
         QHeaderView::section {{
-            background-color: {colors.surface};
-            color: {colors.text_primary};
+            background-color: {surface};
+            color: {text_primary};
             border: none;
-            border-right: 1px solid {colors.border};
-            border-bottom: 1px solid {colors.border};
+            border-right: 1px solid {border};
+            border-bottom: 1px solid {border};
             padding: 6px 8px;
             font-weight: bold;
         }}
-
-        QScrollBar:vertical {{
-            background-color: {colors.surface};
-            width: 12px;
-            margin: 0;
-        }}
-
-        QScrollBar::handle:vertical {{
-            background-color: {colors.border};
-            border-radius: 6px;
-            min-height: 20px;
-            margin: 2px;
-        }}
-
-        QScrollBar::handle:vertical:hover {{
-            background-color: {colors.text_disabled};
-        }}
-
-        QScrollBar::add-line:vertical,
-        QScrollBar::sub-line:vertical {{
-            height: 0;
-        }}
         """))
-
-        self._tree.viewport().setStyleSheet(  # type: ignore[union-attr]
-            f"background-color: {colors.card}; color: {colors.text_primary};"
-        )
 
     def _populate_tree(self, filter_text: str = ""):
         self._tree.clear()

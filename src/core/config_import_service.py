@@ -8,7 +8,7 @@
 """
 
 import json as json_module
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple
 
 from ..utils.logger import get_logger
 from .workspace_store import WorkspaceStore
@@ -213,12 +213,14 @@ class ConfigImportService:
             except KeyError:
                 self._skip(f"workspace.{key}", "未知字段")
 
-    def _check_type(self, value, expected_types: tuple, reject_bool: bool = False) -> bool:
+    @staticmethod
+    def _check_type(value, expected_types: tuple, reject_bool: bool = False) -> bool:
         if reject_bool and isinstance(value, bool) and bool not in expected_types:
             return False
         return isinstance(value, expected_types)
 
-    def _check_range(self, value, range_rule: Optional[Tuple[Optional[float], Optional[float]]]) -> bool:
+    @staticmethod
+    def _check_range(value, range_rule: Optional[Tuple[Optional[float], Optional[float]]]) -> bool:
         if range_rule is None:
             return True
         lo, hi = range_rule

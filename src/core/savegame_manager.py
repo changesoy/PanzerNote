@@ -12,7 +12,6 @@ from types import MappingProxyType
 from typing import Any, Dict, Mapping, Optional, cast
 
 from ..utils.logger import get_logger
-from ..utils.exceptions import safe_call
 from ..security.path_validator import PathSecurityError
 from ..security.file_guard import FileGuard, FileSizeExceededError, FileOperationTimeoutError
 from ..security.file_access_context import FileAccessContext

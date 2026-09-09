@@ -21,6 +21,7 @@ from PyQt6.QtGui import QPainter, QColor, QPixmap, QPicture
 
 from ..utils.feature_flags import is_enabled
 from ..themes.theme_aware_mixin import ThemeAwareMixin
+from ..themes.theme_v2.consumer import v2_color, v2_token
 from ..utils.logger import get_logger
 
 
@@ -43,13 +44,6 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
             raise RuntimeError("Minimap 必须传入 theme_engine，不允许为 None")
         self._editor = editor
         self._dragging = False
-        colors = theme_engine.get_active_theme().colors
-        self._bg_color = colors.minimap_bg
-        self._border_color = colors.border
-        self._text_color = colors.text_disabled
-        primary = QColor(colors.primary)
-        self._viewport_color = QColor(primary.red(), primary.green(), primary.blue(), 30)
-        self._viewport_border_color = QColor(primary.red(), primary.green(), primary.blue(), 70)
 
         self.setFixedWidth(self.MINIMAP_WIDTH)
         self.setCursor(Qt.CursorShape.ArrowCursor)
@@ -73,13 +67,24 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
 
         self._init_theme(theme_engine)
 
-    def _apply_theme_colors(self, colors):
-        self._bg_color = colors.minimap_bg
-        self._border_color = colors.border
-        self._text_color = colors.text_disabled
-        primary = QColor(colors.primary)
-        self._viewport_color = QColor(primary.red(), primary.green(), primary.blue(), 30)
-        self._viewport_border_color = QColor(primary.red(), primary.green(), primary.blue(), 70)
+    def _apply_theme_colors(self):
+        # B2：minimap 消费 v2 minimap recipe + 语义 token，无 v1 回退
+        # 补漏 D P1-2：viewport 接线 minimap recipe viewport 键（→ minimap_viewport
+        # 变体 token），替换原 accent+alpha 硬编码派生。
+        # 2026-08-17 修正：视口指示保持"浅色半透明矩形"观感——半透明 alpha 是绘制
+        # 细节（填充 90 / 边框 150，透出下方代码纹理），颜色来源走 recipe token。
+        self._bg_color = v2_color(self._theme_engine, "minimap", "background", "#FFFFFF")
+        self._border_color = v2_token(self._theme_engine, "border_muted", "#E0E0E0")
+        self._text_color = v2_color(self._theme_engine, "minimap", "text", "#BDBDBD")
+        viewport_color = QColor(
+            v2_color(self._theme_engine, "minimap", "viewport", "#E0E0E0")
+        )
+        self._viewport_color = QColor(
+            viewport_color.red(), viewport_color.green(), viewport_color.blue(), 90
+        )
+        self._viewport_border_color = QColor(
+            viewport_color.red(), viewport_color.green(), viewport_color.blue(), 150
+        )
         self._cache_valid = False
         if self._use_block_cache:
             self._block_cache.clear()
@@ -159,7 +164,6 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
 
     def _get_viewport_rect(self) -> QRectF:
         editor = self._editor
-        doc = editor.document()
         line_h = self._get_line_height()
 
         first_block = editor.firstVisibleBlock()
@@ -280,7 +284,6 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
                                 get_logger(__name__).debug("QTextBlockFormat 无 formats/additionalFormats 属性")
 
                     segments = self._build_color_segments(text, fmt_ranges, default_color)
-                    x = float(left)
                     rect_h = max(1.0, line_h - 0.5)
                     for seg_start, seg_end, color in segments:
                         seg_x = left + seg_start * char_w

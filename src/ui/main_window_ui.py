@@ -33,6 +33,7 @@ from ..game.game_sidebar import GameSidebar
 from ..game.resource_bar import ResourceBar
 from ..game.secretary_widget import SecretaryWidget
 from ..themes.theme_engine import ThemeEngine
+from ..themes.theme_v2.consumer import v2_token
 from ..utils.dpi_helper import scale
 from ..editor.file_tree import FileTreeWidget
 from ..editor.outline_panel import OutlinePanel
@@ -205,7 +206,7 @@ class MainWindowUIBuilder:
         game_placeholder = QLabel("该功能尚在开发中")
         game_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         game_placeholder.setStyleSheet(
-            f"color: {self._theme_engine.get_active_theme().colors.text_disabled}; font-size: 18px;"
+            f"color: {v2_token(self._theme_engine, 'text_muted', '#BDBDBD')}; font-size: 18px;"
         )
         _game_layout.addWidget(game_placeholder)
         main_layout.addWidget(game_view_container)

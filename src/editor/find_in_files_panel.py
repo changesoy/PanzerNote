@@ -28,6 +28,7 @@ from PyQt6.QtWidgets import (
 
 from .find_in_files_service import FindInFilesWorker
 from ..themes.theme_aware_mixin import ThemeAwareMixin
+from ..themes.theme_v2.consumer import v2_token
 
 
 class FindInFilesPanel(ThemeAwareMixin, QWidget):
@@ -121,8 +122,9 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
         filters_layout.setSpacing(4)
 
         include_label = QLabel("包含:")
-        include_label.setStyleSheet("font-size: 11px; color: #888;")
+        include_label.setStyleSheet("font-size: 11px;")
         filters_layout.addWidget(include_label)
+        self._include_label = include_label
         self._include_input = QLineEdit()
         self._include_input.setPlaceholderText("如 *.py, src/**")
         self._include_input.setToolTip("只搜索匹配的文件（逗号分隔 glob，留空不限）")
@@ -130,8 +132,9 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
         filters_layout.addWidget(self._include_input, 1)
 
         exclude_label = QLabel("排除:")
-        exclude_label.setStyleSheet("font-size: 11px; color: #888;")
+        exclude_label.setStyleSheet("font-size: 11px;")
         filters_layout.addWidget(exclude_label)
+        self._exclude_label = exclude_label
         self._exclude_input = QLineEdit()
         self._exclude_input.setPlaceholderText("如 *.min.js, dist")
         self._exclude_input.setToolTip("排除匹配的文件/目录（逗号分隔 glob，留空不排除）")
@@ -158,9 +161,14 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
 
         self._init_theme(theme_engine)
 
-    def _apply_theme_colors(self, colors):
-        self._scope_label.setStyleSheet(f"font-size: 11px; color: {colors.text_secondary};")
-        self._status_label.setStyleSheet(f"color: {colors.text_secondary}; font-size: 11px;")
+    def _apply_theme_colors(self):
+        # B4：搜索面板文字消费 v2 token（text_secondary），无 v1 回退；
+        # 输入/下拉/勾选/按钮/结果树由 B3 全局 recipe 驱动
+        text_secondary = v2_token(self._theme_engine, "text_secondary", "#757575")
+        label_style = f"font-size: 11px; color: {text_secondary};"
+        for label in (self._scope_label, self._include_label,
+                      self._exclude_label, self._status_label):
+            label.setStyleSheet(label_style)
 
     # ------------------------------------------------------------------
     # 搜索
@@ -330,7 +338,9 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
         match_node.setData(0, Qt.ItemDataRole.UserRole, (filepath, line_num))
 
         font = QFont("Consolas, Courier New, monospace")
-        font.setPointSize(QApplication.font().pointSize() - 1)
+        base_point = QApplication.font().pointSize()
+        if base_point > 1:  # 防御：字体 pointSize 为 -1/0 时跳过缩放，避免 Qt 警告
+            font.setPointSize(base_point - 1)
         match_node.setFont(0, font)
 
         file_node.addChild(match_node)

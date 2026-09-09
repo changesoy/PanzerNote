@@ -214,6 +214,7 @@ def main():
 
     profiler.begin_phase(PHASE_WINDOW_CREATE)
     from src.main_window import MainWindow
+    from src.themes.theme_v2.errors import ThemeLoadError
     # 阶段 7：AppContext 承载已拆好的子模块，稳定依赖边界；
     # Config 门面仍在 app_context.config 上保留（过渡期共存）
     app_context = AppContext(
@@ -222,7 +223,13 @@ def main():
         workspace_store=config.workspace_store,
         config=config,
     )
-    window = MainWindow(app_context)
+    try:
+        window = MainWindow(app_context)
+    except ThemeLoadError as e:
+        # Wave8 Batch C：v2 主题加载失败 = 启动显式报错，永不静默回退 v1
+        from PyQt6.QtWidgets import QMessageBox
+        QMessageBox.critical(None, "主题加载失败", str(e))
+        sys.exit(1)
     profiler.end_phase()
 
     profiler.begin_phase(PHASE_WINDOW_SHOW)

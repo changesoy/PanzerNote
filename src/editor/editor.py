@@ -16,15 +16,12 @@ v1.6 改动：
   - 新增JSON/XML格式化功能：右键菜单"格式化文档"
 """
 
-import os
-import json
 import re
-import xml.dom.minidom as minidom
 from contextlib import contextmanager
 from typing import Generator, Optional, Set, cast
 from PyQt6.QtWidgets import (
-    QPlainTextEdit, QWidget, QTextEdit, QVBoxLayout,
-    QMenu, QMessageBox, QPlainTextDocumentLayout
+    QPlainTextEdit, QWidget, QTextEdit,
+    QMenu, QPlainTextDocumentLayout
 )
 from PyQt6.QtCore import Qt, QRect, QSize, QTimer, QPointF, pyqtSignal
 from PyQt6.QtGui import (
@@ -50,6 +47,12 @@ from ..utils.perf_probe import measure as _perf_measure
 from ..utils.feature_flags import is_enabled as _feature_enabled
 from .folding import FoldingManager
 from ..themes.theme_aware_mixin import ThemeAwareMixin
+from ..themes.theme_v2.consumer import (
+    v2_active_variant,
+    v2_color,
+    v2_color_qcolor,
+    v2_token,
+)
 
 
 class LineNumberArea(QWidget):
@@ -233,19 +236,31 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
 
-    def _apply_theme_colors(self, colors):
+    def _apply_theme_colors(self):
+        # B8：编辑器 slice 消费 Theme v2（token + editor/scrollbar recipe），fallback 字面量
+        bg = v2_color(self._theme_engine, "editor", "background", "#FFFFFF")
+        # 选区：accent 半透明（经典 GitHub 淡蓝选区观感，深浅双变体均合理）
+        sel = v2_color_qcolor(
+            self._theme_engine, "editor", "selection", "#BBDEFB", alpha=102
+        ).name(QColor.NameFormat.HexArgb)
+        fg = v2_token(self._theme_engine, "text_primary", "#212121")
+
+        # 编辑器 Scrollbar 走 v2 scrollbar recipe（共享 QSS 片段，与全局/弹窗同源）
+        scrollbar_qss = self._theme_engine.components.qss("scrollbar")
+
         self.setStyleSheet(f"""
             QPlainTextEdit {{
                 border: none;
-                background-color: {colors.editor_bg};
-                selection-background-color: {colors.primary_light};
-                color: {colors.text_primary};
+                background-color: {bg};
+                selection-background-color: {sel};
+                color: {fg};
             }}
+            {scrollbar_qss}
         """)
         # 更新高亮器的主题（3.5.8：两种高亮器均实现 set_dark_mode——Pygments
         # 走 set_dark_mode 重建 formats，不经过 set_file_type，避免摘除共享高亮）
         if self._highlighter and self._filepath_or_ext:
-            is_dark = self._theme_engine.get_active_theme().is_dark
+            is_dark = v2_active_variant(self._theme_engine) == "dark"
             if hasattr(self._highlighter, 'set_dark_mode'):
                 self._highlighter.set_dark_mode(is_dark)
             else:
@@ -255,7 +270,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
 
         # 更新无父顶层补全弹窗的主题
         if hasattr(self, "_completion_popup") and self._completion_popup is not None:
-            self._completion_popup.apply_theme_colors(colors)
+            self._completion_popup.apply_theme_colors(self._theme_engine)
             font_family = self.config.get_editor_setting("font_family", "Microsoft YaHei")
             font_size = self.config.get_editor_setting("font_size", 12)
             self._completion_popup.apply_font(font_family, font_size)
@@ -421,10 +436,10 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
     def line_number_area_paint_event(self, event):
         """绘制行号 + 折叠标记"""
         painter = QPainter(self.line_number_area)
-        bg_color = self._theme_engine.get_active_theme().colors.sidebar_bg
-        text_color = self._theme_engine.get_active_theme().colors.editor_line_number
-        bookmark_bg_color = self._theme_engine.get_active_theme().colors.editor_bookmark_bg
-        bookmark_fg_color = self._theme_engine.get_active_theme().colors.editor_bookmark_fg
+        bg_color = v2_color(self._theme_engine, "editor", "background", "#F5F5F5")
+        text_color = v2_color(self._theme_engine, "editor", "line_number", "#BDBDBD")
+        bookmark_bg_color = v2_color(self._theme_engine, "editor", "bookmark_bg", "#FF9800")
+        bookmark_fg_color = v2_color(self._theme_engine, "editor", "bookmark_fg", "#FFFFFF")
         painter.fillRect(event.rect(), QColor(bg_color))
 
         supports_fold = self._file_type in self._FOLD_SUPPORTED_TYPES
@@ -462,8 +477,13 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
                 # 折叠标记 — 手绘三角（大小一致，不受行高影响）
                 if supports_fold and self._folding.is_foldable(block_number):
                     collapsed = (block_number + 1) in self._folding._collapsed_blocks
-                    fold_color_expanded_name = self._theme_engine.get_active_theme().colors.editor_fold_marker
-                    fold_color_collapsed_name = self._theme_engine.get_active_theme().colors.editor_fold_marker_collapsed
+                    fold_color_expanded_name = v2_color(
+                        self._theme_engine, "editor", "fold_marker", "#4CAF50"
+                    )
+                    fold_color_collapsed_name = v2_color(
+                        self._theme_engine, "editor", "fold_marker_collapsed",
+                        "#66BB6A",
+                    )
                     painter.setBrush(QColor(fold_color_collapsed_name if collapsed else fold_color_expanded_name))
                     painter.setPen(Qt.PenStyle.NoPen)
                     tri_size = 8  # 三角边长 px
@@ -498,7 +518,12 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             self._selection_manager.clear_layer("current_line")
         else:
             selection = QTextEdit.ExtraSelection()
-            line_color_name = self._theme_engine.get_active_theme().colors.editor_current_line
+            line_color_name = v2_color(
+                self._theme_engine,
+                "editor",
+                "current_line",
+                "#FFF9C4",
+            )
             line_color = QColor(line_color_name)
             selection.format.setBackground(line_color)
             selection.format.setProperty(QTextFormat.Property.FullWidthSelection, True)
@@ -520,10 +545,9 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             self._selection_manager.refresh()
             return
 
-        colors = self._theme_engine.get_active_theme().colors
-        match_bg = colors.editor_bracket_match_bg
-        match_fg = colors.editor_bracket_match_fg
-        unmatched = colors.editor_bracket_unmatched
+        match_bg = v2_color(self._theme_engine, "editor", "bracket_match_bg", "#E6F2E6")
+        match_fg = v2_color(self._theme_engine, "editor", "bracket_match_fg", "#1A1A1A")
+        unmatched = v2_color(self._theme_engine, "editor", "bracket_unmatched", "#E06C75")
 
         selections: list[QTextEdit.ExtraSelection] = []
 
@@ -663,7 +687,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
                 self._lazy_highlight.set_highlighter(self._highlighter)
                 self.apply_auto_minimap()
                 return
-        is_dark = self._theme_engine.get_active_theme().is_dark
+        is_dark = v2_active_variant(self._theme_engine) == "dark"
         self._highlighter, self._file_type = get_highlighter_for_file(
             doc, filepath_or_ext, theme_engine=self._theme_engine, is_dark=is_dark
         )
@@ -794,7 +818,8 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
     # 仅拦截"本地文件"URL 拖放并 event.ignore() 冒泡给 MainWindow 打开文件；
     # 文本/纯链接拖放（如浏览器拖 URL 粘贴）保留默认行为。
 
-    def _has_local_file_urls(self, mime) -> bool:
+    @staticmethod
+    def _has_local_file_urls(mime) -> bool:
         if not mime.hasUrls():
             return False
         return any(url.isLocalFile() for url in mime.urls())
@@ -1031,10 +1056,8 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
                 shared_doc.qdocument, parent=shared_doc
             )
             shared_doc._lazy_coordinator = coordinator
-        cast(DocumentLazyHighlightCoordinator, coordinator).register(self)
-        self._lazy_highlight.set_coordinator(
-            cast(DocumentLazyHighlightCoordinator, coordinator)
-        )
+        coordinator.register(self)
+        self._lazy_highlight.set_coordinator(coordinator)
         self.invalidate_word_count()
 
     def detach_shared_document(self) -> None:
@@ -1227,9 +1250,6 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         """检测点击的折叠标记并切换折叠。"""
         if self._file_type not in self._FOLD_SUPPORTED_TYPES:
             return
-
-        area_width = self.line_number_area.width()
-        marker_width = self._folding.fold_marker_width
 
         block = self.firstVisibleBlock()
         top = round(self.blockBoundingGeometry(block).translated(self.contentOffset()).top())

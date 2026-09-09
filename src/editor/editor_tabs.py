@@ -11,17 +11,16 @@ v1.5.4 改动：
 
 import os
 import shutil
-from datetime import datetime
 from typing import Optional, List, Dict, Tuple, Set, cast
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QTabWidget, QTabBar, QMessageBox,
-    QFileDialog, QPlainTextEdit, QTextEdit, QMenu,
+    QFileDialog, QMenu,
     QInputDialog, QLabel, QDialog, QHBoxLayout, QComboBox,
-    QPushButton, QLineEdit, QFormLayout, QApplication, QToolButton
+    QPushButton, QLineEdit, QApplication, QToolButton
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QMimeData, QPoint, QByteArray
-from PyQt6.QtGui import QFont, QTextCursor, QColor, QTextCharFormat, QDrag, QAction
+from PyQt6.QtCore import Qt, pyqtSignal, QMimeData, QPoint
+from PyQt6.QtGui import QColor, QDrag, QAction, QImage, QPainter, QPixmap
 
 from ..core.config import Config
 from ..core import workspace_entries
@@ -33,8 +32,8 @@ from ..utils.error_handler import ErrorHandler, ErrorCategory
 from ..utils.feature_flags import is_enabled
 from ..security.file_guard import FileSizeExceededError, FileOperationTimeoutError
 from ..security.file_access_context import FileAccessContext
-from ..security.input_validator import InputValidator
 from ..themes.theme_aware_mixin import ThemeAwareMixin
+from ..themes.theme_v2.consumer import v2_color, v2_export_colors
 from .editor import Editor
 from .markdown_preview import MarkdownPreviewWidget
 from .find_replace import FindReplaceBar
@@ -199,10 +198,26 @@ class DraggableTabBar(QTabBar):
         mime.setData(MIME_TAB_ID, str(tab_id).encode('utf-8'))
         if filepath:
             mime.setData(MIME_TAB_FILEPATH, filepath.encode('utf-8'))
-            mime.setText(os.path.basename(filepath))
         drag.setMimeData(mime)
 
-        result = drag.exec(Qt.DropAction.MoveAction | Qt.DropAction.CopyAction)
+        # B6（8.1 拖拽视觉）：拖拽体为半透明的标签缩略图，随鼠标跟手。
+        # 不携带 text/plain——避免编辑器把 tab 拖拽当文本拖放而写入文件名。
+        rect = self.tabRect(self._drag_tab_index)
+        pixmap = self.grab(rect)
+        if not pixmap.isNull():
+            img = pixmap.toImage().convertToFormat(QImage.Format.Format_ARGB32)
+            painter = QPainter(img)
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
+            painter.fillRect(img.rect(), QColor(0, 0, 0, 150))  # ~60% 不透明度
+            painter.end()
+            drag.setPixmap(QPixmap.fromImage(img))
+            # 热点 = 按下点在源 tab 内的相对偏移：缩略图初始与源 tab 垂直对齐，
+            # 拖拽过程中保持按下时的相对位置（VS Code 行为）。
+            hx = max(0, min(rect.width() - 1, self._drag_start_pos.x() - rect.left()))
+            hy = max(0, min(rect.height() - 1, self._drag_start_pos.y() - rect.top()))
+            drag.setHotSpot(QPoint(hx, hy))
+
+        drag.exec(Qt.DropAction.MoveAction | Qt.DropAction.CopyAction)
         self._drag_tab_index = -1
 
     def mouseReleaseEvent(self, event):
@@ -253,17 +268,17 @@ class _TabCloseButton(QWidget):
         self._btn.setFixedSize(15, 16)
         self._btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._btn.setText("×")
-        colors = theme_engine.get_active_theme().colors
-        self._apply_btn_style(colors)
+        self._apply_btn_style()
         layout.addWidget(self._btn)
         layout.addStretch()
 
         self._btn.clicked.connect(self._on_clicked)
 
-    def _apply_btn_style(self, colors) -> None:
+    def _apply_btn_style(self) -> None:
+        close_hover = v2_color(self._theme_engine, "tab", "close_hover", "#BBDEFB")
         self._btn.setStyleSheet(
             f"#tabCloseInnerBtn {{ border: none; background: transparent; border-radius: 2px; padding: 0; }}"
-            f"#tabCloseInnerBtn:hover {{ background: {colors.hover_bg}; }}"
+            f"#tabCloseInnerBtn:hover {{ background: {close_hover}; }}"
         )
 
     def _on_clicked(self):
@@ -411,7 +426,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 return str(shared_doc.filepath)
         return None
 
-    def _get_editor_from_widget(self, widget) -> Optional[Editor]:
+    @staticmethod
+    def _get_editor_from_widget(widget) -> Optional[Editor]:
         if isinstance(widget, Editor):
             return widget
         elif isinstance(widget, MarkdownPreviewWidget):
@@ -619,7 +635,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self._update_tab_tooltip(index)
         return int(index)
 
-    def _is_markdown_file(self, filepath: str) -> bool:
+    @staticmethod
+    def _is_markdown_file(filepath: str) -> bool:
         """判断是否为Markdown文件"""
         ext = os.path.splitext(filepath)[1].lower()
         return ext in ('.md', '.markdown')
@@ -1043,7 +1060,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 is_md,
                 self,
                 _on_pdf_ready,
-                self._theme_engine.get_active_theme().colors,
+                v2_export_colors(self._theme_engine),
             )
             return True, 0
         except RuntimeError as e:
@@ -1072,7 +1089,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             body_html = ExportService.render_content(content, is_md)
             full_html = build_export_html_document(
                 body_html,
-                self._theme_engine.get_active_theme().colors,
+                v2_export_colors(self._theme_engine),
             )
             self.config.get_file_guard().safe_write_bytes(
                 filepath,
@@ -1204,7 +1221,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
         return True, 0
 
-    def _current_normalized_content(self, widget, target_eol: str) -> str:
+    @staticmethod
+    def _current_normalized_content(widget, target_eol: str) -> str:
         """当前编辑器内容（按目标 EOL 规范化），用于保存成功时的 snapshot 判定。"""
         if isinstance(widget, MarkdownPreviewWidget):
             raw = widget.editor.toPlainText()
@@ -1450,57 +1468,86 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 break
             keep_index -= 1
 
-    def _apply_theme_colors(self, colors):
+    def _apply_theme_colors(self):
+        # B8：tabs 消费 v2 tab recipe
+        # 补漏 C：统一走 resolve()（color/design 数值一次解析），消除 padding/radius 字面量
+        style = self._theme_engine.components.resolve("tab") or {}
+        tab_bg = style.get("background", "#F5F5F5")
+        active_bg = style.get("active_background", "#FFFFFF")
+        pane_bg = style.get("pane_background", "#FFFFFF")
+        tab_fg = style.get("text", "#757575")
+        active_fg = style.get("active_text", "#212121")
+        hover_bg = style.get("hover_background", "#BBDEFB")
+        pressed_bg = style.get("pressed_background", "#E0E0E0")
+        border = style.get("border", "#E0E0E0")
+        radius = style.get("radius", 3)
+
         self.setStyleSheet(f"""
     QTabWidget {{
-        background-color: {colors.surface};
+        background-color: {tab_bg};
         border: none;
     }}
 
     QTabWidget::pane {{
-        background-color: {colors.editor_bg};
+        background-color: {pane_bg};
         border: none;
         top: -1px;
     }}
 
     QTabBar {{
-        background-color: {colors.surface};
+        background-color: {tab_bg};
         border: none;
     }}
 
     QTabBar::tab {{
         padding: 8px 15px;
         margin-right: 2px;
-        background-color: {colors.surface};
-        border: 1px solid {colors.border};
-        border-bottom: none;
+        background-color: {tab_bg};
+        border: 1px solid {border};
+        /* 所有 tab 统一无左边框：tab 栏最左侧与正文左边缘齐平（pane 无
+           边框，视觉连续）；tab 间分隔由前一个 tab 的右边框承担。
+           不用 :first 伪状态——实测在真实 QTabBar 上匹配不可靠。 */
+        border-left: none;
+        border-bottom: 1px solid {tab_bg};
         border-top-left-radius: 4px;
         border-top-right-radius: 4px;
-        color: {colors.text_secondary};
+        color: {tab_fg};
     }}
 
     QTabBar::tab:selected {{
-        background-color: {colors.card};
-        border-color: {colors.border};
-        border-bottom: 1px solid {colors.card};
-        color: {colors.text_primary};
+        background-color: {active_bg};
+        border-color: {border};
+        border-bottom: 1px solid {active_bg};
+        color: {active_fg};
     }}
 
     QTabBar::tab:hover:!selected {{
-        background-color: {colors.primary_light};
-        color: {colors.text_primary};
+        background-color: {hover_bg};
+        color: {active_fg};
+    }}
+
+    /* B6 pressed 态：仅当 hover AND pressed 同时生效，避免 Qt 在 tab 增删时
+       pressed 伪状态在相邻 tab 上残留，导致"某 tab 颜色莫名变深"。 */
+    QTabBar::tab:hover:pressed:!selected {{
+        background-color: {pressed_bg};
+    }}
+
+    /* tab 栏左下角/右下角 corner（文档模式下的左右空白区域）：
+       与 tab 栏同色，避免 tab 最左侧/最右侧出现 pane 背景的竖向色条。 */
+    QTabWidget::left-corner, QTabWidget::right-corner {{
+        background-color: {tab_bg};
     }}
 
     QTabBar QToolButton {{
-        background-color: {colors.surface};
-        color: {colors.text_primary};
-        border: 1px solid {colors.border};
-        border-radius: 3px;
+        background-color: {tab_bg};
+        color: {active_fg};
+        border: 1px solid {border};
+        border-radius: {radius}px;
         margin: 1px;
     }}
 
     QTabBar QToolButton:hover {{
-        background-color: {colors.primary_light};
+        background-color: {hover_bg};
     }}
     """)
         tab_bar = self.tabBar()
@@ -1508,7 +1555,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             for i in range(tab_bar.count()):
                 btn = tab_bar.tabButton(i, QTabBar.ButtonPosition.RightSide)
                 if isinstance(btn, _TabCloseButton):
-                    btn._apply_btn_style(colors)
+                    btn._apply_btn_style()
 
     def _on_tab_close_requested(self, index: int):
         self._close_tab(index)
@@ -1603,7 +1650,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         binding.attach()
         widget._doc_binding = binding
 
-    def _disconnect_doc_binding(self, widget) -> None:
+    @staticmethod
+    def _disconnect_doc_binding(widget) -> None:
         """解除 View 的 Document 信号绑定（关闭/迁移前调用，幂等）。"""
         binding = getattr(widget, "_doc_binding", None)
         if binding is not None:
@@ -1642,7 +1690,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         stripped = self._strip_tab_suffix(title)
         self.setTabText(index, name + title[len(stripped):])
 
-    def _on_view_path_changed(self, widget, path: str) -> None:
+    @staticmethod
+    def _on_view_path_changed(widget, path: str) -> None:
         """Document.pathChanged → 本 View 预览基准跟随（规格 2.8）。
 
         D3b：路径 authority 在 Document——pathChanged 由 bind_path 广播给所有
@@ -1727,7 +1776,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             msg_box.setIcon(QMessageBox.Icon.Question)
 
             save_btn = msg_box.addButton("保存", QMessageBox.ButtonRole.AcceptRole)
-            discard_btn = msg_box.addButton("不保存", QMessageBox.ButtonRole.DestructiveRole)
+            msg_box.addButton("不保存", QMessageBox.ButtonRole.DestructiveRole)
             cancel_btn = msg_box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
 
             msg_box.exec()
@@ -2071,7 +2120,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             # D3a：Document 已是 dirty（由 qdocument.setModified 驱动），无附加动作
             pass
 
-    def _on_save_failed(self, tab_id: int, filepath: str, exc: BaseException) -> None:
+    @staticmethod
+    def _on_save_failed(tab_id: int, filepath: str, exc: BaseException) -> None:
         basename = os.path.basename(filepath) if filepath else "未知文件"
         ErrorHandler.show_from_exception(exc, ErrorCategory.FILE, f"保存文件失败：{basename}")
 

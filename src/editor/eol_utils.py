@@ -29,7 +29,7 @@ def detect_eol(text: str) -> Tuple[str, str]:
       - 多种换行符同时存在 → 按出现次数取主导，显示 ("Mixed", 主导行尾)
     """
     if not text:
-        return ("LF", "\n")
+        return "LF", "\n"
 
     crlf_count = text.count("\r\n")
     # 统计纯 CR（排除 CRLF 中的 CR）
@@ -47,7 +47,7 @@ def detect_eol_from_bytes(data: bytes) -> Tuple[str, str]:
     在本阶段读取少量字节即可完成探测。
     """
     if not data:
-        return ("LF", "\n")
+        return "LF", "\n"
 
     crlf_count = data.count(b"\r\n")
     cr_count = data.count(b"\r") - crlf_count
@@ -67,15 +67,15 @@ def _classify_counts(lf_count: int, crlf_count: int, cr_count: int) -> Tuple[str
     present = {k: v for k, v in counts.items() if v > 0}
 
     if not present:
-        return ("LF", "\n")
+        return "LF", "\n"
 
     if len(present) == 1:
         label = next(iter(present))
-        return (label, EOL_MAP[label])
+        return label, EOL_MAP[label]
 
     # 多种换行符 → 取计数最多的
     dominant = max(present, key=present.get)  # type: ignore[arg-type]
-    return ("Mixed", EOL_MAP[dominant])
+    return "Mixed", EOL_MAP[dominant]
 
 
 def normalize_eol(text: str, target_eol: str) -> str:

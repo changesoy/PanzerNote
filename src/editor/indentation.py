@@ -18,7 +18,7 @@ def get_indent_width(config) -> int:
     """
     try:
         return int(config.get_editor_setting("indent_size", 4))
-    except Exception:
+    except (ValueError, TypeError):
         return 4
 
 

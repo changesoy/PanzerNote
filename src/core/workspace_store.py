@@ -14,7 +14,7 @@ import os
 from typing import Dict, Any, List, Optional, cast
 
 from ..security.file_guard import FileGuard
-from .path_resolver import PathResolver, load_json, save_json, merge_dicts, INTERNAL_CONFIG_CTX
+from .path_resolver import PathResolver, load_json, save_json, merge_dicts
 
 
 class WorkspaceStore:
@@ -142,7 +142,7 @@ class WorkspaceStore:
         tabs = self._workspace.get("last_session", {}).get("split_tabs", [])
         if not isinstance(tabs, list):
             return []
-        return cast(List[Dict[str, Any]], [t for t in tabs if isinstance(t, dict)])
+        return [t for t in tabs if isinstance(t, dict)]
 
     # === bookmarks / folds ===
 
@@ -187,7 +187,7 @@ class WorkspaceStore:
         memory = self._workspace.get("closed_tabs_memory", {})
         if not isinstance(memory, dict):
             return None
-        return cast(Optional[Dict[str, int]], memory.get(filepath))
+        return memory.get(filepath)
 
     def clear_closed_tab_memory(self, filepath: str) -> None:
         """清除指定文件的位置记忆（重新打开并恢复后调用）。"""

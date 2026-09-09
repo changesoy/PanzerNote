@@ -40,18 +40,19 @@
 - 音效与提示开关
 - 游戏存档导入/导出
 
-## 主题系统迁移
+## 主题系统迁移（已完成）
 
-将编辑器、Markdown 预览、弹窗中残留的硬编码颜色迁移到主题 token 系统，统一颜色语义。详细审计结果见 [color_audit.md](theme-design/color_audit.md)。
+Wave 8（B1~B8）完成主题系统重构为 Theme v2：删除 v1 主题引擎与外部主题（JSON/YAML）加载，UI 组件全部迁移到 v2 token / recipe，语法高亮与 Markdown 预览配色统一从 v2 调色板读取。剩余硬编码颜色与状态见 [color_audit.md](theme-design/color_audit.md)。
 
-- 编辑器硬编码颜色 → 主题 token
-- Markdown 预览代码块配色 → 主题 token
-- 弹窗与浮窗深色样式补全
-- 外部主题作者指南（`docs/theme_system.md`，待编写）
+- ✅ 编辑器硬编码颜色 → 主题 token
+- ✅ Markdown 预览代码块配色 → 主题 token
+- ✅ 弹窗与浮窗深色样式补全
+- ✅ 主题作者指南：Theme v2 主题包格式与校验规则见 [theme_authoring.md](theme-design/theme_authoring.md)（B9 B6）
+- ~~外部主题作者指南（`docs/theme_system.md`）~~：外部主题机制已随 v1 删除；v2 主题制作文档已由 theme_authoring.md 承接
 
 ## 文档完善
 
 - `docs/user_guide.md`：面向终端用户的使用指南
 - `docs/developer_guide.md`：开发、测试、提交规范
-- `docs/theme_system.md`：主题系统与外部主题格式
 - `docs/branch_recovery.md`：分支事故与稳定基线记录（短期）
+- ✅ `docs/theme_system.md`：v1 外部主题格式文档已随 v1 机制删除；Theme v2 主题包文档由 `docs/theme-design/theme_authoring.md` 承接

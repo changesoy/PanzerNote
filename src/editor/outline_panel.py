@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
-from PyQt6.QtGui import QFont, QColor, QPalette
+from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget, QLabel, QApplication
 
 from src.editor.outline_parser import parse_headings, Heading
@@ -88,7 +88,8 @@ class OutlinePanel(QWidget):
         self._tree.clear()
 
         font_base = QFont(QApplication.font())
-        font_base.setPointSize(font_base.pointSize() + 1)
+        if font_base.pointSize() > 1:  # 防御：pointSize 为 -1/0 时跳过，避免 Qt 警告
+            font_base.setPointSize(font_base.pointSize() + 1)
 
         for level, line_num, title in headings:
             item = QTreeWidgetItem()
@@ -102,7 +103,8 @@ class OutlinePanel(QWidget):
             if level == 1:
                 font.setBold(True)
             elif level >= 5:
-                font.setPointSize(font.pointSize() - 1)
+                if font.pointSize() > 1:
+                    font.setPointSize(font.pointSize() - 1)
             item.setFont(0, font)
 
             self._tree.addTopLevelItem(item)

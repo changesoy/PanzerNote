@@ -81,7 +81,7 @@ def get_logger(name: str) -> logging.Logger:
     if not _initialized:
         setup_logging()
 
-    if not name.startswith("src"):
+    if not name.startswith("src."):
         name = f"src.{name}"
 
     return logging.getLogger(name)

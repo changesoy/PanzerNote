@@ -19,9 +19,8 @@ PyQt6 默认启用高 DPI 缩放，则会自动缩放"。
 import re
 
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtCore import QSize
 
-_BASE_DPI = 96.0
 _scale_factor = 1.0
 _initialized = False
 
@@ -32,41 +31,15 @@ def init_dpi():
     应在 QApplication 创建后、主窗口显示前调用。
 
     当高 DPI 缩放启用时（PyQt6 默认），Qt 已自动处理缩放，
-    所有尺寸设置应使用逻辑像素（基准值），scale_factor 应为 1.0。
+    所有尺寸设置应使用逻辑像素（基准值），scale_factor 恒为 1.0。
     """
     global _scale_factor, _initialized
 
-    app = QApplication.instance()
-    if app is None:
+    if QApplication.instance() is None:
         return
 
     _scale_factor = 1.0
     _initialized = True
-    return
-
-    screen = app.primaryScreen()
-    if screen is None:
-        _initialized = True
-        return
-
-    logical_dpi = screen.logicalDotsPerInch()
-    dpi_ratio = logical_dpi / _BASE_DPI
-
-    device_ratio = screen.devicePixelRatio()
-
-    _scale_factor = max(dpi_ratio, device_ratio)
-
-    if _scale_factor < 1.0:
-        _scale_factor = 1.0
-
-    _clamp_scale_factor()
-    _initialized = True
-
-
-def _clamp_scale_factor():
-    global _scale_factor
-    _scale_factor = round(_scale_factor * 4) / 4
-    _scale_factor = max(1.0, min(_scale_factor, 3.0))
 
 
 def scale_factor() -> float:

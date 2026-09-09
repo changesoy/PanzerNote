@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
+from ..themes.bootstrap import BootstrapAppearance
 from ..utils.logger import get_logger
 
 
@@ -29,6 +30,9 @@ class FirstRunDialog(QDialog):
 
     def _init_ui(self):
         """初始化UI"""
+        # Wave8 D31 Layer 0：启动期 Bootstrap 外观（局部 QSS + C0 titlebar），
+        # 保证 MainWindow 创建前的首帧不再是系统默认观感。
+        BootstrapAppearance.apply_to_dialog(self)
         self.setWindowTitle("欢迎使用 PanzerNote")
         self.setFixedSize(500, 280)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)

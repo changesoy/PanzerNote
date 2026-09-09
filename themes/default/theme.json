@@ -1,0 +1,8 @@
+{
+  "schema_version": 2,
+  "name": "PanzerNote Default",
+  "family": "classic",
+  "shell_schema": "workbench-v1",
+  "renderer_profile": "classic-v1",
+  "window_chrome": { "mode": "native" }
+}

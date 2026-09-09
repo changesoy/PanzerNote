@@ -7,7 +7,7 @@
 from typing import Any, Callable, Optional, Union
 
 from PyQt6.QtGui import QKeySequence, QAction
-from PyQt6.QtWidgets import QMenu, QMenuBar, QMessageBox
+from PyQt6.QtWidgets import QMenu, QMenuBar
 
 from ..core.config import Config
 from ..core.shortcut_manager import ShortcutManager

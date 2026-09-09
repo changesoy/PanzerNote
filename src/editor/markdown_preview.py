@@ -57,8 +57,8 @@ from ..core.config import Config
 from ..editor.editor import Editor
 from ..utils.logger import get_logger
 from ..utils.feature_flags import is_enabled
-from ..security.path_validator import PathValidator
 from ..themes.theme_aware_mixin import ThemeAwareMixin
+from ..themes.theme_v2.consumer import v2_color, v2_style_value, v2_token
 from .highlight_themes import highlight_code_html
 from .webengine_runtime import WebEngineRuntime
 
@@ -259,18 +259,18 @@ section[data-fold-heading].folded {{
     display: none;
 }}
 
-/* ========== 滚动条（与编辑器样式一致，暗色模式下自适应） ========== */
+/* ========== 滚动条（与编辑器样式一致：同一 scrollbar recipe 供值） ========== */
 ::-webkit-scrollbar {{
-    width: 12px;
-    height: 12px;
+    width: {sb_width}px;
+    height: {sb_width}px;
 }}
 ::-webkit-scrollbar-track {{
     background: var(--scrollbar-track);
 }}
 ::-webkit-scrollbar-thumb {{
     background: var(--scrollbar-thumb);
-    border-radius: 6px;
-    border: 2px solid var(--scrollbar-track);
+    border-radius: {sb_radius}px;
+    border: {sb_margin}px solid var(--scrollbar-track);
 }}
 ::-webkit-scrollbar-thumb:hover {{
     background: var(--scrollbar-thumb-hover);
@@ -523,31 +523,29 @@ window.updateFoldVisibility = function(collapsedLinesJson) {{
 def _build_preview_css_vars(theme_engine) -> str:
     """根据主题引擎构造 :root CSS 变量覆盖块。
 
+    B2：纯消费 Theme v2（semantic token + markdown/scrollbar recipe），无 v1 回退。
     theme_engine 必须传入，不允许为 None。
     """
-    c = theme_engine.get_active_theme().colors
-
-    # 颜色语义映射：CSS 变量名 → 主题 token 值
-    # light/dark 主题 token 已各自配置正确色值，无需再做明暗判断
+    # 颜色语义映射：CSS 变量名 → v2 token / recipe 值（B8：字面量 fallback = v1 light 值）
     vars_map = {
-        "bg-card": c.background,
-        "text-primary": c.text_primary,
-        "text-secondary": c.text_secondary,
-        "text-muted": c.text_disabled,
-        "border": c.border,
-        "border-soft": c.divider,
-        "divider": c.divider,
-        "surface": c.surface,
-        "surface-soft": c.surface,
-        "surface-hover": c.sidebar_bg,
-        "primary": c.primary,
-        "primary-hover": c.primary_dark,
-        "bg-codeblock": c.bg_codeblock,
-        "codeblock-border": c.codeblock_border,
-        "toc-bg": c.sidebar_bg,
-        "scrollbar-track": c.surface,
-        "scrollbar-thumb": c.border,
-        "scrollbar-thumb-hover": c.text_disabled,
+        "bg-card": v2_token(theme_engine, "surface_primary", "#FFFFFF"),
+        "text-primary": v2_token(theme_engine, "text_primary", "#212121"),
+        "text-secondary": v2_token(theme_engine, "text_secondary", "#757575"),
+        "text-muted": v2_token(theme_engine, "text_muted", "#BDBDBD"),
+        "border": v2_token(theme_engine, "border_muted", "#E0E0E0"),
+        "border-soft": v2_token(theme_engine, "border_muted", "#EEEEEE"),
+        "divider": v2_token(theme_engine, "border_muted", "#EEEEEE"),
+        "surface": v2_token(theme_engine, "surface_secondary", "#F5F5F5"),
+        "surface-soft": v2_token(theme_engine, "surface_secondary", "#F5F5F5"),
+        "surface-hover": v2_token(theme_engine, "surface_raised", "#FAFAFA"),
+        "primary": v2_token(theme_engine, "accent", "#2196F3"),
+        "primary-hover": v2_token(theme_engine, "focus", "#1976D2"),
+        "bg-codeblock": v2_color(theme_engine, "markdown", "code_block_bg", "#EDF3FA"),
+        "codeblock-border": v2_token(theme_engine, "border_muted", "#D8DEE9"),
+        "toc-bg": v2_token(theme_engine, "surface_secondary", "#FAFAFA"),
+        "scrollbar-track": v2_color(theme_engine, "scrollbar", "track", "#F5F5F5"),
+        "scrollbar-thumb": v2_color(theme_engine, "scrollbar", "handle", "#E0E0E0"),
+        "scrollbar-thumb-hover": v2_color(theme_engine, "scrollbar", "handle_hover", "#BDBDBD"),
     }
     lines = [":root {"]
     for k, v in vars_map.items():
@@ -594,8 +592,7 @@ class PreviewBrowser(QTextBrowser):
         self._copy_btn.setToolTip("复制到剪贴板")
         self._copy_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self._copy_btn.hide()
-        colors = theme_engine.get_active_theme().colors
-        self._apply_copy_btn_style(colors)
+        self._apply_copy_btn_style()
         self._copy_btn.clicked.connect(self._copy_current)
         self._copy_btn.installEventFilter(self)
 
@@ -606,19 +603,23 @@ class PreviewBrowser(QTextBrowser):
         self._hover_timer.timeout.connect(self._check_hover)
         self._mouse_pos = QPoint()
 
-    def _apply_copy_btn_style(self, colors) -> None:
-        """使用主题色更新浮动复制按钮样式。"""
+    def _apply_copy_btn_style(self) -> None:
+        """使用主题 token 更新浮动复制按钮样式（B2：纯 v2，无 v1 回退）。"""
+        btn_bg = v2_token(self._theme_engine, "surface_raised", "#FFFFFF")
+        btn_border = v2_token(self._theme_engine, "border_muted", "#E0E0E0")
+        btn_hover_bg = v2_token(self._theme_engine, "surface_secondary", "#F5F5F5")
+        btn_hover_border = v2_token(self._theme_engine, "text_muted", "#BDBDBD")
         self._copy_btn.setStyleSheet(
             f"QPushButton {{"
-            f"  background: {colors.card};"
-            f"  border: 1px solid {colors.border};"
+            f"  background: {btn_bg};"
+            f"  border: 1px solid {btn_border};"
             f"  border-radius: 3px;"
             f"  font-size: 12px;"
             f"  padding: 0;"
             f"}}"
             f"QPushButton:hover {{"
-            f"  background: {colors.surface};"
-            f"  border-color: {colors.text_disabled};"
+            f"  background: {btn_hover_bg};"
+            f"  border-color: {btn_hover_border};"
             f"}}"
         )
 
@@ -887,9 +888,9 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             self.config.set_view_setting("preview_width", sizes[1])
         self._schedule_resync()
 
-    def _apply_theme_colors(self, colors):
+    def _apply_theme_colors(self):
         if isinstance(self.preview, PreviewBrowser):
-            self.preview._apply_copy_btn_style(colors)
+            self.preview._apply_copy_btn_style()
         # 主题变更时清空 Document 级渲染缓存（高亮颜色/折叠样式依赖主题）
         clear_document_render_cache()
         # 主题变更时重建预览以应用新 CSS（重置标志让 _push_to_preview 走 setHtml 路径）
@@ -1016,11 +1017,18 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
                 page.runJavaScript(js)
         else:
             css_vars = _build_preview_css_vars(self._theme_engine)
+            # 滚动条尺寸与圆角：与 Qt 侧同一 scrollbar recipe（width/radius=w//2/margin）
+            sb_width = int(v2_style_value(self._theme_engine, "scrollbar", "width", 12))
+            sb_radius = sb_width // 2
+            sb_margin = int(v2_style_value(self._theme_engine, "scrollbar", "margin", 2))
             template = PREVIEW_HTML_TEMPLATE
             try:
                 full_html = template.format(
                     content=html_content,
                     layout_css=_MARKDOWN_LAYOUT_CSS,
+                    sb_width=sb_width,
+                    sb_radius=sb_radius,
+                    sb_margin=sb_margin,
                 ).replace(
                     "</style>", css_vars + "\n</style>", 1
                 )
@@ -1031,12 +1039,12 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
                     exc_info=True,
                 )
 
-                colors = self._theme_engine.get_active_theme().colors
-                fallback_bg = colors.background
-                fallback_text = colors.text_primary
-                fallback_code_bg = colors.bg_codeblock
-                fallback_border = colors.codeblock_border
-                fallback_link = colors.primary
+                # B2：模板格式失败时的降级 HTML（B8：字面量 = v1 light 值，无 v1 回退）
+                fallback_bg = "#FFFFFF"
+                fallback_text = "#212121"
+                fallback_code_bg = "#EDF3FA"
+                fallback_border = "#D8DEE9"
+                fallback_link = "#2196F3"
 
                 full_html = f"""<!DOCTYPE html>
 <html>
@@ -1086,7 +1094,8 @@ a {{
         # 同步当前折叠状态到预览
         self._sync_folds_to_preview()
 
-    def _create_md_parser(self):
+    @staticmethod
+    def _create_md_parser():
         if not HAS_MARKDOWN_IT:
             return None
         md = _MarkdownIt("commonmark", {"html": False})
@@ -1220,7 +1229,8 @@ a {{
 
     # ──────────── 折叠 section 包裹 ────────────
 
-    def _wrap_fold_sections(self, html: str, text: str) -> str:
+    @staticmethod
+    def _wrap_fold_sections(html: str, text: str) -> str:
         """在 Markdown 标题的 DOM 节点外包裹 <section data-fold-heading="N">。
 
         折叠区间计算与 FoldingManager 一致，确保编辑器和预览折叠对应。
@@ -1347,8 +1357,6 @@ a {{
             self._pending_async_task = None
 
         def _replace(m):
-            code_attrs = m.group("code_attrs") or ""
-            lang = _extract_language_from_code_attrs(code_attrs)
             raw = html_module.unescape(m.group("body"))
             if raw.endswith("\n"):
                 raw = raw[:-1]
@@ -1396,8 +1404,6 @@ a {{
         block_idx = [0]
 
         def _replace_sync(m):
-            code_attrs = m.group("code_attrs") or ""
-            lang = _extract_language_from_code_attrs(code_attrs)
             raw = html_module.unescape(m.group("body"))
             if raw.endswith("\n"):
                 raw = raw[:-1]
@@ -1480,7 +1486,8 @@ a {{
 
     # ──────────── 基础渲染（无 markdown 库回退） ────────────
 
-    def _basic_md_to_html(self, text: str) -> str:
+    @staticmethod
+    def _basic_md_to_html(text: str) -> str:
         lines = text.split('\n')
         html_lines = []
         in_code = False
@@ -1518,7 +1525,7 @@ a {{
                 p = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', p)
                 p = re.sub(r'\*(.+?)\*', r'<em>\1</em>', p)
                 p = re.sub(r'`(.+?)`', r'<code>\1</code>', p)
-                p = re.sub(r'\[(.+?)\]\((.+?)\)', r'<a href="\2">\1</a>', p)
+                p = re.sub(r'\[(.+?)]\((.+?)\)', r'<a href="\2">\1</a>', p)
                 html_lines.append(f'<p>{p}</p>')
             else:
                 html_lines.append('<br>')
@@ -1539,8 +1546,7 @@ a {{
         ed = self.editor
         bar = ed.verticalScrollBar()
         at_top = bar is None or bar.value() <= bar.minimum()
-        at_bottom = (bar is not None and bar.maximum() > 0
-                     and bar.value() >= bar.maximum())
+        at_bottom = (bar is not None and 0 < bar.maximum() <= bar.value())
 
         frac_line = 1.0
         try:
@@ -1579,7 +1585,7 @@ a {{
         bar = self.editor.verticalScrollBar()
         at_edge = bar is not None and (
             bar.value() <= bar.minimum()
-            or (bar.maximum() > 0 and bar.value() >= bar.maximum())
+            or (0 < bar.maximum() <= bar.value())
         )
 
         # 带后沿的节流：50ms 内最多一次 leading 同步，避免高频 runJavaScript；
@@ -1665,7 +1671,8 @@ a {{
             return
         self._scroll_editor_to_line(frac_line)
 
-    def _open_external_link(self, url: str) -> None:
+    @staticmethod
+    def _open_external_link(url: str) -> None:
         """预览链接点击 → 系统外部浏览器打开（与 QTextBrowser 回退路径一致）。"""
         if not url:
             return

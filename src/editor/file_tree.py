@@ -6,7 +6,7 @@
 v1.5.4 改动：
   - 支持接受标签拖拽：将文件移动到文件树中的目标文件夹
 v1.6.4 改动：
-  - 主题感知：订阅 theme_changed 信号
+  - 主题感知：订阅 theme_committed 信号（v2 manager）
 """
 
 import os
@@ -14,16 +14,17 @@ from typing import Optional
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QTreeView, QLabel, QMenu,
     QInputDialog, QMessageBox,
-    QHeaderView, QFrame, QScrollArea, QStyledItemDelegate, QAbstractItemView
+    QFrame, QAbstractItemView
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QDir, QModelIndex, QMimeData, QSortFilterProxyModel, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal, QModelIndex, QMimeData, QTimer
 from PyQt6.QtGui import QFont, QAction, QFileSystemModel
 
 from ..core.config import Config
 from ..utils.logger import get_logger
 from ..utils.error_handler import ErrorHandler, ErrorCategory
-from ..security.input_validator import InputValidator, FilenameValidationError
+from ..security.input_validator import FilenameValidationError
 from ..themes.theme_aware_mixin import ThemeAwareMixin
+from ..themes.theme_v2.consumer import v2_token
 
 
 MIME_TAB_FILEPATH = "application/x-panzernote-tab-filepath"
@@ -69,6 +70,9 @@ class DroppableTreeView(QTreeView):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAcceptDrops(True)
+        # B6（8.1 拖拽视觉）：显示拖拽落点指示线（颜色由全局 tree_item
+        # recipe 的 drop_indicator 控制）
+        self.setDropIndicatorShown(True)
 
     def _ask_move_or_copy(self, filename: str, dest_folder: str) -> Optional[str]:
         """询问用户移动还是复制文件。返回 "move" / "copy" / None（取消）。"""
@@ -107,7 +111,8 @@ class DroppableTreeView(QTreeView):
                 self.setCurrentIndex(QModelIndex())
         super().mousePressEvent(event)
 
-    def _is_tab_drag(self, mime: QMimeData) -> bool:
+    @staticmethod
+    def _is_tab_drag(mime: QMimeData) -> bool:
         """标签拖拽：已保存文件（MIME_TAB_FILEPATH）或未命名标签（MIME_TAB_ID）。"""
         return mime.hasFormat(MIME_TAB_FILEPATH) or mime.hasFormat(MIME_TAB_ID)
 
@@ -285,43 +290,36 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
         self.external_container.hide()
         layout.addWidget(self.external_container)
 
-    def _apply_theme_colors(self, colors):
+    def _apply_theme_colors(self):
+        # B4：文件树消费 v2 token（侧栏 = surface_secondary，标题栏 = surface_primary），
+        # 无 v1 回退（B8：字面量 = v1 light 值）
+        sidebar_bg = v2_token(self._theme_engine, "surface_secondary", "#FAFAFA")
+        surface = v2_token(self._theme_engine, "surface_primary", "#F5F5F5")
+        border = v2_token(self._theme_engine, "border_muted", "#E0E0E0")
+        text_primary = v2_token(self._theme_engine, "text_primary", "#212121")
+
         self.setStyleSheet(f"""
-            QWidget {{
-                background-color: {colors.sidebar_bg};
+            QWidget#FileTreeWidget {{
+                background-color: {sidebar_bg};
             }}
         """)
         self._title_frame.setStyleSheet(f"""
             QFrame {{
-                background-color: {colors.surface};
-                border-bottom: 1px solid {colors.border};
+                background-color: {surface};
+                border-bottom: 1px solid {border};
             }}
         """)
-        self.tree_view.setStyleSheet(f"""
-            QTreeView {{
-                border: none;
-                background-color: {colors.sidebar_bg};
-            }}
-            QTreeView::item {{
-                padding: 5px;
-            }}
-            QTreeView::item:hover {{
-                background-color: {colors.primary_light};
-            }}
-            QTreeView::item:selected {{
-                background-color: {colors.editor_selection};
-                color: {colors.text_primary};
-            }}
-        """)
+        # B4：QTreeView 由全局 tree_item recipe 驱动（v2）/ 全局 v1 QSS（回退），
+        # 不再在页面内打补丁（B3 契约 8.1）
         self.external_title.setStyleSheet(f"""
             QLabel {{
                 padding: 8px 10px;
-                background-color: {colors.surface};
-                border-bottom: 1px solid {colors.border};
-                color: {colors.text_primary};
+                background-color: {surface};
+                border-bottom: 1px solid {border};
+                color: {text_primary};
             }}
         """)
-        self.external_list.setStyleSheet(f"background-color: {colors.sidebar_bg};")
+        self.external_list.setStyleSheet(f"background-color: {sidebar_bg};")
 
     def _on_file_move_requested(self, src_filepath: str, dest_folder: str):
         self.file_move_requested.emit(src_filepath, dest_folder)
@@ -472,7 +470,7 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
         msg_box.setIcon(QMessageBox.Icon.Question)
 
         yes_btn = msg_box.addButton("确定", QMessageBox.ButtonRole.AcceptRole)
-        no_btn = msg_box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+        msg_box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
 
         msg_box.exec()
 

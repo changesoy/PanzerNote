@@ -27,7 +27,7 @@ from typing import Any, Callable, Dict, List, Optional, Type, cast
 
 from ..utils.logger import get_logger
 from .capability_registry import CapabilityRegistry
-from .plugin_base import PluginBase, PluginMeta, PluginPermission, PluginState
+from .plugin_base import PluginBase, PluginState
 from .plugin_context import PluginContext
 
 
@@ -328,7 +328,8 @@ class PluginManager:
             return "SAFE_MODE"
         return PluginState.UNLOADED.name
 
-    def _load_manifest(self, manifest_path: str) -> Dict:
+    @staticmethod
+    def _load_manifest(manifest_path: str) -> Dict:
         with open(manifest_path, 'r', encoding='utf-8') as fh:
             return cast(Dict[str, Any], json.load(fh))
 

@@ -8,15 +8,15 @@ v1.5.4 新增
 
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLineEdit,
-    QPushButton, QLabel, QCheckBox, QToolButton, QSizePolicy
+    QPushButton, QLabel, QCheckBox, QToolButton
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import (
     QColor, QTextCursor
 )
 
 from ..themes.theme_aware_mixin import ThemeAwareMixin
-from ..utils.logger import get_logger
+from ..themes.theme_v2.consumer import v2_color, v2_token
 from .search_service import SearchService
 
 
@@ -38,12 +38,6 @@ class FindReplaceBar(ThemeAwareMixin, QWidget):
         self._matches = []
         self._current_idx = -1
         self._replace_visible = False
-
-        # 高亮颜色从主题 token 取值（由 _apply_theme_colors 按主题更新）
-        colors = theme_engine.get_active_theme().colors
-        self._match_bg = QColor(colors.search_match_bg)
-        self._current_bg = QColor(colors.search_current_bg)
-        self._current_fg = QColor(colors.search_current_fg)
 
         self._init_ui()
         self._connect_signals()
@@ -299,49 +293,41 @@ class FindReplaceBar(ThemeAwareMixin, QWidget):
         self._update_match_label()
         self._apply_highlights()
 
-    def _apply_theme_colors(self, colors):
+    def _apply_theme_colors(self):
+        # B2：查找栏消费 v2 语义 token + search recipe（无 v1 回退，B8：字面量 = v1 light 值）
+        # 补漏 C：删除子控件局部美化（QLineEdit/QPushButton/QCheckBox/QLabel 由全局 recipe
+        # 驱动）；仅保留容器背景、关闭按钮（QToolButton 无全局样式）与 search recipe 高亮。
+        bar_bg = v2_token(self._theme_engine, "surface_secondary", "#F5F5F5")
+        border = v2_token(self._theme_engine, "border_muted", "#E0E0E0")
+        text_secondary = v2_token(self._theme_engine, "text_secondary", "#757575")
+        hover_bg = v2_token(self._theme_engine, "border_muted", "#E0E0E0")
+
         self.setStyleSheet(f"""
             FindReplaceBar {{
-                background-color: {colors.surface};
-                border-bottom: 1px solid {colors.border};
+                background-color: {bar_bg};
+                border-bottom: 1px solid {border};
             }}
-            QLineEdit {{
-                padding: 3px 6px;
-                border: 1px solid {colors.border};
-                border-radius: 3px;
-                background: {colors.card};
-                color: {colors.text_primary};
-                font-size: 12px;
+            QToolButton {{
+                background: transparent;
+                border: none;
+                color: {text_secondary};
             }}
-            QLineEdit:focus {{ border-color: {colors.focus_border}; }}
-            QPushButton, QToolButton {{
-                padding: 3px 8px;
-                border: 1px solid {colors.border};
-                border-radius: 3px;
-                background: {colors.card};
-                color: {colors.text_primary};
-                font-size: 12px;
-            }}
-            QPushButton:hover, QToolButton:hover {{ background: {colors.primary_light}; }}
-            QPushButton:pressed, QToolButton:pressed {{ background: {colors.border}; }}
-            QCheckBox {{ font-size: 12px; margin-left: 4px; color: {colors.text_primary}; }}
-            QLabel {{ font-size: 12px; color: {colors.text_primary}; }}
+            QToolButton:hover {{ background: {hover_bg}; }}
         """)
         self._update_match_label()
-        # 高亮颜色从主题 token 取值
-        self._match_bg = QColor(colors.search_match_bg)
-        self._current_bg = QColor(colors.search_current_bg)
-        self._current_fg = QColor(colors.search_current_fg)
+        # 高亮颜色：v2 search recipe（无 v1 回退，B8：字面量 = v1 light 值）
+        self._match_bg = QColor(v2_color(self._theme_engine, "search", "match_bg", "#FFEE58"))
+        self._current_bg = QColor(v2_color(self._theme_engine, "search", "current_bg", "#FF9800"))
+        self._current_fg = QColor(v2_color(self._theme_engine, "search", "current_fg", "#FFFFFF"))
         if self._matches and self.isVisible():
             self._apply_highlights()
 
     def _update_match_label(self):
         """更新匹配计数标签"""
         total = len(self._matches)
-        colors = self._theme_engine.get_active_theme().colors
-        error_color = colors.error
-        text_color = colors.text_secondary
-        match_border = colors.search_match_bg
+        error_color = v2_token(self._theme_engine, "danger", "#F44336")
+        text_color = v2_token(self._theme_engine, "text_secondary", "#757575")
+        match_border = v2_color(self._theme_engine, "search", "match_bg", "#FFEE58")
         if total == 0:
             query = self.search_input.text()
             if query:
@@ -359,7 +345,7 @@ class FindReplaceBar(ThemeAwareMixin, QWidget):
             self.match_label.setText(f"第 {idx}/{total} 个匹配")
             self.match_label.setStyleSheet(f"color: {text_color};")
             self.search_input.setStyleSheet(
-                f"QLineEdit {{ border: 1px solid {match_border}; border-radius: 3px; }}"
+                f"QLineEdit {{ border: 1px solid {match_border}; }}"
             )
 
     # ────────────────── 高亮管理 ──────────────────

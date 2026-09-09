@@ -19,7 +19,6 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
-from ..themes.theme_engine import ThemeEngine
 from ..utils.dpi_helper import scale
 
 
@@ -34,21 +33,19 @@ class UnsavedChoice:
 class UnsavedFilesDialog(QDialog):
     """统一「未保存文件确认」对话框（3.5.7）。
 
-    用法：`UnsavedFilesDialog.ask(parent, theme_engine, titles, ...)` 返回
+    用法：`UnsavedFilesDialog.ask(parent, titles, ...)` 返回
     UnsavedChoice.SAVE / DISCARD / CANCEL。
     """
 
     def __init__(
         self,
         parent,
-        theme_engine: ThemeEngine,
         titles: List[str],
         *,
         show_cancel: bool = False,
         window_title: str = "有未保存的文件",
     ) -> None:
         super().__init__(parent)
-        self._theme_engine = theme_engine
         self._titles = list(titles)
         self._choice = UnsavedChoice.CANCEL
         self._cancel_handled = False
@@ -89,13 +86,8 @@ class UnsavedFilesDialog(QDialog):
         # 叉号 / ESC 触发 QDialog.rejected → 统一走 _on_cancel（内部防重入）
         self.rejected.connect(self._on_cancel)
 
-        colors = self._theme_engine.get_active_theme().colors
-        self._list.setStyleSheet(
-            f"QListWidget {{ background-color: {colors.card};"
-            f" color: {colors.text_primary};"
-            f" border: 1px solid {colors.border};"
-            f" border-radius: 4px; }}"
-        )
+        # B5：QDialog 背景由全局 dialog recipe 驱动，QListWidget 由全局
+        # tree_item recipe 驱动，页面不再打局部样式补丁。
 
     def choice(self) -> str:
         """返回 UnsavedChoice.SAVE / DISCARD / CANCEL。"""
@@ -123,7 +115,6 @@ class UnsavedFilesDialog(QDialog):
     @staticmethod
     def ask(
         parent,
-        theme_engine: ThemeEngine,
         titles: List[str],
         *,
         show_cancel: bool = False,
@@ -132,7 +123,6 @@ class UnsavedFilesDialog(QDialog):
         """模态询问，返回 UnsavedChoice.SAVE / DISCARD / CANCEL。"""
         dlg = UnsavedFilesDialog(
             parent,
-            theme_engine,
             titles,
             show_cancel=show_cancel,
             window_title=window_title,

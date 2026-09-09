@@ -10,6 +10,7 @@ from typing import Optional
 from PyQt6.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor, QFont, QTextDocument
 
 from ..utils.logger import get_logger
+from ..themes.theme_v2.consumer import v2_color
 
 try:
     from pygments.lexers import get_lexer_for_filename, get_lexer_by_name
@@ -18,7 +19,48 @@ try:
 except ImportError:
     HAS_PYGMENTS = False
 
-from .highlight_themes import get_editor_formats, build_format
+from .highlight_themes import get_editor_formats
+
+
+# md_* v1 token → v2 markdown recipe style 键映射（B2）
+_MD_STYLE_MAP = {
+    "h1_fg": "heading",
+    "h2_fg": "heading",
+    "h3_fg": "heading",
+    "h456_fg": "heading",
+    "bold_fg": "bold",
+    "italic_fg": "italic",
+    "code_fg": "code",
+    "code_bg": "code_bg",
+    "link_fg": "link",
+    "image_fg": "image",
+    "list_fg": "list",
+    "quote_fg": "quote",
+    "hr_fg": "hr",
+    "fence_fg": "fence",
+    "code_block_fg": "code_block_text",
+    "code_block_bg": "code_block_bg",
+}
+
+# B2：v2 recipe 不可用时的字面量 fallback（= v1 light md_* 值），无 v1 对象回退
+_MD_FALLBACK = {
+    "h1_fg": "#000000",
+    "h2_fg": "#000000",
+    "h3_fg": "#000000",
+    "h456_fg": "#2b2b2b",
+    "bold_fg": "#2b2b2b",
+    "italic_fg": "#2b2b2b",
+    "code_fg": "#008000",
+    "code_bg": "#f2f2f2",
+    "link_fg": "#2470B3",
+    "image_fg": "#6A1B9A",
+    "list_fg": "#2b2b2b",
+    "quote_fg": "#808080",
+    "hr_fg": "#AAAAAA",
+    "fence_fg": "#808080",
+    "code_block_fg": "#2b2b2b",
+    "code_block_bg": "#f5f5f5",
+}
 
 
 # ════════════════════════════════════════════════════════
@@ -98,13 +140,14 @@ class MarkdownHighlighter(QSyntaxHighlighter):
 
     def _init_formats(self, is_dark: bool):
         """初始化所有格式"""
-        theme_colors = self._theme_engine.get_active_theme().colors
-
         def get_color(key: str) -> str:
-            token_key = f"md_{key}"
-            if hasattr(theme_colors, token_key):
-                return str(getattr(theme_colors, token_key))
-            return "#000000"
+            # B2：md_* → v2 markdown recipe（token 引用），无 v1 回退
+            style_key = _MD_STYLE_MAP.get(key)
+            if style_key:
+                color = v2_color(self._theme_engine, "markdown", style_key)
+                if color:
+                    return color
+            return _MD_FALLBACK.get(key, "#000000")
 
         self.inline_rules = []
 
@@ -153,11 +196,11 @@ class MarkdownHighlighter(QSyntaxHighlighter):
         link_fmt = QTextCharFormat()
         link_fmt.setForeground(QColor(get_color("link_fg")))
         link_fmt.setFontUnderline(True)
-        self.inline_rules.append((re.compile(r'\[([^\]]+)\]\([^\)]+\)'), link_fmt))
+        self.inline_rules.append((re.compile(r'\[([^\]]+)]\([^)]+\)'), link_fmt))
 
         img_fmt = QTextCharFormat()
         img_fmt.setForeground(QColor(get_color("image_fg")))
-        self.inline_rules.append((re.compile(r'!\[([^\]]*)\]\([^\)]+\)'), img_fmt))
+        self.inline_rules.append((re.compile(r'!\[([^\]]*)]\([^)]+\)'), img_fmt))
 
         list_fmt = QTextCharFormat()
         list_fmt.setForeground(QColor(get_color("list_fg")))
@@ -248,7 +291,6 @@ def get_highlighter_for_file(document: QTextDocument, filepath_or_ext: str,
     Args:
         document: QTextDocument
         filepath_or_ext: 文件路径或扩展名
-        theme_name: 主题名称（None 使用默认）
         is_dark: 是否为暗色主题
         theme_engine: ThemeEngine 实例，用于 Markdown 高亮主题 token 取值
     Returns:

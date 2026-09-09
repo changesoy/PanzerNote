@@ -12,10 +12,7 @@
 关闭时行为：QWebEngineView 通过 printToPdf 回调完成后 deleteLater 自动清理
 """
 
-import os
-
 from ..security.file_access_context import FileAccessContext
-from ..utils.logger import get_logger
 from .secure_markdown_renderer import (
     render_markdown_to_safe_html,
     render_plain_text_to_safe_html,
@@ -79,7 +76,7 @@ class ExportService:
           content：原始文本
           is_markdown：是否按 Markdown 渲染
           filepath：导出文件路径
-          colors：ThemeColorScheme 实例，提供主题色值
+          colors：v2_export_colors 产物（dict），提供主题色值
           title：文档标题
           file_guard：FileGuard 实例（必填），写入经 safe_write_bytes 安全执行
 
@@ -104,7 +101,7 @@ class ExportService:
           is_markdown：是否按 Markdown 渲染
           parent_widget：父 widget（用于 QWebEngineView 的 parent）
           on_pdf_generated：回调函数 (pdf_data: bytes, filepath: str) -> None
-          colors：ThemeColorScheme 实例，提供主题色值
+          colors：v2_export_colors 产物（dict），提供主题色值
           title：文档标题
 
         返回：QWebEngineView 实例（调用方不应持有，由内部自动清理）

@@ -7,15 +7,16 @@
     编辑器：  get_editor_formats(theme_engine) → {Token: QTextCharFormat}
     预览CSS： get_preview_css(theme_engine)     → str (注入到 HTML <style>)
 
-颜色值统一由 ThemeEngine 的 ThemeColorScheme 管理。
+颜色值统一由 ThemeEngine 的 v2 syntax palette 管理。
 Token → syntax_* 映射、bold/italic 装饰在此定义。
 """
 
-from typing import Optional, cast
+from typing import cast
 
 from PyQt6.QtGui import QTextCharFormat, QColor, QFont
 
 from ..utils.logger import get_logger
+from ..themes.theme_v2.consumer import v2_syntax_colors
 
 try:
     from pygments.token import Token
@@ -28,7 +29,7 @@ except ImportError:
 
 # ════════════════════════════════════════════════════════
 #  Token → syntax_* 映射表
-#  所有 Pygments Token 到 ThemeColorScheme 语义 token 属性的映射
+#  所有 Pygments Token 到 syntax_* token 的映射
 # ════════════════════════════════════════════════════════
 
 if HAS_PYGMENTS:
@@ -160,6 +161,12 @@ else:
 #  公开接口
 # ════════════════════════════════════════════════════════
 
+def _color_map(theme_engine) -> dict:
+    """构建 {Token: color} 映射（B2：纯 v2 syntax palette，无 v1 回退）。"""
+    v2_colors = v2_syntax_colors(theme_engine)
+    return {token: v2_colors.get(name) for token, name in TOKEN_MAP.items() if name in v2_colors}
+
+
 def build_format(style: dict) -> QTextCharFormat:
     """从样式字典构建 QTextCharFormat"""
     fmt = QTextCharFormat()
@@ -174,12 +181,11 @@ def build_format(style: dict) -> QTextCharFormat:
     return fmt
 
 
-def _build_format_from_token(token, colors) -> QTextCharFormat:
-    """从主题 colors + TOKEN_MAP 构建单个 Token 的 QTextCharFormat"""
-    attr_name = TOKEN_MAP.get(token)
-    if attr_name is None:
+def _build_format_from_token(token, color_map) -> QTextCharFormat:
+    """从 color_map 构建单个 Token 的 QTextCharFormat"""
+    color = color_map.get(token)
+    if color is None:
         return QTextCharFormat()
-    color = getattr(colors, attr_name)
     fmt = QTextCharFormat()
     fmt.setForeground(QColor(color))
     if token in _TOKEN_BOLD:
@@ -203,20 +209,19 @@ def get_editor_formats(theme_engine):
     """
     if not HAS_PYGMENTS:
         return {}
-    colors = theme_engine.get_active_theme().colors
-    return {token: _build_format_from_token(token, colors) for token in TOKEN_MAP}
+    color_map = _color_map(theme_engine)
+    return {token: _build_format_from_token(token, color_map) for token in TOKEN_MAP}
 
 
 # ════════════════════════════════════════════════════════
 #  预览用：CSS
 # ════════════════════════════════════════════════════════
 
-def _style_to_pygments_str(token, colors) -> str:
-    """从主题 colors 构建单个 Token 的 Pygments style 字符串"""
-    attr_name = TOKEN_MAP.get(token)
-    if attr_name is None:
+def _style_to_pygments_str(token, color_map) -> str:
+    """从 color_map 构建单个 Token 的 Pygments style 字符串"""
+    color = color_map.get(token)
+    if color is None:
         return ""
-    color = getattr(colors, attr_name)
     parts = []
     if token in _TOKEN_BOLD:
         parts.append("bold")
@@ -237,10 +242,10 @@ def get_preview_css(theme_engine, css_class="codehilite"):
     """
     if not HAS_PYGMENTS:
         return ""
-    colors = theme_engine.get_active_theme().colors
+    color_map = _color_map(theme_engine)
     pygments_styles = {}
     for token in TOKEN_MAP:
-        s = _style_to_pygments_str(token, colors)
+        s = _style_to_pygments_str(token, color_map)
         if s:
             pygments_styles[token] = s
     if not pygments_styles:
@@ -265,10 +270,10 @@ def _get_pygments_style_class(theme_engine):
     """
     if not HAS_PYGMENTS:
         return None
-    colors = theme_engine.get_active_theme().colors
+    color_map = _color_map(theme_engine)
     pygments_styles = {}
     for token in TOKEN_MAP:
-        s = _style_to_pygments_str(token, colors)
+        s = _style_to_pygments_str(token, color_map)
         if s:
             pygments_styles[token] = s
     if not pygments_styles:

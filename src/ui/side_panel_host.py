@@ -6,7 +6,6 @@ from __future__ import annotations
 from typing import Dict
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QSizePolicy,
     QStackedWidget,
@@ -16,6 +15,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.themes.theme_aware_mixin import ThemeAwareMixin
+from src.themes.theme_v2.consumer import v2_design_value, v2_token
 
 
 class SidePanelHost(ThemeAwareMixin, QWidget):
@@ -36,7 +36,7 @@ class SidePanelHost(ThemeAwareMixin, QWidget):
         self._buttons: Dict[str, QToolButton] = {}
         self._current_panel_id: str | None = None
         self._last_width: int = 200
-        self._last_colors = None
+        self._theme_applied = False
 
         self._init_theme(theme_engine)
 
@@ -102,7 +102,7 @@ class SidePanelHost(ThemeAwareMixin, QWidget):
         # 添加到栈
         self._stack.addWidget(panel)
 
-        if self._last_colors is not None:
+        if self._theme_applied:
             self._style_button(btn)
 
     def switch_to(self, panel_id: str) -> None:
@@ -177,12 +177,11 @@ class SidePanelHost(ThemeAwareMixin, QWidget):
     # 主题
     # ------------------------------------------------------------------
 
-    def _apply_theme_colors(self, colors) -> None:
-        self._last_colors = colors
-        bg = colors.sidebar_bg
-        border = colors.border
-        accent = colors.accent
-        surface = colors.surface
+    def _apply_theme_colors(self) -> None:
+        self._theme_applied = True
+        # B4：侧栏消费 v2 token（侧栏/活动栏 = surface_secondary），无 v1 回退
+        bg = v2_token(self._theme_engine, "surface_secondary", "#FAFAFA")
+        border = v2_token(self._theme_engine, "border_muted", "#E0E0E0")
 
         self.setStyleSheet(f"""
             #side_panel_host {{
@@ -190,7 +189,7 @@ class SidePanelHost(ThemeAwareMixin, QWidget):
                 border-left: 1px solid {border};
             }}
             #activity_bar {{
-                background-color: {surface};
+                background-color: {bg};
                 border-right: 1px solid {border};
             }}
             #panel_stack {{
@@ -203,13 +202,16 @@ class SidePanelHost(ThemeAwareMixin, QWidget):
 
     def _style_button(self, btn: QToolButton) -> None:
         """给单个按钮设样式。"""
-        c = self._last_colors
-        if c is None:
+        if not self._theme_applied:
             return
-        text = c.text_primary
-        border = c.border
-        accent = c.accent
-        accent_fg = c.accent_fg
+        text = v2_token(self._theme_engine, "text_primary", "#212121")
+        border = v2_token(self._theme_engine, "border_muted", "#E0E0E0")
+        accent = v2_token(self._theme_engine, "accent", "#2196F3")
+        on_accent = v2_token(self._theme_engine, "on_accent", "#FFFFFF")
+        pressed_bg = v2_token(self._theme_engine, "border_strong", "#BDBDBD")
+        # 补漏 C：radius 走 design.json（radius_sm），font-size 为活动栏专属尺度保留；
+        # B9 P2-4：补 pressed 态（按下变深，比 hover 更明确）
+        radius = v2_design_value(self._theme_engine, "radius", "radius_sm", 3)
         btn.setStyleSheet(f"""
             QToolButton {{
                 background: transparent;
@@ -217,16 +219,20 @@ class SidePanelHost(ThemeAwareMixin, QWidget):
                 color: {text};
                 font-size: 13px;
                 font-weight: bold;
-                border-radius: 4px;
+                border-radius: {radius}px;
             }}
             QToolButton:hover {{
                 background-color: {border};
                 border-color: {border};
             }}
+            QToolButton:pressed {{
+                background-color: {pressed_bg};
+                border-color: {pressed_bg};
+            }}
             QToolButton:checked {{
                 background-color: {accent};
                 border-color: {accent};
-                color: {accent_fg};
+                color: {on_accent};
             }}
         """)
 

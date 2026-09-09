@@ -1,50 +1,104 @@
 # -*- coding: utf-8 -*-
-"""
-Windows 原生窗口标题栏主题辅助。
+"""Window Chrome 能力层（Wave 8 B1）。
 
-只处理非客户区标题栏颜色，不处理 Qt 内容区 QSS。
+由 `bool is_dark` 升级为 `WindowChromeProfile(mode, appearance)`：
+backend fail softly → fallback OS native default → 记录 diagnostic（不静默吞错）。
+
+降级链：C2 → C1（若支持）→ C0；C1 → C0；C0 customization failure → OS native default。
+themed opaque 不是通用 fallback（仅未来 Aero profile 的视觉 fallback）。
+
+对外保留 `apply_native_dark_titlebar` / `install_native_titlebar_theme_filter` 兼容入口，
+内部统一走 WindowChromeManager。
 """
 
 from __future__ import annotations
 
 import sys
-import ctypes
-from ctypes import wintypes
 from typing import Callable, Optional
 
-from PyQt6.QtCore import QObject, QEvent, QTimer, Qt
+from PyQt6.QtCore import QEvent, QObject, QTimer, Qt
 from PyQt6.QtWidgets import QApplication, QWidget
+
+from ..utils.logger import get_logger
+from ..platform import (
+    ChromeAppearance,
+    ChromeApplyResult,
+    ChromeCapability,
+    ChromeMode,
+    ChromeStatus,
+    WindowChromeBackend,
+    WindowChromeProfile,
+)
+
+__all__ = [
+    "ChromeAppearance",
+    "ChromeApplyResult",
+    "ChromeCapability",
+    "ChromeMode",
+    "ChromeStatus",
+    "WindowChromeProfile",
+    "WindowChromeManager",
+    "apply_native_dark_titlebar",
+    "install_native_titlebar_theme_filter",
+]
+
+
+class WindowChromeManager:
+    """Window Chrome 能力层入口：按 mode 选择平台 backend，记录降级诊断。"""
+
+    def __init__(self) -> None:
+        self._logger = get_logger(__name__)
+        self._backends: dict[ChromeMode, WindowChromeBackend] = {}
+        if sys.platform == "win32":
+            from ..platform.windows.window_chrome import WindowsChromeBackend
+
+            self._backends[ChromeMode.NATIVE] = WindowsChromeBackend()
+
+    def apply(self, widget: QWidget | None, profile: WindowChromeProfile) -> ChromeApplyResult:
+        backend = self._backends.get(profile.mode)
+        if backend is None:
+            result = ChromeApplyResult(
+                ChromeCapability.C0,
+                ChromeStatus.FALLBACK,
+                f"mode {profile.mode.value} 无可用 backend",
+            )
+        else:
+            try:
+                result = backend.apply(widget, profile)
+            except Exception as exc:  # backend 自身不应抛异常，防御性兜底
+                result = ChromeApplyResult(
+                    ChromeCapability.C0, ChromeStatus.FAILED, f"backend 异常: {exc}"
+                )
+
+        if result.status is not ChromeStatus.APPLIED:
+            self._logger.warning(
+                "Window Chrome 未应用（%s）: %s", profile.mode.value, result.reason
+            )
+        return result
+
+
+_manager: WindowChromeManager | None = None
+
+
+def _get_manager() -> WindowChromeManager:
+    global _manager
+    if _manager is None:
+        _manager = WindowChromeManager()
+    return _manager
 
 
 def apply_native_dark_titlebar(widget: QWidget | None, is_dark: bool) -> None:
-    """在 Windows 上为一个顶层窗口设置原生标题栏深/浅色。
+    """在 Windows 上为一个顶层窗口设置原生标题栏深/浅色（兼容入口）。
 
-    非 Windows、无效窗口、无 hwnd、DWM 调用失败时静默返回。
+    非 Windows、无效窗口、无 hwnd、DWM 调用失败时走降级链并记录 diagnostic。
     """
     if sys.platform != "win32" or widget is None:
         return
-
-    try:
-        hwnd = int(widget.winId())
-        if hwnd == 0:
-            return
-
-        value = ctypes.c_int(1 if is_dark else 0)
-
-        # Windows 11 官方值通常是 20；部分 Windows 10 构建需要 19。
-        # 先试 20，再 fallback 19。
-        for attr in (20, 19):
-            result = ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                wintypes.HWND(hwnd),
-                wintypes.DWORD(attr),
-                ctypes.byref(value),
-                ctypes.sizeof(value),
-            )
-            if result == 0:
-                break
-    except Exception:
-        # 这里必须静默，不能让主题修复影响应用启动/弹窗显示。
-        return
+    profile = WindowChromeProfile(
+        mode=ChromeMode.NATIVE,
+        appearance=ChromeAppearance.DARK if is_dark else ChromeAppearance.LIGHT,
+    )
+    _get_manager().apply(widget, profile)
 
 
 class NativeTitleBarThemeFilter(QObject):

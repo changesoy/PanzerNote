@@ -52,23 +52,23 @@ def find_matching_bracket(
       text="hello"，cursor_pos=0 → (None, None)
     """
     if not text or cursor_pos < 0 or cursor_pos > len(text):
-        return (None, None)
+        return None, None
 
     # 优先检查光标前一字符
     if cursor_pos > 0:
         char_before = text[cursor_pos - 1]
         if char_before in BRACKET_PAIRS or char_before in _CLOSE_TO_OPEN:
             match = _try_match(text, cursor_pos - 1, char_before)
-            return (cursor_pos - 1, match)
+            return cursor_pos - 1, match
 
     # 再检查光标后一字符
     if cursor_pos < len(text):
         char_after = text[cursor_pos]
         if char_after in BRACKET_PAIRS or char_after in _CLOSE_TO_OPEN:
             match = _try_match(text, cursor_pos, char_after)
-            return (cursor_pos, match)
+            return cursor_pos, match
 
-    return (None, None)
+    return None, None
 
 
 def _try_match(text: str, bracket_pos: int, char: str) -> Optional[int]:

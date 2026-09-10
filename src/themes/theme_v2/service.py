@@ -186,9 +186,15 @@ class ThemeV2Service(QObject):
             return value
         return None
 
-    def syntax_colors(self) -> Mapping[SyntaxTokenKey, ColorValue]:
-        """合并 palette + override 后的完整 syntax 配色（空 dict 表示不可用）。"""
-        variant = self.variant_snapshot()
+    def syntax_colors(
+        self, variant_id: str | None = None
+    ) -> Mapping[SyntaxTokenKey, ColorValue]:
+        """合并 palette + override 后的完整 syntax 配色（空 dict 表示不可用）。
+
+        variant_id 指定要解析的主题变体；None 时取当前激活变体。
+        导出等需要固定明暗的场景可显式传入（如 light）。
+        """
+        variant = self.variant_snapshot(variant_id)
         if variant is None:
             return {}
         palette = self._palettes.get(variant.syntax.palette)

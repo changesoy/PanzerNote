@@ -13,7 +13,11 @@
 """
 
 from ..security.file_access_context import FileAccessContext
+from ..themes.theme_engine import ThemeEngine
+from ..themes.theme_v2.consumer import v2_export_variant_id
+from .highlight_themes import highlight_code_html
 from .secure_markdown_renderer import (
+    CodeHighlighter,
     render_markdown_to_safe_html,
     render_plain_text_to_safe_html,
     build_export_html_document,
@@ -35,6 +39,23 @@ class ExportService:
     """
 
     @staticmethod
+    def _code_highlighter(theme_engine: ThemeEngine | None) -> CodeHighlighter | None:
+        """导出用代码高亮器：固定亮色变体的 syntax 配色。
+
+        导出文档打印在白底上，深色主题的语法配色会糊在白底里，故与导出配色
+        一致地取 light 变体。theme_engine 为 None 时返回 None（代码块退化为
+        纯文本，不抛出）。
+        """
+        if theme_engine is None:
+            return None
+        variant_id = v2_export_variant_id(theme_engine)
+
+        def _highlight(code: str, language: str) -> str:
+            return highlight_code_html(code, language, theme_engine, variant_id)
+
+        return _highlight
+
+    @staticmethod
     def is_markdown_content(content: str, widget_type_name: str = "") -> bool:
         """判断内容是否应按 Markdown 渲染
 
@@ -49,22 +70,28 @@ class ExportService:
         return False
 
     @staticmethod
-    def render_content(content: str, is_markdown: bool) -> str:
+    def render_content(content: str, is_markdown: bool,
+                       theme_engine: ThemeEngine | None = None) -> str:
         """渲染内容为安全的 HTML 片段
 
         参数：
           content：原始文本
           is_markdown：是否按 Markdown 渲染
+          theme_engine：主题引擎（提供时对 fenced code 做语法高亮，
+            与预览同源、固定亮色变体配色）
 
         返回：安全的 HTML 片段
         """
         if is_markdown:
-            return render_markdown_to_safe_html(content)
+            return render_markdown_to_safe_html(
+                content, ExportService._code_highlighter(theme_engine)
+            )
         return render_plain_text_to_safe_html(content)
 
     @staticmethod
     def export_html(content: str, is_markdown: bool, filepath: str, colors,
-                    title: str = "", file_guard=None) -> None:
+                    title: str = "", file_guard=None,
+                    theme_engine: ThemeEngine | None = None) -> None:
         """导出为 HTML 文件
 
         参数：
@@ -74,10 +101,11 @@ class ExportService:
           colors：v2_export_colors 产物（dict），提供主题色值
           title：文档标题
           file_guard：FileGuard 实例（必填），写入经 safe_write_bytes 安全执行
+          theme_engine：主题引擎，用于代码块语法高亮（可选）
 
         异常：文件写入失败时抛出 IOError
         """
-        body_html = ExportService.render_content(content, is_markdown)
+        body_html = ExportService.render_content(content, is_markdown, theme_engine)
         full_html = build_export_html_document(body_html, colors, title)
 
         file_guard.safe_write_bytes(
@@ -88,7 +116,8 @@ class ExportService:
 
     @staticmethod
     def export_pdf(content: str, is_markdown: bool, parent_widget,
-                   on_pdf_generated, colors, title: str = "") -> object:
+                   on_pdf_generated, colors, title: str = "",
+                   theme_engine: ThemeEngine | None = None) -> object:
         """导出为 PDF 文件
 
         参数：
@@ -98,10 +127,11 @@ class ExportService:
           on_pdf_generated：回调函数 (pdf_data: bytes, filepath: str) -> None
           colors：v2_export_colors 产物（dict），提供主题色值
           title：文档标题
+          theme_engine：主题引擎，用于代码块语法高亮（可选）
 
         返回：QWebEngineView 实例（调用方不应持有，由内部自动清理）
         """
-        body_html = ExportService.render_content(content, is_markdown)
+        body_html = ExportService.render_content(content, is_markdown, theme_engine)
         full_html = build_export_html_document(body_html, colors, title)
 
         web_view = QWebEngineView(parent_widget)

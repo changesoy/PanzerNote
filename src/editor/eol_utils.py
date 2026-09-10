@@ -12,34 +12,6 @@ EOL_MAP = {"LF": "\n", "CRLF": "\r\n", "CR": "\r"}
 """显示标签到实际换行符的映射"""
 
 
-def detect_eol(text: str) -> Tuple[str, str]:
-    """探测文本的行尾类型
-
-    参数：
-      text：原始文本（可能包含混合行尾）
-
-    返回：
-      (显示标签, 主导行尾) 二元组
-      显示标签： "LF" / "CRLF" / "CR" / "Mixed"
-      主导行尾：  "\\n" / "\\r\\n" / "\\r"
-
-    规则：
-      - 无换行符 → ("LF", "\\n")
-      - 只有一种换行符 → ("LF"/"CRLF"/"CR", 对应换行符)
-      - 多种换行符同时存在 → 按出现次数取主导，显示 ("Mixed", 主导行尾)
-    """
-    if not text:
-        return "LF", "\n"
-
-    crlf_count = text.count("\r\n")
-    # 统计纯 CR（排除 CRLF 中的 CR）
-    cr_count = text.count("\r") - crlf_count
-    # 统计纯 LF（排除 CRLF 中的 LF）
-    lf_count = text.count("\n") - crlf_count
-
-    return _classify_counts(lf_count, crlf_count, cr_count)
-
-
 def detect_eol_from_bytes(data: bytes) -> Tuple[str, str]:
     """从原始字节探测行尾类型（不依赖文本解码）
 

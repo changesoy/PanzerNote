@@ -16,7 +16,7 @@
 
 import re
 import html as html_module
-from typing import List
+from typing import Callable, List
 
 from ..utils.logger import get_logger
 
@@ -61,6 +61,22 @@ _JAVASCRIPT_URL_UNQUOTED_RE = re.compile(
     re.IGNORECASE,
 )
 
+# fenced code 输出（与预览同构：<pre><code class="language-x">…</code></pre>）
+_CODEBLOCK_RE = re.compile(
+    r'<pre(?P<pre_attrs>[^>]*)>\s*'
+    r'<code(?P<code_attrs>[^>]*)>'
+    r'(?P<body>.*?)'
+    r'</code>\s*</pre>',
+    re.DOTALL | re.IGNORECASE,
+)
+_LANGUAGE_RE = re.compile(
+    r'class\s*=\s*["\'][^"\']*language-([\w+#.-]+)',
+    re.IGNORECASE,
+)
+
+# 代码高亮回调：(源码, 语言名) → 含内联样式的 HTML 片段
+CodeHighlighter = Callable[[str, str], str]
+
 
 def strip_dangerous_html(html_text: str) -> str:
     """清洗 HTML 中的危险标签和属性
@@ -93,25 +109,55 @@ def strip_dangerous_html(html_text: str) -> str:
     return html_text
 
 
-def render_markdown_to_safe_html(markdown_text: str) -> str:
+def _apply_code_highlight(html_text: str, highlight: CodeHighlighter) -> str:
+    """把 fenced code 块替换为高亮后的 <pre><code> 块。
+
+    导出侧传入 highlight 回调（复用预览的 highlight_code_html），
+    使导出的代码块与预览保持同一套语法高亮；无回调时保持纯文本代码块。
+    """
+    def _replace(match: re.Match[str]) -> str:
+        lang_match = _LANGUAGE_RE.search(match.group("code_attrs") or "")
+        language = lang_match.group(1) if lang_match else ""
+        raw = html_module.unescape(match.group("body"))
+        if raw.endswith("\n"):
+            raw = raw[:-1]
+        return f"<pre><code>{highlight(raw, language)}</code></pre>"
+
+    return _CODEBLOCK_RE.sub(_replace, html_text)
+
+
+def render_markdown_to_safe_html(
+    markdown_text: str, highlight: CodeHighlighter | None = None
+) -> str:
     """将 Markdown 文本渲染为安全的 HTML
 
     渲染优先级：
-      1. markdown-it-py（html=False）
+      1. markdown-it-py（html=False，启用 GFM 表格/删除线扩展）
       2. python-markdown（渲染后走 strip_dangerous_html 清洗）
       3. 纯文本 fallback（html.escape）
 
+    参数：
+      markdown_text：Markdown 源文本
+      highlight：可选的代码高亮回调 (源码, 语言名) → HTML；提供时 fenced code
+        块会被替换为高亮 HTML（导出与预览保持一致的语法高亮）
+
     返回：安全的 HTML 片段（不含 <html>/<body> 等外层标签）
     """
+    def _finish(rendered: str) -> str:
+        safe = strip_dangerous_html(rendered)
+        return _apply_code_highlight(safe, highlight) if highlight else safe
+
     if HAS_MARKDOWN_IT:
         try:
             md = _MarkdownIt("commonmark", {"html": False})
+            # commonmark preset 不含表格/删除线（GFM 扩展），与预览渲染保持一致
+            md.enable(["table", "strikethrough"])
             try:
                 from mdit_py_plugins.tasklists import tasklists_plugin
                 tasklists_plugin(md)
             except ImportError:
                 get_logger(__name__).debug("mdit_py_plugins 未安装，任务列表语法不可用")
-            return strip_dangerous_html(md.render(markdown_text))
+            return _finish(md.render(markdown_text))
         except Exception:
             get_logger(__name__).debug("markdown-it 渲染失败，回退到 python-markdown")
 
@@ -128,7 +174,7 @@ def render_markdown_to_safe_html(markdown_text: str) -> str:
             except Exception:
                 get_logger(__name__).warning("python-markdown 渲染失败")
                 return html_module.escape(markdown_text)
-        return strip_dangerous_html(result)
+        return _finish(result)
 
     return html_module.escape(markdown_text)
 

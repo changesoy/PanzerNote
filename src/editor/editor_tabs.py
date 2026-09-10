@@ -1061,6 +1061,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 self,
                 _on_pdf_ready,
                 v2_export_colors(self._theme_engine),
+                theme_engine=self._theme_engine,
             )
             return True, 0
         except RuntimeError as e:
@@ -1086,7 +1087,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         is_md = ExportService.is_markdown_content(content, widget_type)
 
         try:
-            body_html = ExportService.render_content(content, is_md)
+            body_html = ExportService.render_content(content, is_md, self._theme_engine)
             full_html = build_export_html_document(
                 body_html,
                 v2_export_colors(self._theme_engine),

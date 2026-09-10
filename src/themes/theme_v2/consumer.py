@@ -101,12 +101,18 @@ def v2_color_qcolor(
     return color
 
 
-def v2_syntax_colors(theme_engine: ThemeEngine) -> Mapping[str, str]:
-    """合并 palette + override 后的 syntax 配色（v2 不可用时空 dict）。"""
+def v2_syntax_colors(
+    theme_engine: ThemeEngine, variant_id: str | None = None
+) -> Mapping[str, str]:
+    """合并 palette + override 后的 syntax 配色（v2 不可用时空 dict）。
+
+    variant_id 指定主题变体；None 时取当前激活变体。导出/打印等需要固定明暗
+    的场景可显式传入（如 light），避免深色高亮配色落到白底文档上。
+    """
     svc = _service(theme_engine)
     if svc is None:
         return {}
-    return svc.syntax_colors()
+    return svc.syntax_colors(variant_id)
 
 
 def v2_active_variant(theme_engine: ThemeEngine) -> str | None:
@@ -117,6 +123,19 @@ def v2_active_variant(theme_engine: ThemeEngine) -> str | None:
     return svc.active_variant()
 
 
+def v2_export_variant_id(theme_engine: ThemeEngine) -> str | None:
+    """导出/打印固定的亮色变体 id（v2 不可用为 None）。
+
+    导出文档打印在白底上，配色（文本、代码块、语法高亮）一律取亮色变体，
+    与当前激活主题的明暗无关。variant_for_dark(False) → "light" 变体；
+    包内无 light 时回退首个变体。
+    """
+    svc = _service(theme_engine)
+    if svc is None or svc.snapshot() is None:
+        return None
+    return svc.variant_for_dark(False)
+
+
 def v2_export_colors(theme_engine: ThemeEngine) -> dict[str, str]:
     """导出 HTML/PDF 所需的 v2 色值集合（B8：替代 v1 配色对象传参）。
 
@@ -125,8 +144,7 @@ def v2_export_colors(theme_engine: ThemeEngine) -> dict[str, str]:
     在白底 PDF 上不可读。亮色变体缺失时回退下方浅色常量。
     """
     svc = _service(theme_engine)
-    # variant_for_dark(False) → "light" 变体；包内无 light 时回退首个变体。
-    light_vid = svc.variant_for_dark(False) if svc is not None and svc.snapshot() else None
+    light_vid = v2_export_variant_id(theme_engine)
 
     def _token(token_name: str, fallback: str) -> str:
         if svc is None:

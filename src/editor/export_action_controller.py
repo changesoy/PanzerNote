@@ -66,6 +66,7 @@ class ExportActionController:
                 self._parent_widget,
                 on_pdf_ready,
                 v2_export_colors(self._theme_engine),
+                theme_engine=self._theme_engine,
             )
         except RuntimeError as e:
             QMessageBox.warning(self._parent_widget, "导出失败", str(e))
@@ -116,6 +117,7 @@ class ExportActionController:
                 filepath,
                 v2_export_colors(self._theme_engine),
                 file_guard=self._editor_tabs.config.get_file_guard(),
+                theme_engine=self._theme_engine,
             )
             self._secretary.show_message(
                 f"已导出HTML: {os.path.basename(filepath)}"

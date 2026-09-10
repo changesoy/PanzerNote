@@ -9,7 +9,6 @@ PanzerNote 自身许可证：GPL-3.0-or-later（见 `LICENSE`）。
 | 组件 | 版本约束 | 许可证 | 用途 |
 | --- | --- | --- | --- |
 | PyQt6 | >=6.11.0 | GPL-3.0（Riverbank Computing，另提供商业授权） | Qt 绑定 / GUI 框架 |
-| PyQt6-WebEngine | >=6.11.0 | GPL-3.0 | Markdown 预览 WebEngine 渲染 |
 | shiboken6 | >=6.11.2 | LGPL-3.0 | PyQt6 绑定支撑库 |
 | Pygments | >=2.21.0 | BSD-2-Clause | 语法高亮 |
 | markdown (Python-Markdown) | >=3.10.3 | BSD-3-Clause | Markdown 渲染（导出 fallback） |

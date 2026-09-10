@@ -2,6 +2,19 @@
 
 本文件记录 PanzerNote 各版本的变更。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
 
+## 未发布
+
+**Markdown 预览与 PDF 导出轻量化（去 WebEngine）**
+
+- **依赖摘除**：移除 `PyQt6-WebEngine`。预览由 `QWebEngineView` 改为 `QTextBrowser` + `QTextDocument`；PDF 导出由 `QWebEngineView.printToPdf` 改为 `QPdfWriter` + `QTextDocument.print()`。删除 WebEngine 启动锚点（`src/editor/webengine_runtime.py`）、WebEngine 专用预览模板（`PREVIEW_HTML_TEMPLATE` / `_build_preview_css_vars`）与 `main.py` 的 `AA_ShareOpenGLContexts`
+- **打包体积**：538 MB → **90.1 MB**（对照：保留 WebEngine 的方案 B 为 362.5 MB）。规格见新增的 `PanzerNote.spec`：Qt 翻译仅保留中文/英文，并按 A 已无 OpenGL/QML 消费者的事实删除软件 OpenGL 兜底库 `opengl32sw.dll`
+- **观感与行为变化**：源码行号同步由 WebEngine 的 `runJavaScript` 精确滚动改为比例滚动（已接受）；预览不再走 JS 局部更新（`innerHTML`），改为全量 `setHtml`；代码块复制按钮、折叠联动、本地图片解析、双主题、表格、语法高亮均保留
+- **导出修复**：导出渲染补齐 GFM 表格/删除线扩展；接入与预览同源的语法高亮并固定亮色变体（深色主题导出为黑字浅底）；PDF 表格改用 QTextDocument 认得的 HTML 属性；代码块行高与行内代码底色复位（消除逐条条纹与双色底）
+- **测试**：`tests/` 与实现差异相关用例按能力门控（`a_only` / `b_only` / `@webengine_only`），两分支共用同一份测试目录
+- **文档**：`docs/architecture.md` 技术栈与 Markdown 预览章节改写；`docs/roadmap.md` 新增「渲染轻量化（已完成）」
+
+> 说明：本条目对应实验分支 `refactor20260910-lightweight_preview`（方案 A）。版本号与 MAJOR/MINOR/PATCH 定位在 PR/发布收尾时统一决定，此处不预设版本号。
+
 ## v2.2.0
 
 **帮助中心**

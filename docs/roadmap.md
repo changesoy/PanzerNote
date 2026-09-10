@@ -50,6 +50,16 @@ Wave 8（B1~B8）完成主题系统重构为 Theme v2：删除 v1 主题引擎�
 - ✅ 主题作者指南：Theme v2 主题包格式与校验规则见 [theme_authoring.md](theme-design/theme_authoring.md)（B9 B6）
 - ~~外部主题作者指南（`docs/theme_system.md`）~~：外部主题机制已随 v1 删除；v2 主题制作文档已由 theme_authoring.md 承接
 
+## 渲染轻量化（已完成）
+
+方案 A（分支 `refactor20260910-lightweight_preview`）以 `QTextBrowser` + `QTextDocument` 承载 Markdown 预览，以 `QPdfWriter` + `QTextDocument.print()` 承载 PDF 导出，摘除 `PyQt6-WebEngine` 依赖；打包体积 538 MB → **90.1 MB**（规格见 `PanzerNote.spec`）。对照方案 B（保留 WebEngine、仅做打包瘦身，362.5 MB）见分支 `refactor20260910-webengine_single_path`。
+
+- ✅ 预览渲染唯一化到 `QTextBrowser`（删除 WebEngine 分支与启动锚点）
+- ✅ PDF 导出改为 `QPdfWriter`（同步渲染，无 WebEngine 回调）
+- ✅ 导出与预览共用语法高亮与亮色变体（深色主题导出为黑字浅底）
+- ⚠️ 行号同步由 WebEngine JS 精确滚动降级为比例滚动（已接受）
+- ~~WebEngine 预览 JS 局部增量更新~~：随 WebEngine 一并移除，预览改为全量 `setHtml`
+
 ## 文档完善
 
 - `docs/user_guide.md`：面向终端用户的使用指南

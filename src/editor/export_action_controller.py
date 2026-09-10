@@ -13,6 +13,7 @@ import os
 from PyQt6.QtWidgets import QFileDialog, QMessageBox, QWidget
 
 from ..game.secretary_widget import SecretaryWidget
+from ..security.file_access_context import FileAccessContext
 from ..themes.theme_engine import ThemeEngine
 from ..themes.theme_v2.consumer import v2_export_colors
 from ..utils.error_handler import ErrorHandler, ErrorCategory
@@ -73,9 +74,12 @@ class ExportActionController:
         """PDF 生成完成的回调：写文件 / 提示 / 失败弹窗。"""
         if pdf_data:
             try:
-                # 经 FileGuard 安全写入，遵守路径白名单与文件大小限制
+                # 目标路径由用户在导出“另存为”对话框中显式授权（EXPORT_TARGET），
+                # 无需再走 PathValidator 白名单；仍受文件大小限制与原子写入保护。
                 file_guard = self._editor_tabs.config.get_file_guard()
-                file_guard.safe_write_bytes(filepath, pdf_data)
+                file_guard.safe_write_bytes(
+                    filepath, pdf_data, context=FileAccessContext.EXPORT_TARGET
+                )
                 self._secretary.show_message(
                     f"已导出PDF: {os.path.basename(filepath)}"
                 )

@@ -88,7 +88,7 @@ class ExportService:
         file_guard.safe_write_bytes(
             filepath,
             full_html.encode("utf-8"),
-            context=FileAccessContext.USER_DOCUMENT_SAVE,
+            context=FileAccessContext.EXPORT_TARGET,
         )
 
     @staticmethod

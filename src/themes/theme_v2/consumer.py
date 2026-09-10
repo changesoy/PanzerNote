@@ -118,16 +118,40 @@ def v2_active_variant(theme_engine: ThemeEngine) -> str | None:
 
 
 def v2_export_colors(theme_engine: ThemeEngine) -> dict[str, str]:
-    """导出 HTML/PDF 所需的 v2 色值集合（B8：替代 v1 配色对象传参）。"""
+    """导出 HTML/PDF 所需的 v2 色值集合（B8：替代 v1 配色对象传参）。
+
+    导出文档打印在白底上，始终采用**亮色变体**配色（白纸黑字），不随当前
+    深色主题变化——否则深色模式下导出的文字为浅灰、代码块/引用块为黑底，
+    在白底 PDF 上不可读。亮色变体缺失时回退下方浅色常量。
+    """
+    svc = _service(theme_engine)
+    # variant_for_dark(False) → "light" 变体；包内无 light 时回退首个变体。
+    light_vid = svc.variant_for_dark(False) if svc is not None and svc.snapshot() else None
+
+    def _token(token_name: str, fallback: str) -> str:
+        if svc is None:
+            return fallback
+        variant = svc.variant_snapshot(light_vid)
+        if variant is None:
+            return fallback
+        value = variant.tokens.get(token_name)
+        return value if value is not None else fallback
+
+    def _style(recipe_key: str, style_key: str, fallback: str) -> str:
+        if svc is None:
+            return fallback
+        value = svc.resolve_style_color(recipe_key, style_key, variant_id=light_vid)
+        return value if value is not None else fallback
+
     return {
-        "text_primary": v2_token(theme_engine, "text_primary", "#212121"),
-        "text_secondary": v2_token(theme_engine, "text_secondary", "#757575"),
-        "text_disabled": v2_token(theme_engine, "text_muted", "#BDBDBD"),
-        "border": v2_token(theme_engine, "border_muted", "#E0E0E0"),
-        "divider": v2_token(theme_engine, "border_muted", "#EEEEEE"),
-        "surface": v2_token(theme_engine, "surface_secondary", "#F5F5F5"),
-        "sidebar_bg": v2_token(theme_engine, "surface_secondary", "#FAFAFA"),
-        "primary": v2_token(theme_engine, "accent", "#2196F3"),
-        "primary_dark": v2_color(theme_engine, "button", "pressed_background", "#1976D2"),
-        "bg_codeblock": v2_token(theme_engine, "md_preview_code_block_bg", "#EDF3FA"),
+        "text_primary": _token("text_primary", "#212121"),
+        "text_secondary": _token("text_secondary", "#757575"),
+        "text_disabled": _token("text_muted", "#BDBDBD"),
+        "border": _token("border_muted", "#E0E0E0"),
+        "divider": _token("border_muted", "#EEEEEE"),
+        "surface": _token("surface_secondary", "#F5F5F5"),
+        "sidebar_bg": _token("surface_secondary", "#FAFAFA"),
+        "primary": _token("accent", "#2196F3"),
+        "primary_dark": _style("button", "pressed_background", "#1976D2"),
+        "bg_codeblock": _token("md_preview_code_block_bg", "#EDF3FA"),
     }

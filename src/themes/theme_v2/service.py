@@ -163,6 +163,7 @@ class ThemeV2Service(QObject):
         self,
         recipe_key: RecipeKey,
         style_key: str,
+        variant_id: str | None = None,
     ) -> ColorValue | None:
         """解析 recipe.style 中一个颜色键。
 
@@ -170,9 +171,12 @@ class ThemeV2Service(QObject):
           - semantic token 名（如 "surface_primary"）→ variant tokens 中的色值
           - 直接色值 "#RRGGBB[AA]" → 原样返回
         解析失败返回 None（消费方回退 v1）。
+
+        variant_id 指定要解析的主题变体；None 时取当前激活变体。
+        导出/打印等需要固定明暗的场景可显式传入（如 light）。
         """
         recipe = self.recipe(recipe_key)
-        variant = self.variant_snapshot()
+        variant = self.variant_snapshot(variant_id)
         if recipe is None or variant is None:
             return None
         value: Any = recipe.style.get(style_key)

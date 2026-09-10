@@ -5,7 +5,7 @@
 
 创建者：MainWindow（_init_ui 之后构造注入）
 持有者：MainWindow
-完成通知：见 ExportService（HTML 同步完成；PDF 经 QWebEngineView.printToPdf 回调）
+完成通知：见 ExportService（HTML / PDF 均同步完成，PDF 渲染在内存中生成字节）
 """
 
 import os
@@ -13,6 +13,7 @@ import os
 from PyQt6.QtWidgets import QFileDialog, QMessageBox, QWidget
 
 from ..game.secretary_widget import SecretaryWidget
+from ..security.file_access_context import FileAccessContext
 from ..themes.theme_engine import ThemeEngine
 from ..themes.theme_v2.consumer import v2_export_colors
 from ..utils.error_handler import ErrorHandler, ErrorCategory
@@ -39,7 +40,7 @@ class ExportActionController:
         self._parent_widget = parent_widget
 
     def export_pdf(self) -> None:
-        """导出当前文档为 PDF（经 QWebEngineView.printToPdf 异步生成）。"""
+        """导出当前文档为 PDF（QTextDocument 同步渲染，再经 FileGuard 落盘）。"""
         from .export_service import ExportService
         try:
             editor = self._editor_tabs.current_editor()
@@ -56,26 +57,28 @@ class ExportActionController:
             widget_type = type(widget).__name__ if widget else ""
             is_md = ExportService.is_markdown_content(content, widget_type)
 
-            def on_pdf_ready(pdf_data):
-                self._on_pdf_generated(pdf_data, filepath)
-
-            ExportService.export_pdf(
-                content,
-                is_md,
-                self._parent_widget,
-                on_pdf_ready,
-                v2_export_colors(self._theme_engine),
+            self._on_pdf_generated(
+                ExportService.export_pdf(
+                    content,
+                    is_md,
+                    v2_export_colors(self._theme_engine),
+                    theme_engine=self._theme_engine,
+                ),
+                filepath,
             )
-        except RuntimeError as e:
+        except Exception as e:
             QMessageBox.warning(self._parent_widget, "导出失败", str(e))
 
     def _on_pdf_generated(self, pdf_data, filepath) -> None:
-        """PDF 生成完成的回调：写文件 / 提示 / 失败弹窗。"""
+        """PDF 渲染完成的处理：写文件 / 提示 / 失败弹窗。"""
         if pdf_data:
             try:
-                # 经 FileGuard 安全写入，遵守路径白名单与文件大小限制
+                # 目标路径由用户在导出“另存为”对话框中显式授权（EXPORT_TARGET），
+                # 无需再走 PathValidator 白名单；仍受文件大小限制与原子写入保护。
                 file_guard = self._editor_tabs.config.get_file_guard()
-                file_guard.safe_write_bytes(filepath, pdf_data)
+                file_guard.safe_write_bytes(
+                    filepath, pdf_data, context=FileAccessContext.EXPORT_TARGET
+                )
                 self._secretary.show_message(
                     f"已导出PDF: {os.path.basename(filepath)}"
                 )
@@ -112,6 +115,7 @@ class ExportActionController:
                 filepath,
                 v2_export_colors(self._theme_engine),
                 file_guard=self._editor_tabs.config.get_file_guard(),
+                theme_engine=self._theme_engine,
             )
             self._secretary.show_message(
                 f"已导出HTML: {os.path.basename(filepath)}"

@@ -1055,15 +1055,17 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 QMessageBox.warning(self, "另存为", "PDF生成失败")
 
         try:
-            ExportService.export_pdf(
-                content,
-                is_md,
-                self,
-                _on_pdf_ready,
-                v2_export_colors(self._theme_engine),
+            # QTextDocument 同步渲染，返回 PDF 字节后立即落盘
+            _on_pdf_ready(
+                ExportService.export_pdf(
+                    content,
+                    is_md,
+                    v2_export_colors(self._theme_engine),
+                    theme_engine=self._theme_engine,
+                )
             )
             return True, 0
-        except RuntimeError as e:
+        except Exception as e:
             QMessageBox.warning(self, "另存为", str(e))
             return False, 0
 

@@ -16,7 +16,7 @@
 
 import re
 import html as html_module
-from typing import List
+from typing import Callable, List
 
 from ..utils.logger import get_logger
 
@@ -61,6 +61,22 @@ _JAVASCRIPT_URL_UNQUOTED_RE = re.compile(
     re.IGNORECASE,
 )
 
+# fenced code 输出（与预览同构：<pre><code class="language-x">…</code></pre>）
+_CODEBLOCK_RE = re.compile(
+    r'<pre(?P<pre_attrs>[^>]*)>\s*'
+    r'<code(?P<code_attrs>[^>]*)>'
+    r'(?P<body>.*?)'
+    r'</code>\s*</pre>',
+    re.DOTALL | re.IGNORECASE,
+)
+_LANGUAGE_RE = re.compile(
+    r'class\s*=\s*["\'][^"\']*language-([\w+#.-]+)',
+    re.IGNORECASE,
+)
+
+# 代码高亮回调：(源码, 语言名) → 含内联样式的 HTML 片段
+CodeHighlighter = Callable[[str, str], str]
+
 
 def strip_dangerous_html(html_text: str) -> str:
     """清洗 HTML 中的危险标签和属性
@@ -93,25 +109,55 @@ def strip_dangerous_html(html_text: str) -> str:
     return html_text
 
 
-def render_markdown_to_safe_html(markdown_text: str) -> str:
+def _apply_code_highlight(html_text: str, highlight: CodeHighlighter) -> str:
+    """把 fenced code 块替换为高亮后的 <pre><code> 块。
+
+    导出侧传入 highlight 回调（复用预览的 highlight_code_html），
+    使导出的代码块与预览保持同一套语法高亮；无回调时保持纯文本代码块。
+    """
+    def _replace(match: re.Match[str]) -> str:
+        lang_match = _LANGUAGE_RE.search(match.group("code_attrs") or "")
+        language = lang_match.group(1) if lang_match else ""
+        raw = html_module.unescape(match.group("body"))
+        if raw.endswith("\n"):
+            raw = raw[:-1]
+        return f"<pre><code>{highlight(raw, language)}</code></pre>"
+
+    return _CODEBLOCK_RE.sub(_replace, html_text)
+
+
+def render_markdown_to_safe_html(
+    markdown_text: str, highlight: CodeHighlighter | None = None
+) -> str:
     """将 Markdown 文本渲染为安全的 HTML
 
     渲染优先级：
-      1. markdown-it-py（html=False）
+      1. markdown-it-py（html=False，启用 GFM 表格/删除线扩展）
       2. python-markdown（渲染后走 strip_dangerous_html 清洗）
       3. 纯文本 fallback（html.escape）
 
+    参数：
+      markdown_text：Markdown 源文本
+      highlight：可选的代码高亮回调 (源码, 语言名) → HTML；提供时 fenced code
+        块会被替换为高亮 HTML（导出与预览保持一致的语法高亮）
+
     返回：安全的 HTML 片段（不含 <html>/<body> 等外层标签）
     """
+    def _finish(rendered: str) -> str:
+        safe = strip_dangerous_html(rendered)
+        return _apply_code_highlight(safe, highlight) if highlight else safe
+
     if HAS_MARKDOWN_IT:
         try:
             md = _MarkdownIt("commonmark", {"html": False})
+            # commonmark preset 不含表格/删除线（GFM 扩展），与预览渲染保持一致
+            md.enable(["table", "strikethrough"])
             try:
                 from mdit_py_plugins.tasklists import tasklists_plugin
                 tasklists_plugin(md)
             except ImportError:
                 get_logger(__name__).debug("mdit_py_plugins 未安装，任务列表语法不可用")
-            return strip_dangerous_html(md.render(markdown_text))
+            return _finish(md.render(markdown_text))
         except Exception:
             get_logger(__name__).debug("markdown-it 渲染失败，回退到 python-markdown")
 
@@ -128,7 +174,7 @@ def render_markdown_to_safe_html(markdown_text: str) -> str:
             except Exception:
                 get_logger(__name__).warning("python-markdown 渲染失败")
                 return html_module.escape(markdown_text)
-        return strip_dangerous_html(result)
+        return _finish(result)
 
     return html_module.escape(markdown_text)
 
@@ -354,5 +400,97 @@ def convert_layout_css_for_qtext(theme_colors: dict[str, str]) -> str:
     # 4. 剔除 QTextDocument 不支持的观感属性（忽略无害，去掉避免误读）
     result = re.sub(r'\s*border-radius\s*:\s*[^;]+;', '', result)
     result = re.sub(r'\s*max-width\s*:\s*[^;]+;', '', result)
+
+    # 5. 复位代码块内的行内代码样式
+    #    QTextDocument 不支持 :not()，第 3 步把 `:not(pre) > code` 降级成了
+    #    `code`，行内代码的底色/内边距/边框因此一并落到代码块里的 <code> 上，
+    #    与容器 <pre> 的代码块底色叠成「文字处一色、行内空白另一色」的双色块。
+    #    这里用 Qt 支持的后代选择器复位（与 WebEngine 模板的 pre code 规则同义）。
+    result += (
+        "\npre code { background-color: transparent;"
+        " padding: 0; border: none; }\n"
+    )
     return result
+
+
+_QTABLE_OPEN_RE = re.compile(r'<table(?P<attrs>[^>]*)>', re.IGNORECASE)
+
+
+def _apply_qtext_table_attributes(body_html: str) -> str:
+    """把表格样式转成 QTextDocument 认得的 HTML 属性。
+
+    QTextDocument 的富文本引擎只读表格的 HTML 属性（border / cellspacing /
+    cellpadding / width），完全忽略 th、td 上的 CSS border 与 padding；
+    只靠 CSS 会导出成无边框、无内边距、单元格文字互相挤压的裸表格。
+
+    这里**不给表头加底色**：单元格背景会被 Qt 的导入器“粘”到表格之后的块上
+    （实测表格后的列表项整行被染成表头底色），而表头本身已由 Qt 默认渲染为
+    加粗居中，观感损失有限。
+    """
+    def _table(match: re.Match[str]) -> str:
+        attrs = match.group("attrs")
+        if "border" in attrs.lower():
+            return match.group(0)
+        return f'<table border="1" cellspacing="0" cellpadding="6" width="100%"{attrs}>'
+
+    return _QTABLE_OPEN_RE.sub(_table, body_html)
+
+
+def build_export_qtext_html_document(
+    body_html: str, theme_colors: dict[str, str], title: str = ""
+) -> str:
+    """构建 QTextDocument（PDF 导出）渲染的完整 HTML。
+
+    与 build_export_html_document 的区别：QTextDocument 不支持 CSS 变量、
+    :root 与部分属性，故经 convert_layout_css_for_qtext 把 var(--x) 换成具体
+    色值，表格改用 HTML 属性表达，并用同样不含变量的外壳样式（导出文档是
+    静态白纸，不需要变量）。
+
+    参数：
+      body_html：已渲染的安全 HTML 片段
+      theme_colors：v2_export_colors 产物（下划线键名）
+      title：文档标题（可选）
+
+    返回：完整的 HTML 文档字符串
+    """
+    # MARKDOWN_LAYOUT_CSS 的变量名是连字符形式，此处做键名映射
+    qtext_colors = {
+        "text-primary": theme_colors["text_primary"],
+        "text-secondary": theme_colors["text_secondary"],
+        "text-muted": theme_colors["text_disabled"],
+        "border": theme_colors["border"],
+        "border-soft": theme_colors["divider"],
+        "divider": theme_colors["divider"],
+        "surface": theme_colors["surface"],
+        "surface-soft": theme_colors["surface"],
+        "surface-hover": theme_colors["sidebar_bg"],
+        "primary": theme_colors["primary"],
+        "primary-hover": theme_colors["primary_dark"],
+        "bg-codeblock": theme_colors["bg_codeblock"],
+        "scrollbar-thumb-hover": theme_colors["text_disabled"],
+    }
+    layout_css = convert_layout_css_for_qtext(qtext_colors)
+    body_html = _apply_qtext_table_attributes(body_html)
+
+    # 外壳样式：body/pre 为导出特有；白纸文档固定用亮色变体色值
+    # （code 的等宽字体与 pre 的 pre-wrap 不可省——缺 pre-wrap 时长代码行
+    #   会超出页面可绘宽度而被裁切；pre 需显式复位行高——QTextDocument 会把
+    #   <pre> 的每一行当作独立块，正文的 line-height 会在行间留出白缝，
+    #   表现为代码块被切成一条条背景）
+    shell_css = (
+        "body { font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;"
+        f" font-size: 11pt; line-height: 1.7;"
+        f" color: {theme_colors['text_primary']}; }}\n"
+        "pre { white-space: pre-wrap; line-height: normal;"
+        f" background-color: {theme_colors['bg_codeblock']}; padding: 10px; }}\n"
+        "code { font-family: 'Consolas', 'Courier New', monospace; }\n"
+    )
+
+    title_tag = f"<title>{html_module.escape(title)}</title>" if title else ""
+    return (
+        "<html><head>"
+        f"{title_tag}"
+        f"<style>\n{shell_css}{layout_css}\n</style>"
+        f"</head><body>{body_html}</body></html>"
+    )
 

@@ -76,11 +76,61 @@ _MK_S2 = "\u231D"  # ⌝
 _MK_E1 = "\u231E"  # ⌞
 _MK_E2 = "\u231F"  # ⌟
 
+# 匹配折叠 section 的开闭标签（方案 A：QTextDocument 无法用 CSS 隐藏折叠区段）
+_SECTION_TAG_RE = re.compile(r'<section data-fold-heading="(\d+)">|</section>')
+
+# 源码行锚点标记：QTextDocument 无法读取 HTML 自定义属性，故在块首嵌入
+# 不可见标记（⌈N⌉），setHtml 后按块扫描还原"源码行 → 文档像素 y"锚点表。
+_SRC_MARK_OPEN = "\u2308"  # ⌈
+_SRC_MARK_CLOSE = "\u2309"  # ⌉
+_SRC_MARK_RE = re.compile(r"\u2308(\d+)\u2309")
+
+# 可安全嵌入块首标记的标签（容器类标签如 table/tr/div 内直接插内联节点会破坏结构）
+_SRC_MARK_TAGS = frozenset({
+    "h1", "h2", "h3", "h4", "h5", "h6",
+    "p", "li", "blockquote", "td", "th", "span",
+})
+
+# 匹配携带 data-source-line 的开标签
+_SRC_LINE_TAG_RE = re.compile(
+    r'<(?P<tag>[a-zA-Z][\w-]*)\b[^>]*?\bdata-source-line="(?P<line>\d+)"[^>]*>'
+)
+
+# 复制时剔除所有预览内部标记（源码行锚点 + 代码块起止标记）
+_PREVIEW_MARK_STRIP_RE = re.compile(r"[\u2308\u231C\u231E]\d+[\u2309\u231D\u231F]")
+
 from .secure_markdown_renderer import (
     convert_layout_css_for_qtext,
     strip_dangerous_html as _strip_dangerous_html,
 )
 from .document_render_cache import _DOC_RENDER_CACHE, clear_document_render_cache
+
+
+def strip_preview_markers(text: str) -> str:
+    """剔除预览内部锚点/标记字符，供剪贴板复制使用。"""
+    if not text:
+        return text
+    return _PREVIEW_MARK_STRIP_RE.sub("", text)
+
+
+def _inject_source_line_marks(html: str) -> str:
+    """在带 data-source-line 的块级标签首部注入不可见源码行标记（⌈N⌉）。
+
+    QTextDocument 不保留 HTML 自定义属性，锚点标记是唯一可靠的行定位手段：
+    setHtml 后按块扫描标记，即可建立"源码行 → 文档像素 y"锚点表，
+    供编辑器↔预览双向滚动同步使用。标记在复制时由 strip_preview_markers 剔除。
+    """
+    def _replace(match: re.Match[str]) -> str:
+        if match.group("tag").lower() not in _SRC_MARK_TAGS:
+            return match.group(0)
+        line = match.group("line")
+        return (
+            f'{match.group(0)}<span class="src-mark" '
+            f'style="font-size:1px;color:transparent;">'
+            f'{_SRC_MARK_OPEN}{line}{_SRC_MARK_CLOSE}</span>'
+        )
+
+    return _SRC_LINE_TAG_RE.sub(_replace, html)
 
 
 def _extract_language_from_code_attrs(attrs: str) -> str:
@@ -574,6 +624,9 @@ class PreviewBrowser(QTextBrowser):
         self._hover_idx = -1
         # 鼠标是否在复制按钮上
         self._btn_hovered = False
+        # 源码行锚点表 [(源码行, 文档像素 y)] 与脏标记（布局变化后惰性重建）
+        self._line_anchors: list[tuple[float, float]] = []
+        self._line_anchors_dirty = True
 
         # ── 浮动复制按钮（挂在 viewport 上，随内容滚动） ──
         self._copy_btn = QPushButton("\U0001f4cb", self.viewport())
@@ -621,6 +674,7 @@ class PreviewBrowser(QTextBrowser):
     def setHtml(self, html_str):
         super().setHtml(html_str)
         self._cache_cursors()
+        self._line_anchors_dirty = True
 
     # ──────────── 标记位置缓存 ────────────
 
@@ -637,6 +691,100 @@ class PreviewBrowser(QTextBrowser):
             ec = doc.find(e_marker)
             if not sc.isNull() and not ec.isNull():
                 self._code_cursors.append((sc, ec, i))
+
+    # ──────────── 源码行锚点表（滚动同步） ────────────
+
+    def line_anchors(self) -> list[tuple[float, float]]:
+        """返回 [(源码行, 文档像素 y)] 锚点表，按 y 升序。
+
+        布局变化（resize / setHtml）后惰性重建：QTextDocument 不保留 HTML
+        自定义属性，锚点由 _inject_source_line_marks 嵌入的不可见标记还原。
+        """
+        if self._line_anchors_dirty:
+            self._rebuild_line_anchors()
+        return self._line_anchors
+
+    def _rebuild_line_anchors(self) -> None:
+        doc = self.document()
+        anchors: list[tuple[float, float]] = []
+        layout = doc.documentLayout() if doc is not None else None
+        if doc is not None and layout is not None:
+            block = doc.begin()
+            while block.isValid():
+                match = _SRC_MARK_RE.match(block.text())
+                if match:
+                    top = layout.blockBoundingRect(block).top()
+                    anchors.append((float(match.group(1)), float(top)))
+                block = block.next()
+        anchors.sort(key=lambda item: (item[1], item[0]))
+        self._line_anchors = anchors
+        self._line_anchors_dirty = False
+
+    def scroll_to_source_line(
+        self, frac_line: float, at_top: bool = False, at_bottom: bool = False
+    ) -> None:
+        """把源码行 frac_line 对齐到预览视口顶部。
+
+        锚点间线性插值；无锚点时由调用方（widget）回退到整体比例滚动。
+        文档坐标 y 与竖直滚动条取值范围同源，可直接 setValue。
+        """
+        bar = self.verticalScrollBar()
+        if bar is None:
+            return
+        if at_top:
+            bar.setValue(bar.minimum())
+            return
+        if at_bottom:
+            bar.setValue(bar.maximum())
+            return
+
+        anchors = self.line_anchors()
+        if len(anchors) < 2:
+            return
+        target = self._interpolate_line_to_y(anchors, frac_line)
+        bar.setValue(int(max(float(bar.minimum()), min(target, float(bar.maximum())))))
+
+    @staticmethod
+    def _interpolate_line_to_y(anchors: list[tuple[float, float]], frac_line: float) -> float:
+        """源码行（可含小数）→ 文档像素 y，锚点间线性插值。"""
+        first_line, first_y = anchors[0]
+        if frac_line <= first_line:
+            return first_y
+        for (line0, y0), (line1, y1) in zip(anchors, anchors[1:]):
+            if line0 <= frac_line < line1:
+                if line1 <= line0:
+                    return y0
+                ratio = (frac_line - line0) / (line1 - line0)
+                return y0 + (y1 - y0) * ratio
+        return anchors[-1][1]
+
+    def source_line_at_viewport_top(self) -> float | None:
+        """预览视口顶部对应的源码行（可含小数）；锚点不足时返回 None。"""
+        bar = self.verticalScrollBar()
+        anchors = self.line_anchors()
+        if bar is None or len(anchors) < 2:
+            return None
+        y = float(bar.value())
+        first_line, first_y = anchors[0]
+        if y <= first_y:
+            return first_line
+        for (line0, y0), (line1, y1) in zip(anchors, anchors[1:]):
+            if y0 <= y < y1:
+                if y1 <= y0:
+                    return line0
+                ratio = (y - y0) / (y1 - y0)
+                return line0 + (line1 - line0) * ratio
+        return anchors[-1][0]
+
+    def createMimeDataFromSelection(self):
+        """复制时剔除预览内部锚点/标记字符，避免剪贴板出现不可见噪声。"""
+        mime = super().createMimeDataFromSelection()
+        if mime is None:
+            return mime
+        text = mime.text()
+        if text and _PREVIEW_MARK_STRIP_RE.search(text):
+            mime.setText(strip_preview_markers(text))
+        return mime
 
     # ──────────── 鼠标悬停检测 ────────────
 
@@ -712,6 +860,8 @@ class PreviewBrowser(QTextBrowser):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        # 换行宽度变化会改变块高度 → 锚点像素位置失效，标记待重建
+        self._line_anchors_dirty = True
         if self._copy_btn.isVisible():
             self._check_hover()
 
@@ -779,6 +929,7 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self._sync_trailing_timer.setSingleShot(True)
         self._sync_trailing_timer.timeout.connect(self._on_sync_trailing)
         self._suppress_editor_sync: bool = False
+        self._suppress_preview_sync: bool = False
         self._resync_timer = QTimer(self)
         self._resync_timer.setSingleShot(True)
         self._resync_timer.setInterval(120)
@@ -860,6 +1011,10 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         vbar = self.editor.verticalScrollBar()
         if vbar is not None:
             vbar.valueChanged.connect(self._sync_scroll)
+        # 预览滚动 → 反向同步编辑器（锚点表映射，替代原 JS 回传桥）
+        pbar = self.preview.verticalScrollBar()
+        if pbar is not None:
+            pbar.valueChanged.connect(self._on_preview_scroll)
         # 折叠状态变更 → 同步预览（3.5.8 批次 5：监听编辑器转发的有效折叠信号，
         # attach 共享 Document 后仍指向 Document 级 FoldingManager，连接不漂移）
         self.editor.fold_state_changed.connect(self._sync_folds_to_preview)
@@ -930,6 +1085,9 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
 
         html_content = self._resolve_local_images(html_content)
 
+        # 注入源码行锚点标记（滚动同步用，复制时剔除）
+        html_content = _inject_source_line_marks(html_content)
+
         # 包裹折叠 section（编辑器的折叠状态同步到预览；产物仅依赖 text）
         html_content = self._wrap_fold_sections(html_content, text)
 
@@ -941,8 +1099,13 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         """把渲染好的 HTML 推送到预览，供 _update_preview / _on_async_highlight_done 共用。
 
         方案 A：唯一渲染路径为 QTextBrowser（QTextDocument CSS 子集），整页 setHtml。
+        折叠区段在推送前按当前折叠状态剔除（QTextDocument 无法用 CSS 隐藏）。
         """
         self.preview.set_code_blocks(self._code_blocks)
+
+        html_content = self._apply_fold_visibility(
+            html_content, self._collapsed_fold_lines()
+        )
 
         try:
             full_html = self._build_qtext_full_html(html_content)
@@ -954,9 +1117,6 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             )
             full_html = self._build_qtext_full_html_fallback(html_content)
         self.preview.setHtml(full_html)
-
-        # 同步当前折叠状态到预览（QTextDocument 下为降级 no-op，见 _sync_folds_to_preview）
-        self._sync_folds_to_preview()
 
     def _qtext_theme_colors(self) -> dict[str, str]:
         """构建 QTextDocument 子集 CSS 的变量色值。
@@ -1207,13 +1367,61 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
 
     # ──────────── 折叠同步 ────────────
 
-    def _sync_folds_to_preview(self) -> None:
-        """将编辑器 FoldingManager 的折叠状态同步到预览。
+    @staticmethod
+    def _apply_fold_visibility(html: str, collapsed: set[int]) -> str:
+        """剔除被折叠 section 的整段内容。
 
-        方案 A：QTextDocument 无 JS 层，折叠区段隐藏降级为 no-op
-        （保留信号槽形状；A2 按"保留/降级/暂缓"清单决策是否实现）。
+        QTextDocument 既不支持 JS 也无 display:none，因此折叠只能通过
+        "不把该段内容放进文档"来实现：在已包裹 section 的 HTML 上按折叠行号
+        做深度感知的区间删除（支持标题层级嵌套产生的嵌套 section）。
+        标签不配对时原样返回，避免半截 HTML。
         """
-        return
+        if not collapsed:
+            return html
+
+        out: list[str] = []
+        pos = 0
+        skip_depth = 0
+        for match in _SECTION_TAG_RE.finditer(html):
+            token = match.group(0)
+            is_open = token.startswith("<section")
+            if skip_depth:
+                skip_depth += 1 if is_open else -1
+                if skip_depth == 0:
+                    pos = match.end()
+                continue
+            if is_open and int(match.group(1)) in collapsed:
+                out.append(html[pos:match.start()])
+                skip_depth = 1
+                pos = match.end()
+
+        if skip_depth:
+            get_logger(__name__).debug("折叠 section 标签不配对，跳过折叠过滤")
+            return html
+
+        out.append(html[pos:])
+        return "".join(out)
+
+    def _collapsed_fold_lines(self) -> set[int]:
+        """读取编辑器 FoldingManager 当前折叠的标题行号集合。"""
+        editor = getattr(self, "editor", None)
+        folding = getattr(editor, "_folding", None) if editor is not None else None
+        if folding is None:
+            return set()
+        try:
+            return {int(line) for line in folding.get_collapsed_lines()}
+        except Exception:
+            get_logger(__name__).debug("读取折叠状态失败", exc_info=True)
+            return set()
+
+    def _sync_folds_to_preview(self) -> None:
+        """编辑器折叠状态变化 → 重新推送预览（按折叠剔除被隐藏区段）。
+
+        经预览防抖定时器复用 textChanged 的刷新路径，避免连续折叠时抖动。
+        """
+        timer = getattr(self, "_preview_timer", None)
+        if timer is not None:
+            timer.start()
 
     # ──────────── 代码块后处理 ────────────
 
@@ -1542,15 +1750,32 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self._last_at_top = at_top
         self._last_at_bottom = at_bottom
 
-        # QTextBrowser（方案 A）：按源码行号比例滚动（A2 强化精度）
-        if total_lines > 0:
-            line_ratio = min(frac_line / total_lines, 1.0)
-            try:
-                pb = self.preview.verticalScrollBar()
-                if pb is not None:
-                    pb.setValue(int(line_ratio * pb.maximum()))
-            except Exception:
-                get_logger(__name__).debug("QTextBrowser 同步失败", exc_info=True)
+        # 锚点表定位：源码行 → 文档像素 y（锚点不足时回退到整体比例）
+        self._suppress_preview_sync = True
+        try:
+            self.preview.scroll_to_source_line(frac_line, at_top, at_bottom)
+            if not self.preview.line_anchors() and total_lines > 0:
+                line_ratio = min(frac_line / total_lines, 1.0)
+                bar = self.preview.verticalScrollBar()
+                if bar is not None:
+                    bar.setValue(int(line_ratio * bar.maximum()))
+        except Exception:
+            get_logger(__name__).debug("预览滚动同步失败", exc_info=True)
+        finally:
+            # setValue 同步触发的 valueChanged 已被抑制，下一轮事件循环再解除
+            QTimer.singleShot(0, self._clear_preview_suppress)
+
+    def _clear_preview_suppress(self):
+        self._suppress_preview_sync = False
+
+    def _on_preview_scroll(self, value):
+        """预览滚动 → 反向同步编辑器（方案 A：原 JS 回传桥由锚点表替代）。"""
+        if not self._preview_visible or self._suppress_preview_sync:
+            return
+        frac_line = self.preview.source_line_at_viewport_top()
+        if frac_line is None:
+            return
+        self._scroll_editor_to_line(frac_line)
 
     @staticmethod
     def _open_external_link(url: str) -> None:

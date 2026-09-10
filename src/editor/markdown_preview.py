@@ -57,15 +57,6 @@ from .webengine_runtime import WebEngineRuntime
 #  正则 / 常量
 # ════════════════════════════════════════════════════════
 
-# 匹配 fenced_code 输出的 <pre><code> 块（支持 pre 标签上的属性）
-_CODEBLOCK_RE = re.compile(
-    r'<pre(?P<pre_attrs>[^>]*)>\s*'
-    r'<code(?P<code_attrs>[^>]*)>'
-    r'(?P<body>.*?)'
-    r'</code>\s*</pre>',
-    re.DOTALL | re.IGNORECASE,
-)
-
 # 匹配 <img src="..."> 标签中的 src 属性
 _IMG_SRC_RE = re.compile(
     r'(<img\s[^>]*?)src="([^"]*)"',
@@ -79,24 +70,12 @@ _MK_E1 = "\u231E"  # ⌞
 _MK_E2 = "\u231F"  # ⌟
 
 from .secure_markdown_renderer import (
+    CODEBLOCK_RE as _CODEBLOCK_RE,
     MARKDOWN_LAYOUT_CSS as _MARKDOWN_LAYOUT_CSS,
+    extract_language_from_code_attrs as _extract_language_from_code_attrs,
     strip_dangerous_html as _strip_dangerous_html,
 )
 from .document_render_cache import _DOC_RENDER_CACHE, clear_document_render_cache
-
-
-def _extract_language_from_code_attrs(attrs: str) -> str:
-    """从 code 标签的属性串中提取语言名称。"""
-    m = re.search(r'class="([^"]*)"', attrs or "")
-    if not m:
-        return ""
-    classes = m.group(1).split()
-    for cls in classes:
-        if cls.startswith("language-"):
-            return cls.removeprefix("language-")
-        if cls.startswith("lang-"):
-            return cls.removeprefix("lang-")
-    return ""
 
 # ════════════════════════════════════════════════════════
 #  HTML 模板

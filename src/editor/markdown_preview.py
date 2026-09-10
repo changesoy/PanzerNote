@@ -994,15 +994,6 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
 
     # ──────────── 代码块后处理 ────────────
 
-    def _get_code_highlight_theme(self):
-        """获取代码高亮用的 ThemeEngine 实例。
-
-        兼容旧配置：
-        - 空值 / auto / default / none / null 视为自动，使用当前主题；
-        - 其它显式主题名保留但对旧用户透明——始终使用当前主题引擎。
-        """
-        return self._theme_engine
-
     def _qtext_code_container_style(self) -> str:
         """构建 QTextDocument 代码块 <pre> 容器的 inline style（当前主题色值）。
 

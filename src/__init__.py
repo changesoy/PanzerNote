@@ -16,9 +16,5 @@ __version__ = "2.2.0"
 __author__ = "Changes"
 
 
-def get_version() -> str:
-    return __version__
-
-
 def get_version_tuple() -> tuple:
     return tuple(int(x) for x in __version__.split("."))

@@ -10,7 +10,6 @@
 """
 from __future__ import annotations
 
-from enum import Enum
 from typing import Any, Callable, Mapping
 
 from .constants import COLOR_VALUE_PATTERN
@@ -41,23 +40,6 @@ STRUCTURAL_RECIPES: tuple[str, ...] = ("group_box", "dialog")
 _PENDING_KEYS: frozenset[str] = frozenset(
     {"arrow", "arrow_hover", "indicator_checked_fg"}
 )
-
-
-class ComponentState(Enum):
-    """统一状态模型（B3 设计文档 2.2）。
-
-    业务状态归 Stable Host 所有；视觉层只表现状态，不拥有状态。
-    """
-
-    NORMAL = "normal"
-    HOVER = "hover"
-    PRESSED = "pressed"
-    FOCUS = "focus"
-    DISABLED = "disabled"
-    SELECTED = "selected"
-    CHECKED = "checked"
-    ACTIVE = "active"
-    INDETERMINATE = "indeterminate"
 
 
 class ThemeComponentLibrary:

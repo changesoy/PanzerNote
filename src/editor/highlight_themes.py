@@ -4,8 +4,8 @@
 统一管理编辑器（左侧）和 Markdown 预览（右侧）的代码配色方案
 
 使用方式：
-    编辑器：  get_editor_formats(theme_engine) → {Token: QTextCharFormat}
-    预览CSS： get_preview_css(theme_engine)     → str (注入到 HTML <style>)
+    编辑器：    get_editor_formats(theme_engine) → {Token: QTextCharFormat}
+    预览/导出：highlight_code_html(code, language, theme_engine) → 内联样式 HTML
 
 颜色值统一由 ThemeEngine 的 v2 syntax palette 管理。
 Token → syntax_* 映射、bold/italic 装饰在此定义。
@@ -171,20 +171,6 @@ def _color_map(theme_engine, variant_id: str | None = None) -> dict:
     return {token: v2_colors.get(name) for token, name in TOKEN_MAP.items() if name in v2_colors}
 
 
-def build_format(style: dict) -> QTextCharFormat:
-    """从样式字典构建 QTextCharFormat"""
-    fmt = QTextCharFormat()
-    if "color" in style:
-        fmt.setForeground(QColor(style["color"]))
-    if style.get("bold"):
-        fmt.setFontWeight(QFont.Weight.Bold)
-    if style.get("italic"):
-        fmt.setFontItalic(True)
-    if style.get("underline"):
-        fmt.setFontUnderline(True)
-    return fmt
-
-
 def _build_format_from_token(token, color_map) -> QTextCharFormat:
     """从 color_map 构建单个 Token 的 QTextCharFormat"""
     color = color_map.get(token)
@@ -218,7 +204,7 @@ def get_editor_formats(theme_engine):
 
 
 # ════════════════════════════════════════════════════════
-#  预览用：CSS
+#  Pygments style 构建（预览 / 导出内联高亮共用）
 # ════════════════════════════════════════════════════════
 
 def _style_to_pygments_str(token, color_map) -> str:
@@ -235,35 +221,8 @@ def _style_to_pygments_str(token, color_map) -> str:
     return " ".join(parts)
 
 
-def get_preview_css(theme_engine, css_class="codehilite"):
-    """生成 Markdown 预览用的代码高亮 CSS
-
-    Args:
-        theme_engine: ThemeEngine 实例
-        css_class: codehilite 外层 CSS class 名
-    Returns:
-        str: CSS 文本；Pygments 不可用时返回空字符串
-    """
-    if not HAS_PYGMENTS:
-        return ""
-    color_map = _color_map(theme_engine)
-    pygments_styles = {}
-    for token in TOKEN_MAP:
-        s = _style_to_pygments_str(token, color_map)
-        if s:
-            pygments_styles[token] = s
-    if not pygments_styles:
-        return ""
-    CustomStyle = type("CustomStyle", (PygmentsStyle,), {
-        "default_style": "",
-        "styles": pygments_styles,
-    })
-    formatter = HtmlFormatter(style=CustomStyle)
-    return formatter.get_style_defs(f".{css_class}")
-
-
 # ════════════════════════════════════════════════════════
-#  预览用：内联样式高亮（适用于 QTextBrowser）
+#  预览 / 导出用：内联样式高亮（QTextBrowser 与 PDF 导出共用）
 # ════════════════════════════════════════════════════════
 
 def _get_pygments_style_class(theme_engine, variant_id: str | None = None):

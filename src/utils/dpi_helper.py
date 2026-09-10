@@ -10,16 +10,14 @@ Qt 已自动处理缩放，scale_factor 恒为 1.0，所有函数为恒等函数
 PyQt6 默认启用高 DPI 缩放，则会自动缩放"。
 
 使用方式:
-    from src.utils.dpi_helper import scale, scale_size
+    from src.utils.dpi_helper import scale
 
     width = scale(200)   # 语义：200 是基准像素值
-    size = scale_size(800, 600)
 """
 
 import re
 
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import QSize
 
 _scale_factor = 1.0
 _initialized = False
@@ -68,31 +66,6 @@ def scale(value: int) -> int:
     return max(1, int(value * scale_factor()))
 
 
-def scale_size(width: int, height: int) -> QSize:
-    """缩放 QSize
-
-    Args:
-        width: 基准宽度
-        height: 基准高度
-
-    Returns:
-        缩放后的 QSize
-    """
-    return QSize(scale(width), scale(height))
-
-
-def scale_font(point_size: int) -> int:
-    """缩放字体大小
-
-    Args:
-        point_size: 基准字体大小（点）
-
-    Returns:
-        调整后的字体大小
-    """
-    return max(8, int(point_size * scale_factor()))
-
-
 def scale_stylesheet(stylesheet: str) -> str:
     """缩放样式表中的 px 值
 
@@ -109,17 +82,3 @@ def scale_stylesheet(stylesheet: str) -> str:
         return f"{scaled}px"
 
     return re.sub(r'(\d+(?:\.\d+)?)px', replace_px, stylesheet)
-
-
-def dp(value: int) -> int:
-    """density-independent pixels 的简写
-
-    与 scale() 相同，提供更简短的调用方式。
-
-    Args:
-        value: 基准像素值
-
-    Returns:
-        缩放后的像素值
-    """
-    return scale(value)

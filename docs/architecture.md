@@ -71,7 +71,7 @@ PanzerNote/
 ├── tests/                          # 单元测试 + 性能基准测试（tests/benchmarks/）
 │
 ├── src/                            # ══════ 源代码 ══════
-│   ├── __init__.py                 # 版本号唯一真相源（__version__/get_version/get_version_tuple）
+│   ├── __init__.py                 # 版本号唯一真相源（__version__/get_version_tuple）
 │   ├── main_window.py              # 主窗口协调者（两阶段关闭/会话恢复协调/信号回调/窗口事件/命令面板/插件主题集成；动作经控制器一行委托）
 │   │
 │   ├── core/                       # ── 核心模块 ──
@@ -481,8 +481,7 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 - **`TOKEN_MAP` 映射表**：60+ 条 `{Pygments Token → syntax_* token}` 映射，覆盖 Keyword/Name/Literal/Comment/Operator/Punctuation/Text/Error/Generic 等所有 Pygments token 层级
 - **跨主题装饰**：`_TOKEN_BOLD` / `_TOKEN_ITALIC` frozenset 统一管理粗体/斜体装饰，不随主题切换变化
 - **编辑器端**：`get_editor_formats(theme_engine)` → 经 `v2_syntax_colors()` 动态构建 `{Token: QTextCharFormat}`
-- **预览端**：`highlight_code_html(code, language, theme_engine)` → 从主题颜色生成 Pygments style class，输出内联样式 HTML
-- **预览 CSS**：`get_preview_css(theme_engine)` → 从主题颜色生成代码高亮 CSS 变量，注入 Markdown 预览
+- **预览/导出端**：`highlight_code_html(code, language, theme_engine)` → 从主题颜色生成 Pygments style class，输出内联样式 HTML（预览与 PDF 导出共用）
 - 切换主题时语法高亮颜色无需任何额外处理——manager `theme_committed` 信号触发订阅组件经 v2 token 重读，颜色自动跟随（详见 [color_audit.md](theme-design/color_audit.md)）
 
 ### 4.7 小秘书 (`game/secretary_widget.py`)
@@ -502,7 +501,7 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
   - 若已启用：`scale_factor = 1.0`（Qt 自动处理 DPI 缩放，dpi_helper 所有 scale 函数为 no-op）
   - 若未启用：基于 `logicalDotsPerInch` / `devicePixelRatio` 计算缩放因子
 - **注意**：当前 `main.py` 已启用 `AA_EnableHighDpiScaling`，因此 dpi_helper 在生产环境中实际为 no-op
-- `scale(value)` / `scale_size(w, h)` / `scale_font(pt)` / `scale_stylesheet(css)` / `dp(value)`
+- `scale(value)` / `scale_stylesheet(css)`
 
 ### 4.9 快捷键管理 (`core/shortcut_manager.py`)
 
@@ -781,7 +780,6 @@ src/__init__.py (__version__ = "2.2.0")
 
 **工具函数**：
 
-- `get_version()` — 返回版本号字符串
 - `get_version_tuple()` — 返回版本号元组，如 `(1, 8, 0)`
 
 **版本一致性验证** (`scripts/verify_version.py`)，5 项检查：

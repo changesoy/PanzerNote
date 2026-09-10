@@ -1,6 +1,5 @@
 # PanzerNote 核心依赖
 PyQt6>=6.11.0
-PyQt6-WebEngine>=6.11.0
 shiboken6>=6.11.2  # PyQt6 绑定依赖，isValid 校验 C++ 对象存活
 Pygments>=2.21.0
 markdown>=3.10.3

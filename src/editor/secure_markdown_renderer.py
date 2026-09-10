@@ -405,7 +405,7 @@ def convert_layout_css_for_qtext(theme_colors: dict[str, str]) -> str:
     #    QTextDocument 不支持 :not()，第 3 步把 `:not(pre) > code` 降级成了
     #    `code`，行内代码的底色/内边距/边框因此一并落到代码块里的 <code> 上，
     #    与容器 <pre> 的代码块底色叠成「文字处一色、行内空白另一色」的双色块。
-    #    这里用 Qt 支持的后代选择器复位（与 WebEngine 模板的 pre code 规则同义）。
+    #    这里用 Qt 支持的后代选择器复位（行内代码规则只应作用于代码块之外）。
     result += (
         "\npre code { background-color: transparent;"
         " padding: 0; border: none; }\n"

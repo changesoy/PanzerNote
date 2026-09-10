@@ -65,7 +65,7 @@ class _SnapshotOverlay(QWidget):
     """全区域覆盖遮罩：pixmap 有效时绘制旧帧，否则填 surface_primary 纯色 veil。
 
     与 QGraphicsOpacityEffect 不同，直接自绘 pixmap + 全局 alpha（主设计 4.5），
-    避免对 WebEngine / 复杂 widget 引入 effect 副作用。动画期间不吞鼠标事件
+    避免对预览等复杂 widget 引入 effect 副作用。动画期间不吞鼠标事件
     （150~250ms，避免切换瞬间点击丢失）。
     """
 

@@ -23,7 +23,6 @@ classifiers = [
 ]
 dependencies = [
     "PyQt6>=6.11.0",
-    "PyQt6-WebEngine>=6.11.0",
     "shiboken6>=6.11.2",  # PyQt6 绑定，isValid 校验 C++ 对象存活（main_window.py 直接导入）
     "Pygments>=2.21.0",
     "markdown>=3.10.3",
@@ -82,7 +81,7 @@ show_column_numbers = true
 show_error_context = true
 
 [[tool.mypy.overrides]]
-module = ["PyQt6.*", "PyQt6.QtCore", "PyQt6.QtWidgets", "PyQt6.QtGui", "PyQt6.QtWebEngineWidgets", "markdown", "pygments.*", "yaml", "cssbeautifier", "send2trash"]
+module = ["PyQt6.*", "PyQt6.QtCore", "PyQt6.QtWidgets", "PyQt6.QtGui", "markdown", "pygments.*", "yaml", "cssbeautifier", "send2trash"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

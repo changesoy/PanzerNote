@@ -35,7 +35,6 @@ from .core.shortcut_manager import ShortcutManager
 from .core.path_resolver import load_json, save_json
 from .game.game_engine import GameEngine
 from .editor.editor_tabs import EditorTabWidget
-from .editor.webengine_runtime import WebEngineRuntime
 from .editor.status_bar import StatusBarWidget
 from .editor.file_open_service import FileOpenService, FileOpenSource, FileOpenSecurityError, _is_inside_root
 from .editor.file_action_controller import FileActionController
@@ -125,8 +124,6 @@ class MainWindow(QMainWindow):
             parent=self,
         )
 
-        self.webengine_runtime = WebEngineRuntime(self)
-
         # 保存待恢复的最大化状态（不在 __init__ 期间显示窗口）
         self._initial_maximized = bool(
             self.config.get_window_setting("maximized", False)
@@ -152,7 +149,6 @@ class MainWindow(QMainWindow):
             self.config,
             self.theme_engine,
             self.shortcut_manager,
-            self.webengine_runtime,
             self._document_registry,
         )
 
@@ -232,11 +228,9 @@ class MainWindow(QMainWindow):
         self.secretary = ui.secretary
         self.shortcut_panel = ui.shortcut_panel
 
-        self.webengine_runtime.prepare_startup_anchor(self.editor_container)
         self.view_coordinator = ViewCoordinator(
             self.config,
             self.theme_engine,
-            self.webengine_runtime,
             self.editor_splitter,
             self.editor_tabs,
             self.find_replace_bar,

@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QLineEdit, QTreeWidget, QTreeWidgetItem,
     QPushButton, QHeaderView,
-    QDialog, QKeySequenceEdit
+    QDialog, QKeySequenceEdit, QApplication
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QKeySequence
@@ -160,6 +160,11 @@ class ShortcutPanel(ThemeAwareMixin, QWidget):
         self.setObjectName("ShortcutPanel")
         self.setWindowTitle("快捷键提示")
         self.setMinimumSize(scale(500), scale(400))
+        # 限制最大高度为屏幕可用高度的 80%，避免超出屏幕
+        screen = QApplication.primaryScreen()
+        if screen is not None:
+            max_h = int(screen.availableGeometry().height() * 0.8)
+            self.setMaximumHeight(max_h)
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowStaysOnTopHint)
 
         layout = QVBoxLayout(self)

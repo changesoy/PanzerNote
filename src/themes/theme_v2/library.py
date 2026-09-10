@@ -448,6 +448,17 @@ QDialog {{
 QMessageBox {{
     background-color: {s['background']};
 }}
+/* 对话框内 QScrollArea 的 viewport/内容容器默认不继承 QDialog 背景，
+   会露出 QPalette.Base 浅色（如记事本设置滚动区），需显式覆盖。
+   objectName 级规则（如 ThemePreviewArea）优先级更高，不受影响。 */
+QDialog QScrollArea {{
+    background-color: {s['background']};
+    border: none;
+}}
+QDialog QScrollArea > QWidget,
+QDialog QScrollArea > QWidget > QWidget {{
+    background-color: {s['background']};
+}}
 """
 
 

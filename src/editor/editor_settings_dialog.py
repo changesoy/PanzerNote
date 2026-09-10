@@ -13,7 +13,7 @@ v1.5.5 改动：
 from PyQt6.QtWidgets import (
     QWidget, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox,
     QPushButton, QSpinBox, QComboBox, QGroupBox, QFormLayout,
-    QFontComboBox, QSlider
+    QFontComboBox, QSlider, QScrollArea, QApplication
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
@@ -30,12 +30,25 @@ class EditorSettingsDialog(QDialog):
         self.config = config
         self.setWindowTitle("记事本设置")
         self.setMinimumWidth(450)
+        # 限制最大高度为屏幕可用高度的 85%，超出时滚动区域接管
+        screen = QApplication.primaryScreen()
+        if screen is not None:
+            max_h = int(screen.availableGeometry().height() * 0.85)
+            self.setMaximumHeight(max_h)
 
         self._init_ui()
         self._load_settings()
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
+
+        # ── 滚动区域（内容超出屏幕时可滚动） ──
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
 
         # ── 显示选项 ──
         display_group = QGroupBox("显示")
@@ -47,7 +60,7 @@ class EditorSettingsDialog(QDialog):
         self.highlight_current_line_cb = QCheckBox()
         display_layout.addRow("高亮当前行:", self.highlight_current_line_cb)
 
-        layout.addWidget(display_group)
+        scroll_layout.addWidget(display_group)
 
         # ── 缩略图选项 ──
         minimap_group = QGroupBox("代码缩略图")
@@ -62,7 +75,7 @@ class EditorSettingsDialog(QDialog):
         )
         minimap_layout.addRow("自动开关缩略图:", self.auto_minimap_cb)
 
-        layout.addWidget(minimap_group)
+        scroll_layout.addWidget(minimap_group)
 
         # ── 编辑器选项 ──
         editor_group = QGroupBox("编辑器")
@@ -117,7 +130,7 @@ class EditorSettingsDialog(QDialog):
         self.completion_min_chars_spin.setToolTip("输入多少字符后触发补全提示")
         editor_layout.addRow("补全最少字符数:", self.completion_min_chars_spin)
 
-        layout.addWidget(editor_group)
+        scroll_layout.addWidget(editor_group)
 
         # ── 大文件选项（Wave 4 E3）──
         large_file_group = QGroupBox("大文件")
@@ -131,7 +144,7 @@ class EditorSettingsDialog(QDialog):
         )
         large_file_layout.addRow("大文件模式:", self.large_file_mode_cb)
 
-        layout.addWidget(large_file_group)
+        scroll_layout.addWidget(large_file_group)
 
         # ── 界面选项（Wave 8 B7：view.motion_level 三档）──
         interface_group = QGroupBox("界面")
@@ -146,7 +159,7 @@ class EditorSettingsDialog(QDialog):
         )
         interface_layout.addRow("界面动效:", self.motion_level_combo)
 
-        layout.addWidget(interface_group)
+        scroll_layout.addWidget(interface_group)
 
         # ── 小秘书选项 ──
         secretary_group = QGroupBox("小秘书")
@@ -175,7 +188,12 @@ class EditorSettingsDialog(QDialog):
 
         secretary_layout.addRow("尺寸占比:", size_widget)
 
-        layout.addWidget(secretary_group)
+        scroll_layout.addWidget(secretary_group)
+
+        # 收尾滚动区域
+        scroll_layout.addStretch()
+        scroll.setWidget(scroll_content)
+        layout.addWidget(scroll)
 
         # ── 按钮 ──
         button_layout = QHBoxLayout()

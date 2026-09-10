@@ -63,12 +63,6 @@ _IMG_SRC_RE = re.compile(
     re.IGNORECASE,
 )
 
-# 用于在 QTextDocument 中标记代码块起止位置的 Unicode 角括号
-_MK_S1 = "\u231C"  # ⌜
-_MK_S2 = "\u231D"  # ⌝
-_MK_E1 = "\u231E"  # ⌞
-_MK_E2 = "\u231F"  # ⌟
-
 from .secure_markdown_renderer import (
     CODEBLOCK_RE as _CODEBLOCK_RE,
     MARKDOWN_LAYOUT_CSS as _MARKDOWN_LAYOUT_CSS,
@@ -179,13 +173,6 @@ body {{
     white-space: pre;
     background: transparent !important;
 }}
-.code-marker {{
-    font-size: 1px;
-    color: transparent;
-    user-select: none;
-    pointer-events: none;
-}}
-
 .code-copy-btn {{
     display: none;
     position: absolute;
@@ -1200,10 +1187,8 @@ a {{
 
     @staticmethod
     def _build_container(index: int, code_html: str, source_line: Optional[int] = None) -> str:
-        """构建代码块 HTML 容器：浅蓝背景 + 首尾不可见标记 + 逐行锚点。
+        """构建代码块 HTML 容器：浅蓝背景 + 逐行锚点 + 悬停复制按钮。
         """
-        sm = f"{_MK_S1}{index}{_MK_S2}"
-        em = f"{_MK_E1}{index}{_MK_E2}"
         line_attr = ""
         if source_line is not None:
             line_attr = f' data-source-line="{source_line}"'
@@ -1216,9 +1201,7 @@ a {{
             f'<div class="code-container src-line"{line_attr}>'
             f'<button class="code-copy-btn" data-code-index="{index}"'
             f' title="复制到剪贴板">\U0001f4cb</button>'
-            f'<span class="code-marker">{sm}</span>'
             f'<pre class="code-pre"><code class="code-block">{code_html}</code></pre>'
-            f'<span class="code-marker">{em}</span>'
             f'</div>'
         )
 

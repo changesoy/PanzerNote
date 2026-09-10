@@ -10,9 +10,9 @@
 
 **打包瘦身（538 MB → 约 362 MB，无功能损失）**
 
-- 排除未使用的 PyQt6 模块（Quick3D/Multimedia/Sensors/SerialPort/SpatialAudio/StateMachine/TextToSpeech 等，经依赖闭包探针确认非 WebEngine 传递依赖）
-- 翻译只保留 `qt_zh_CN.qm`；删除 WebEngine debug 资源（devtools/v8 快照）
-- qml 目录只保留 WebEngine 运行必需的 QtQml/QtQuick/QtWebEngine，联动裁剪 28 个 bin DLL
+- 排除未使用的 PyQt6 模块对应 DLL（Quick3D/Multimedia/Sensors/SerialPort/SpatialAudio/TextToSpeech/RemoteObjects/WebSockets 等，经依赖闭包探针确认非 WebEngine 传递依赖；QtQml/StateMachine 因其 QML 插件随 QtQml 一并保留，未剔除）
+- 翻译裁剪为中文与英文两种（实测包内 12 个 `.qm`，全部为 `_zh_CN.qm` / `_en.qm`）；删除 WebEngine debug 资源（devtools/v8 快照，实测剔除 `qtwebengine_devtools_resources.debug.pak` 等约 77 MB）
+- qml 目录只保留 WebEngine 运行必需的 QtQml/QtQuick/QtWebEngine，联动裁剪 27 个 bin DLL
 - 删除 `opengl32sw.dll` 软件 OpenGL 兜底渲染器（正常 GPU 驱动环境不需要）
 - `PanzerNote.spec` 纳入版本控制：方案 A（去 WebEngine）与方案 B（WebEngine 单路径）需要不同的打包裁剪配置，而 spec 是跨分支共用的同一物理文件，纳入版本管理后由 git 随分支切换
 
@@ -31,6 +31,7 @@
 - 删除 A/B 两个实验分支共同的 10 项死代码（`get_preview_css`、`build_format`、`scale_size`、`scale_font`、`dp`、`get_all_flags`、`detect_eol`、`get_version`、`ComponentState`、`_get_code_highlight_theme`）
 - 收敛 fenced code 识别逻辑为单一来源：`secure_markdown_renderer.CODEBLOCK_RE` / `extract_language_from_code_attrs`，`markdown_preview` 改为导入复用，消除逐字重复的正则与职责重叠的语言提取实现
 - 导出渲染删除"无主题引擎则退化为纯文本代码块"的静默降级路径：`ExportService.render_content` / `export_html` / `export_pdf` 的 `theme_engine` 改为必填
+- 删除预览代码块的 QTextBrowser 时代遗留占位标记：`markdown_preview` 中 `_MK_S1/_MK_S2/_MK_E1/_MK_E2` 常量、`.code-marker` 样式与 `_build_container` 中的首尾隐藏 `<span>` 一并移除（单路径化后复制走 `self._code_blocks[idx]`，不依赖渲染 DOM）
 
 **UI 修复**
 

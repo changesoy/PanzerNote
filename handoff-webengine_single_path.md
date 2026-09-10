@@ -153,7 +153,12 @@ src+tests 全量 0 命中，历史文档除外）。
       的 `PermissionError`（WinError 5），单独重跑该文件 13 passed，属环境抖动。
       mypy：`no issues found in 124 source files`）
 - [ ] 打包体积 ≤ 320 MB（目标约 300 MB），`data/assets` 完整
-      **未达标**：实测约 362 MB（较基线 538 MB 降约 33%，但仍高于 320 MB 验收线）
+      **未达标**：实测约 362 MB（较基线 538 MB 降约 33%，但仍高于 320 MB 验收线）。
+      2026-09-11 重打包（含导出渲染补齐与 code-marker 清理后的代码）实测 **362.5 MB**，
+      与上一版一致；spec 各裁剪规则已逐条复核生效：
+      `opengl32sw.dll` 不在包内、`*.debug.pak`/`*.debug.bin` 0 个、qml 顶层仅
+      QtQml/QtQuick/QtWebEngine、被排除的 bin DLL 0 命中、translations 12 个全部为
+      `_zh_CN.qm`/`_en.qm`、`data/assets`（icons/portraits/gamedata/help）完整
 - [ ] 目标机启动正常：预览、PDF 导出、明暗主题、插件 4 项手工验证通过
       本文件无独立记录可查；且本次导出渲染变更（见 §11）改变了导出产物，**该项需重做**
 - [x] WebEngine 加载失败 = 预览不可用（接受的行为变化，写入 CHANGELOG 说明）
@@ -169,12 +174,16 @@ src+tests 全量 0 命中，历史文档除外）。
 ## 8. 验证命令
 
 ```powershell
-# 构建
-Remove-Item -Recurse -Force build, dist -ErrorAction SilentlyContinue
+# 构建（产物目录按分支区分：B 的产物固定为 dist\PanzerNote-B-WebEngine，
+# 与方案 A 的 dist\PanzerNote-A-Light 并列，供体积/行为对照。
+# 注意勿删 dist 整目录——A 的产物保留在 dist\PanzerNote-A-Light。）
+Remove-Item -Recurse -Force build -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force 'dist\PanzerNote-B-WebEngine' -ErrorAction SilentlyContinue
 .\.venv\Scripts\pyinstaller.exe --noconfirm --clean PanzerNote.spec
+Rename-Item 'dist\PanzerNote' 'PanzerNote-B-WebEngine'
 
 # 体积测量
-$d = (Get-ChildItem -Recurse -File 'dist\PanzerNote' | Measure-Object -Property Length -Sum).Sum
+$d = (Get-ChildItem -Recurse -File 'dist\PanzerNote-B-WebEngine' | Measure-Object -Property Length -Sum).Sum
 '{0:N1} MB' -f ($d / 1MB)
 
 # 测试与类型检查（详见 pytest-tiered-timeout-hunter / python-virtualenv-quick-reference）
@@ -227,9 +236,43 @@ $d = (Get-ChildItem -Recurse -File 'dist\PanzerNote' | Measure-Object -Property 
 
 1. 真机重验「导出 PDF / 导出 HTML」——本次改动直接改变导出产物，自动测试不覆盖
    浏览器打印观感。
-2. 体积：实测约 362 MB 未达 320 MB 线。可选后续方向：Pygments lexer 裁剪、
-   PIL 插件裁剪、复核 qml/bin 的剩余项。
-3. 遗留物清理（低优先）：`markdown_preview._MK_S1/_MK_S2/_MK_E1/_MK_E2` 与
-   `.code-marker` 占位标记在单路径化后已无消费方，可评估删除。
-4. 跨分支共性问题（B1 重复实现、B2 静默降级）已记入 `111.txt`「六」「七」，
+2. 体积：实测约 362 MB 未达 320 MB 线。已核实的候选（2026-09-11 依 `build/PanzerNote/
+xref-PanzerNote.html` 与包内实测，**均未改动 spec**）：
+   - `PIL` 12.8 MB：唯一引入方是 `pygments.formatters.img`（xref 证据），而全仓源码
+     零 `PIL` 引用、项目只用 `HtmlFormatter` 输出 HTML → 可用 `excludes=['PIL']`
+     或排除该 formatter 剔除；`Pillow` 目前仍是 `pyproject.toml` 声明依赖但无调用方
+   - `Qt6/resources/qtwebengine_devtools_resources.pak` 11.1 MB（非 debug 版，DevTools
+     资源）；删前需确认不打开 DevTools 的使用路径
+   - Qt6QuickControls2 的 Imagine/Material/Universal 等样式 DLL（约 7 MB，未验证是否
+     为 WebEngine 所需）
+   - `Qt6Pdf.dll`/`Qt6PdfQuick.dll` 4.4 MB：WebEngine 内置 PDF 阅读器可能依赖，
+     **未验证，不建议动**
+3. 跨分支共性问题（B1 重复实现、B2 静默降级）已记入 `111.txt`「六」「七」，
    待 A 分支处理。
+
+已处理：原第 3 项遗留物清理已完成 —— `markdown_preview` 的 `_MK_S1/_MK_S2/
+_MK_E1/_MK_E2` 常量、`.code-marker` CSS 与 `_build_container` 中的两个占位
+`<span>` 已删除（B 分支无消费方：复制走 `self._code_blocks[idx]`，不依赖 DOM；
+A 分支仍在用，其 `TestStripPreviewMarkers` 以 `@a_only` 门控在 B 上跳过）。
+
+### 11.4 spec 复核与重打包（2026-09-11）
+
+**spec 结论：无需修改。** 本轮代码改动（导出渲染补齐、fenced code 去重、code-marker
+删除）不涉及 PyQt6 模块/资源增删，spec 既有规则逐条在包内复核生效（见 §6 体积项）。
+复核中发现两处**文档**与产物的偏差，已在 `CHANGELOG.md` 修正（不改 spec）：
+
+- 原文「翻译只保留 `qt_zh_CN.qm`」不实：spec 的 `_keep_translation` 保留 `_zh_CN.qm`
+  与 `_en.qm`，实测包内 12 个 `.qm` 全部落在这两类（A 分支 spec 同规则）。
+- 原文把 `StateMachine` 列为「已排除模块」不实：`QtQml/StateMachine` QML 插件随
+  `_QML_KEEP_TOP` 的 `QtQml` 一并保留，故 `Qt6StateMachine(Qml).dll` 仍在包内；
+  已改为说明「随 QtQml 保留，未剔除」。
+
+**重打包**：按 §8 命令重建（保留 `dist\PanzerNote-A-Light`，产物落在
+`dist\PanzerNote-B-WebEngine`），实测 362.5 MB，与上一版持平。`warn-PanzerNote.txt`
+仅含预期项（posix 专属 `fcntl/grp/pwd`、`_posixsubprocess`、PIL 的可选 `olefile`、
+Pygments 可选 `chardet` 等），无新增 top-level 缺失。
+
+**验证**（2026-09-11）：全量 `mypy src/` 零错误（124 文件）；全量 tiered pytest
+1438 passed / 33 skipped / 3 failed —— 3 例均为临时目录 `os.replace` 的
+`PermissionError`（WinError 5），且该轮运行日志出现 TRAE 沙箱拦截提示；三文件
+单独重跑 **93 passed**，与改动无关。

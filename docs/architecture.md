@@ -446,7 +446,7 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 
 - 代码块容器 `.code-container` 内嵌 `<button class="code-copy-btn" data-code-index="N">`，由 CSS `.code-container:hover .code-copy-btn` 控制悬停显示；单路径化后不再需要 `QTextDocument` 命中测试与 `mouseMoveEvent` 判定
 - 点击由预览页内 JS 捕获（`e.target.closest('.code-copy-btn')`），经 `document.title = '__pncopy__:N'` 回传索引，Python 侧在标题变更回调中按索引取源码执行复制，并临时把按钮文案换成 ✔ 作为反馈
-- 代码块首尾仍插入 `<span class="code-marker">⌜N⌝ / ⌞N⌟</span>` 占位标记（CSS 以 1px 透明隐藏）；这些标记原用于 `QTextDocument.find()` 定位，单路径化后未见消费方，属待清理的遗留物
+- 复制源码由 Python 侧 `self._code_blocks[index]` 提供，不依赖渲染后的 DOM；QTextBrowser 时代用于 `QTextDocument.find()` 定位的一对不可见占位标记（`⌜N⌝ / ⌞N⌟`）及 `.code-marker` 样式已随单路径化删除（A 分支仍在用，其测试以 `@a_only` 门控在 B 上跳过）
 
 **源码行号同步**：
 

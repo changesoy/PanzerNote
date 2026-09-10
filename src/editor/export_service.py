@@ -45,15 +45,12 @@ class ExportService:
     PDF_RESOLUTION = 96
 
     @staticmethod
-    def _code_highlighter(theme_engine: ThemeEngine | None) -> CodeHighlighter | None:
+    def _code_highlighter(theme_engine: ThemeEngine) -> CodeHighlighter:
         """导出用代码高亮器：固定亮色变体的 syntax 配色。
 
         导出文档打印在白底上，深色主题的语法配色会糊在白底里，故与导出配色
-        一致地取 light 变体。theme_engine 为 None 时返回 None（代码块退化为
-        纯文本，不抛出）。
+        一致地取 light 变体。
         """
-        if theme_engine is None:
-            return None
         variant_id = v2_export_variant_id(theme_engine)
 
         def _highlight(code: str, language: str) -> str:
@@ -77,14 +74,15 @@ class ExportService:
 
     @staticmethod
     def render_content(content: str, is_markdown: bool,
-                       theme_engine: ThemeEngine | None = None) -> str:
+                       theme_engine: ThemeEngine) -> str:
         """渲染内容为安全的 HTML 片段
 
         参数：
           content：原始文本
           is_markdown：是否按 Markdown 渲染
-          theme_engine：主题引擎（提供时对 fenced code 做语法高亮，
-            与预览同源、固定亮色变体配色）
+          theme_engine：主题引擎，对 fenced code 做语法高亮（与预览同源、
+            固定亮色变体配色）。必填——不提供「无主题引擎则退化为纯文本
+            代码块」的降级路径。
 
         返回：安全的 HTML 片段
         """
@@ -96,8 +94,8 @@ class ExportService:
 
     @staticmethod
     def export_html(content: str, is_markdown: bool, filepath: str, colors,
-                    title: str = "", file_guard=None,
-                    theme_engine: ThemeEngine | None = None) -> None:
+                    theme_engine: ThemeEngine, title: str = "",
+                    file_guard=None) -> None:
         """导出为 HTML 文件
 
         参数：
@@ -105,9 +103,9 @@ class ExportService:
           is_markdown：是否按 Markdown 渲染
           filepath：导出文件路径
           colors：v2_export_colors 产物（dict），提供主题色值
+          theme_engine：主题引擎，用于代码块语法高亮（必填）
           title：文档标题
           file_guard：FileGuard 实例（必填），写入经 safe_write_bytes 安全执行
-          theme_engine：主题引擎，用于代码块语法高亮（可选）
 
         异常：文件写入失败时抛出 IOError
         """
@@ -121,16 +119,16 @@ class ExportService:
         )
 
     @staticmethod
-    def export_pdf(content: str, is_markdown: bool, colors, title: str = "",
-                   theme_engine: ThemeEngine | None = None) -> bytes:
+    def export_pdf(content: str, is_markdown: bool, colors,
+                   theme_engine: ThemeEngine, title: str = "") -> bytes:
         """渲染为 PDF 字节（QTextDocument.print 同步完成）
 
         参数：
           content：原始文本
           is_markdown：是否按 Markdown 渲染
           colors：v2_export_colors 产物（dict），提供主题色值
+          theme_engine：主题引擎，用于代码块语法高亮（必填）
           title：文档标题
-          theme_engine：主题引擎，用于代码块语法高亮（可选）
 
         返回：PDF 字节
 

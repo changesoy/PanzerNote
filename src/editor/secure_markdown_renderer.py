@@ -62,17 +62,32 @@ _JAVASCRIPT_URL_UNQUOTED_RE = re.compile(
 )
 
 # fenced code 输出（与预览同构：<pre><code class="language-x">…</code></pre>）
-_CODEBLOCK_RE = re.compile(
+# 公开名：预览（markdown_preview）与导出共用同一份识别逻辑，避免两处各自维护
+CODEBLOCK_RE = re.compile(
     r'<pre(?P<pre_attrs>[^>]*)>\s*'
     r'<code(?P<code_attrs>[^>]*)>'
     r'(?P<body>.*?)'
     r'</code>\s*</pre>',
     re.DOTALL | re.IGNORECASE,
 )
-_LANGUAGE_RE = re.compile(
-    r'class\s*=\s*["\'][^"\']*language-([\w+#.-]+)',
-    re.IGNORECASE,
-)
+
+
+def extract_language_from_code_attrs(attrs: str) -> str:
+    """从 code 标签的属性串中提取语言名称（预览/导出共用）。
+
+    同时识别 class="language-x" 与 class="lang-x" 两种前缀。
+    """
+    m = re.search(r'class="([^"]*)"', attrs or "")
+    if not m:
+        return ""
+    classes = m.group(1).split()
+    for cls in classes:
+        if cls.startswith("language-"):
+            return cls.removeprefix("language-")
+        if cls.startswith("lang-"):
+            return cls.removeprefix("lang-")
+    return ""
+
 
 # 代码高亮回调：(源码, 语言名) → 含内联样式的 HTML 片段
 CodeHighlighter = Callable[[str, str], str]
@@ -116,14 +131,13 @@ def _apply_code_highlight(html_text: str, highlight: CodeHighlighter) -> str:
     使导出的代码块与预览保持同一套语法高亮；无回调时保持纯文本代码块。
     """
     def _replace(match: re.Match[str]) -> str:
-        lang_match = _LANGUAGE_RE.search(match.group("code_attrs") or "")
-        language = lang_match.group(1) if lang_match else ""
+        language = extract_language_from_code_attrs(match.group("code_attrs") or "")
         raw = html_module.unescape(match.group("body"))
         if raw.endswith("\n"):
             raw = raw[:-1]
         return f"<pre><code>{highlight(raw, language)}</code></pre>"
 
-    return _CODEBLOCK_RE.sub(_replace, html_text)
+    return CODEBLOCK_RE.sub(_replace, html_text)
 
 
 def render_markdown_to_safe_html(

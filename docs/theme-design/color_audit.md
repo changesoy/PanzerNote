@@ -124,17 +124,22 @@ allowed 类别之一（v2 解析回退默认值 / 设计常量 / 游戏域常量
 ~~Preview template and export document each maintained a copy of the Markdown content
 layout CSS (headings / table / code / list / quote …), drifting from each other over time.~~
 **RESOLVED (Wave 1.5)**: single source `MARKDOWN_LAYOUT_CSS` in
-`src/editor/secure_markdown_renderer.py`, consumed by both the preview template
-(`markdown_preview.PREVIEW_HTML_TEMPLATE`) and the export document
-(`build_export_html_document`). Colors are referenced via CSS variables
+`src/editor/secure_markdown_renderer.py`, consumed by both the preview and the export
+document. Colors are referenced via CSS variables
 (`--text-primary` / `--border` / `--surface` …), injected from theme tokens by each consumer.
+
+**Scheme A update (branch `refactor20260910-lightweight_preview`)**: the preview template
+`markdown_preview.PREVIEW_HTML_TEMPLATE` was removed together with WebEngine. Preview and
+PDF export now both inline `MARKDOWN_LAYOUT_CSS` through `convert_layout_css_for_qtext()`
+— from `markdown_preview._qtext_theme_colors()` and `build_export_qtext_html_document()`
+respectively.
 
 **Render path decision (Wave 1.5)**:
 
-- Primary preview path: `markdown_preview.py` (markdown-it-py, with source-line injection / async highlight / local image resolution). Not a legacy renderer.
+- Primary preview path: `markdown_preview.py` (markdown-it-py, with source-line injection / async highlight / local image resolution). Not a legacy renderer. Since Scheme A the preview widget is `QTextBrowser` / `QTextDocument`; there is no WebEngine branch.
 - Unified safe render + export entry: `secure_markdown_renderer.py`
   (`render_markdown_to_safe_html` / `render_plain_text_to_safe_html` /
-  `build_export_html_document`), kept and used for HTML/PDF export, preview fallback,
+  `build_export_html_document` / `build_export_qtext_html_document`), kept and used for HTML/PDF export, preview fallback,
   and `strip_dangerous_html` sanitization reused by the preview.
 - Layout CSS that is allowed to stay local to each consumer: document shell (`body`),
   preview-only interactive styles (TOC / code-container / copy button / folding / scrollbar),

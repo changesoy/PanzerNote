@@ -23,7 +23,7 @@
 
 1. 方案 A 在独立实验分支进行（副本尝试），成败不影响 main。
 2. 先看效果再定：首个可交付物是渲染观感对比（vertical slice），由用户决策是否继续。
-3. 方案 C（reportlab 自绘 PDF）仅当 A 的 QPrinter 打印效果不满足时启用，属兜底选项。
+3. 方案 C（reportlab 自绘 PDF）仅当 A 的 Qt 原生打印（`QPdfWriter`）效果不满足时启用，属兜底选项。
 
 ## 2. 基线现状（映射到改动面）
 
@@ -36,7 +36,7 @@
 | 内联样式高亮   | `src/editor/highlight_themes.py`（Pygments formatter，标注"适用于 QTextBrowser"） | 现成，供 QTextDocument 渲染                                                     |
 | 比例滚动同步   | `markdown_preview.py:1633-1642`                                                   | 已有的非引擎行号同步 fallback，需强化精度                                       |
 | CSS 模板       | `secure_markdown_renderer.MARKDOWN_LAYOUT_CSS`                                    | 使用 `:root` 变量/现代 CSS，QTextDocument 只支持有限子集，需转换                |
-| PDF 导出       | `src/editor/export_service.py:23-26, 111, 129`                                    | 现走 `printToPdf`；A 改为 `QPrinter` + `QTextDocument.print_()`                 |
+| PDF 导出       | `src/editor/export_service.py:23-26, 111, 129`                                    | 现走 `printToPdf`；A 改为 `QPdfWriter` + `QTextDocument.print()`                |
 
 ### 2.2 体积对照
 
@@ -53,7 +53,7 @@
 - 渲染唯一化到 QTextBrowser（QTextDocument）+ 现有 HTML 管线。
 - 体积进入 60–100 MB 区间。
 - 预览核心功能保留：Markdown 常见语法、代码高亮、本地图片、明暗主题、复制按钮。
-- PDF 导出以 `QPrinter` 替换 `printToPdf`。
+- PDF 导出以 `QPdfWriter` + `QTextDocument.print()` 替换 `printToPdf`。
 
 **非目标**
 
@@ -92,7 +92,8 @@
 
 ### A3 PDF 导出替换
 
-- `QPrinter` + `QTextDocument.print_()` 渲染导出 HTML（复用 `build_export_html_document`）。
+- `QPdfWriter` + `QTextDocument.print()` 渲染导出 HTML（导出文档由
+  `build_export_qtext_html_document` 构建，复用 `MARKDOWN_LAYOUT_CSS` 的 CSS 子集转换）。
 - 与原 `printToPdf` 效果对比：分页、中文字体、代码块换行三个检查点。
 - 效果不足 → 决策点：启用方案 C（reportlab 自绘）前必须经用户确认。
 
@@ -117,7 +118,7 @@
 | `scripts/proto_qtextbrowser_preview.py`（新）               | A0 原型，验证后保留或删除          |
 | `src/editor/markdown_preview.py`                            | 渲染唯一化、同步/交互替代          |
 | `src/editor/secure_markdown_renderer.py`                    | CSS 子集转换（管线不动）           |
-| `src/editor/export_service.py`                              | QPrinter 替换 printToPdf           |
+| `src/editor/export_service.py`                              | QPdfWriter 替换 printToPdf         |
 | `src/editor/webengine_runtime.py`                           | 删除                               |
 | `main.py`                                                   | WebEngine 相关导入与时序删除       |
 | `pyproject.toml` / `requirements.txt`                       | 摘除 PyQt6-WebEngine               |

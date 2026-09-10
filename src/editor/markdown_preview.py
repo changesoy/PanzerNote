@@ -637,15 +637,7 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             html_content, self._collapsed_fold_lines()
         )
 
-        try:
-            full_html = self._build_qtext_full_html(html_content)
-        except Exception as exc:
-            get_logger(__name__).error(
-                "Markdown preview QTextDocument HTML 构建失败: %s",
-                exc,
-                exc_info=True,
-            )
-            full_html = self._build_qtext_full_html_fallback(html_content)
+        full_html = self._build_qtext_full_html(html_content)
 
         # setHtml 会把预览滚动条归零。该"程序性归零"必须与用户滚动区分开：
         # 否则会经 _on_preview_scroll 反向把编辑器拖回文档开头
@@ -701,17 +693,6 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             f"{layout_css}"
             "</style></head>"
             f'<body style="background-color:{bg};color:{fg};">'
-            f"{html_content}</body></html>"
-        )
-
-    def _build_qtext_full_html_fallback(self, html_content: str) -> str:
-        """CSS 构建失败时的降级 HTML（字面量 = v1 light 值，B8 语义）。"""
-        return (
-            "<html><head><style>\n"
-            "body { font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;"
-            " font-size: 14px; line-height: 1.7; }\n"
-            "</style></head>"
-            '<body style="background-color:#FFFFFF;color:#212121;">'
             f"{html_content}</body></html>"
         )
 

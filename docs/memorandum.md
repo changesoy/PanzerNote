@@ -40,7 +40,7 @@ PyQt6 导入
 Qt 初始化
 QApplication 创建
 主窗口构建
-QtWebEngine / Markdown 预览初始化
+Markdown 预览初始化
 主题、图标、字体加载
 插件扫描
 会话恢复
@@ -126,7 +126,6 @@ PyQt Widgets 继续优化
 
 ```text
 使用 python -X importtime 分析 import 耗时
-延迟导入 PyQt6.QtWebEngineWidgets
 延迟导入 markdown / pygments / PIL / cryptography 等重模块
 主窗口先显示，再加载重组件
 插件启动时只读取 plugin.json，不 import 插件代码

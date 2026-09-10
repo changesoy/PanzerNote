@@ -113,27 +113,32 @@
 
 ## 5. 关键文件清单
 
-| 文件                                                        | 改动                               |
-| ----------------------------------------------------------- | ---------------------------------- |
-| `scripts/proto_qtextbrowser_preview.py`（新）               | A0 原型，验证后保留或删除          |
-| `src/editor/markdown_preview.py`                            | 渲染唯一化、同步/交互替代          |
-| `src/editor/secure_markdown_renderer.py`                    | CSS 子集转换（管线不动）           |
-| `src/editor/export_service.py`                              | QPdfWriter 替换 printToPdf         |
-| `src/editor/webengine_runtime.py`                           | 删除                               |
-| `main.py`                                                   | WebEngine 相关导入与时序删除       |
-| `pyproject.toml` / `requirements.txt`                       | 摘除 PyQt6-WebEngine               |
-| `PanzerNote.spec`                                           | WebEngine 收集删除、排除清单继承   |
-| `tests/`                                                    | 涉及 WebEngine 抓帧/回退的测试改写 |
-| `docs/architecture.md` / `docs/roadmap.md` / `CHANGELOG.md` | 同步                               |
+| 文件                                                        | 改动                                                                   |
+| ----------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `scripts/proto_qtextbrowser_preview.py`（新，A0 后已删除）  | A0 原型，验证后删除                                                    |
+| `src/editor/markdown_preview.py`                            | 渲染唯一化、同步/交互替代                                              |
+| `src/editor/secure_markdown_renderer.py`                    | CSS 子集转换（管线不动）                                               |
+| `src/editor/export_service.py`                              | QPdfWriter 替换 printToPdf                                             |
+| `src/editor/webengine_runtime.py`                           | 删除                                                                   |
+| `main.py`                                                   | WebEngine 相关导入与时序删除                                           |
+| `pyproject.toml` / `requirements.txt`                       | 摘除 PyQt6-WebEngine                                                   |
+| `PanzerNote.spec`                                           | WebEngine 收集删除、排除清单继承                                       |
+| `tests/`                                                    | 两分支共用，按实现能力门控（`@a_only` / `@webengine_only` / 构造签名） |
+| `docs/architecture.md` / `docs/roadmap.md` / `CHANGELOG.md` | 同步                                                                   |
 
 ## 6. 验收标准
 
-- [ ] A0 决策门通过（用户确认观感）
-- [ ] 全量 tiered pytest 通过；全量 mypy 零错误
-- [ ] src+tests 中 `QWebEngineView`/`QtWebEngineWidgets`/`HAS_WEBENGINE` 0 命中
-- [ ] 打包体积 ≤ 100 MB 且 `data/assets` 完整
-- [ ] 预览：常见 md 语法、代码高亮、图片、复制按钮、双主题可用
-- [ ] PDF 导出与 printToPdf 版本对照三项检查点通过（或用户接受差异）
+- [x] A0 决策门通过（用户确认观感）
+- [x] 全量 tiered pytest 通过；全量 mypy 零错误（最终：pytest 1457 passed / 17 skipped，mypy 123 源文件 0 错误）
+- [x] `src/` 中 `QWebEngineView`/`QtWebEngineWidgets`/`HAS_WEBENGINE` 0 命中。
+      `tests/` 因两分支共用同一份用例，保留 B 侧等价用例并按实现门控
+      （`@webengine_only` 在 A 上跳过，不执行 WebEngine import）
+- [x] 打包体积 ≤ 100 MB 且 `data/assets` 完整（实测 90.1 MB，无 WebEngine / QML / `opengl32sw.dll` 残留）
+- [x] 预览：常见 md 语法、代码高亮、图片、复制按钮、双主题可用（A2 三轮真机复测通过）
+- [x] PDF 导出与 printToPdf 版本对照三项检查点通过（或用户接受差异）（A3 真机复测通过）
+
+> 尚未完成：打包产物真机 smoke（`dist\PanzerNote-A-Light\PanzerNote.exe`，重点验证删除
+> `opengl32sw.dll` 无副作用）与 PR 收尾（版本 bump + PR 文本），见执行文档 `111.md`。
 
 ## 7. 风险与回滚
 
@@ -146,8 +151,8 @@
 ## 8. 验证命令
 
 ```powershell
-# 原型
-.\.venv\Scripts\python.exe scripts/proto_qtextbrowser_preview.py
+# 原型：A0 完成后已删除（依赖 WebEngine 与已删模板，不可再运行）
+# scripts/proto_qtextbrowser_preview.py
 
 # 构建与体积
 Remove-Item -Recurse -Force build, dist -ErrorAction SilentlyContinue

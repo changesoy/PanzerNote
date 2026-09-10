@@ -413,7 +413,7 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 
 **渲染路径与样式单一来源（方案 A：轻量渲染，无 WebEngine）**：
 
-- 预览唯一渲染路径是 `QTextBrowser`（`PreviewBrowser`），不存在 WebEngine 分支与启动锚点。渲染实现位于 `markdown_preview.py`（markdown-it-py，含源码行号注入 / 异步高亮 / 本地图片解析）；`secure_markdown_renderer.py` 提供导出入口（`render_markdown_to_safe_html` / `build_export_qtext_html_document`）与 `strip_dangerous_html` 清洗来源，非遗留渲染器。
+- 预览唯一渲染路径是 `QTextBrowser`（`PreviewBrowser`），不存在 WebEngine 分支与启动锚点。渲染实现位于 `markdown_preview.py`（markdown-it-py，含源码行号注入 / 异步高亮 / 本地图片解析）；`secure_markdown_renderer.py` 提供导出入口（`render_markdown_to_safe_html` / HTML 导出的 `build_export_html_document` / PDF 导出的 `build_export_qtext_html_document`）与 `strip_dangerous_html` 清洗来源，非遗留渲染器。
 - 排版单一来源仍是 `secure_markdown_renderer.MARKDOWN_LAYOUT_CSS`。因 `QTextDocument` 只支持 CSS 2.1 子集，预览与导出各自经 `convert_layout_css_for_qtext()` 把 CSS 变量内联为具体色值、剔除不支持的规则（伪类 / `nth-child` / 属性选择器 / 滚动条 / `border-radius`），并复位代码块内 `<code>` 的行内代码样式（否则行内底色会与代码块底色叠成双色）。
 - 导出另有 QTextDocument 适配：`th/td` 的 CSS 边框与内边距被忽略 → 表格改用 HTML 属性（`border` / `cellspacing` / `cellpadding` / `width`）；`pre` 需 `line-height: normal`（否则逐行背景被切成条）与 `white-space: pre-wrap`（长代码行折行）；配色与语法高亮固定取**亮色变体**（深色主题导出为黑字浅底）。
 
@@ -429,8 +429,9 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 
 ```
 编辑器文本 → render_markdown_to_safe_html()（GFM 表格/删除线扩展 + 语法高亮回调，固定亮色变体）
-           → build_export_qtext_html_document()（CSS 子集 + 表格 HTML 属性 + pre 规则）
-           → QTextDocument.print(QPdfWriter)（PDF）/ QTextDocument.toHtml()（HTML）
+    HTML：→ build_export_html_document()（CSS 变量外壳）→ FileGuard.safe_write_bytes 落盘
+    PDF ：→ build_export_qtext_html_document()（CSS 子集 + 表格 HTML 属性 + pre 规则）
+           → QTextDocument.print(QPdfWriter)（内存直出 PDF 字节）
 ```
 
 **异步渲染管线**（Feature Flag `async_highlight` 控制）：

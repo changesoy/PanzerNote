@@ -416,7 +416,7 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 
 **渲染路径与样式单一来源（Wave 1.5）**：
 
-- 主渲染路径为 `markdown_preview.py`（markdown-it-py，含源码行号注入 / 异步高亮 / 本地图片解析）；`secure_markdown_renderer.py` 为统一安全渲染与 HTML/PDF 导出入口（`render_markdown_to_safe_html` / `build_export_html_document`），兼作预览回退与 `strip_dangerous_html` 清洗来源，非遗留渲染器。
+- 主渲染路径为 `markdown_preview.py`（markdown-it-py，含源码行号注入 / 异步高亮 / 本地图片解析），渲染显示唯一路径为 QWebEngineView（WebEngine 单路径，QTextBrowser 回退已删除）；`secure_markdown_renderer.py` 为统一安全渲染与 HTML/PDF 导出入口（`render_markdown_to_safe_html` / `build_export_html_document`），兼作 `strip_dangerous_html` 清洗来源，非遗留渲染器。
 - 预览模板 `PREVIEW_HTML_TEMPLATE` 与导出文档共用 `secure_markdown_renderer.MARKDOWN_LAYOUT_CSS` 内容排版（单一来源），颜色经 CSS 变量由各端从主题 token 注入；文档外壳（body）与预览交互样式（TOC / 代码块容器 / 复制按钮 / 折叠 / 滚动条）保留各端局部。
 
 **渲染管线**：
@@ -424,7 +424,7 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 ```
 编辑器文本 → markdown 库渲染 HTML → _process_code_blocks()（Pygments 内联样式高亮 + 浅蓝容器 + Unicode 标记）
            → _resolve_local_images()（相对路径 → file:// 绝对路径）
-           → PREVIEW_HTML_TEMPLATE 包裹 → QTextBrowser/QWebEngineView 显示
+           → PREVIEW_HTML_TEMPLATE 包裹 → QWebEngineView 显示
 ```
 
 **异步渲染管线**（Feature Flag `async_highlight` 控制）：
@@ -452,7 +452,7 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 - `_render_markdown_with_source_map()`：使用 `markdown-it-py` 的 `token.map` 给块级节点注入 `data-source-line` 属性（1-based 行号），覆盖 heading_open/paragraph_open/blockquote_open/bullet_list_open/ordered_list_open/list_item_open/table_open/thead_open/tbody_open/tr_open/hr/fence/code_block 共 13 种 token
 - `_build_container()` 支持 `source_line` 参数：代码块外层容器携带 `data-source-line` 属性
 - `_current_editor_top_line()`：通过 `cursorForPosition(QPoint(0, 0))` 获取编辑器视口顶部行号
-- `_sync_scroll()` 改为源码行号同步：QWebEngineView 通过 `runJavaScript` 调用 `scrollToSourceLine(line)`，QTextBrowser 保留旧百分比同步
+- `_sync_scroll()` 改为源码行号同步：QWebEngineView 通过 `runJavaScript` 调用 `scrollToSourceLine(line)`（唯一同步路径）
 - HTML 模板注入 `scrollToSourceLine()` JS 函数：查找 `data-source-line` 节点，在相邻锚点间线性插值计算滚动位置
 - HTML 模板注入 `resyncAfterImagesLoaded()` JS 函数：图片 load/error 事件触发后重新同步预览位置
 
@@ -462,7 +462,6 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 - 首次渲染走 `setHtml` 加载完整模板，`loadFinished` 信号触发后标记 `_html_template_loaded = True`
 - 后续渲染通过 `QWebEngineView.page().runJavaScript()` 仅更新 `document.getElementById('content').innerHTML`
 - 切换文档（`base_path` 变化）时自动重置标志，强制下次全量加载
-- 非 WebEngine 模式（QTextBrowser）仍走全量 `setHtml` 路径
 
 **首次渲染稳定化**：
 
@@ -1049,7 +1048,7 @@ pip install mypy>=1.20                         # 类型检查
 29. **粘贴检测**：`Editor` 重写 `insertFromMimeData()` 设置 `_is_pasting` 标志，`EditorTabWidget._on_text_changed()` 检查此标志跳过粘贴的打字奖励计数。`_PASTE_THRESHOLD = 50`，仅字符增量 ≤50 且非粘贴时计入奖励
 30. **MarkdownIt 实例复用**：`MarkdownPreviewWidget._create_md_parser()` 在 `__init__` 中创建一次解析器实例并缓存为 `_md_parser`，`_render_markdown()` 直接调用缓存实例渲染
 31. **文件保存异步化**：`SaveTask`（`QRunnable`）+ `SaveTaskSignals`（`QObject`）将 `safe_write` 磁盘 IO 放到 `QThreadPool.globalInstance()` 后台线程执行；`safe_write` 原子化（同目录临时文件 + `os.replace`），并发写目标始终是完整版本（last-write-wins），共享 Document 另有跨面板唯一门闩保证最新内容最后落盘。保存失败时回滚修改状态并恢复标签页 `*` 标记
-32. **Markdown 预览 JS 局部更新**：首次渲染走 `setHtml` 加载完整模板，`loadFinished` 信号触发后标记 `_html_template_loaded = True`，后续渲染通过 `runJavaScript` 仅更新 `innerHTML`。切换文档时自动重置标志。非 WebEngine 模式仍走全量路径。注意：这不是真正 block 级增量渲染
+32. **Markdown 预览 JS 局部更新**：首次渲染走 `setHtml` 加载完整模板，`loadFinished` 信号触发后标记 `_html_template_loaded = True`，后续渲染通过 `runJavaScript` 仅更新 `innerHTML`。切换文档时自动重置标志。注意：这不是真正 block 级增量渲染
 33. **Minimap 块级增量失效**：`MinimapWidget` 改用 `QTextDocument.contentsChange` 信号，精确计算受影响缓存块范围并标记为脏块（`_block_dirty`），仅重新渲染脏块。常规打字仅重绘 1 个块，节省约 95% 渲染开销
 34. **状态栏信号驱动统计**：`signal_driven_stats` 默认开启，`characterCount()` 避免全文复制，词数 800ms 防抖，行列号由 `cursorPositionChanged` 驱动
 35. **搜索高亮集中管理**：`SearchService` 封装查找/替换，`QTextDocument.find()` 权威光标位置，`ExtraSelectionManager` 统一高亮层，`replace_all` 从后向前逐匹配替换

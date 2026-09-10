@@ -2,6 +2,24 @@
 
 本文件记录 PanzerNote 各版本的变更。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
 
+## Unreleased
+
+**Markdown 预览单路径化（行为变化）**
+
+- **删除 QTextBrowser 预览回退**：QWebEngineView 成为 Markdown 预览与 PDF 导出的唯一渲染路径，`PreviewBrowser` 及 `HAS_WEBENGINE` 双分支全部移除。行为含义：WebEngine 加载失败时预览不再降级为 QTextBrowser 可用，而是预览不可用（分发形态 WebEngine 必然在包内，原回退分支实际不可达）
+
+**打包瘦身（538 MB → 约 362 MB，无功能损失）**
+
+- 排除未使用的 PyQt6 模块（Quick3D/Multimedia/Sensors/SerialPort/SpatialAudio/StateMachine/TextToSpeech 等，经依赖闭包探针确认非 WebEngine 传递依赖）
+- 翻译只保留 `qt_zh_CN.qm`；删除 WebEngine debug 资源（devtools/v8 快照）
+- qml 目录只保留 WebEngine 运行必需的 QtQml/QtQuick/QtWebEngine，联动裁剪 28 个 bin DLL
+- 删除 `opengl32sw.dll` 软件 OpenGL 兜底渲染器（正常 GPU 驱动环境不需要）
+
+**UI 修复**
+
+- 记事本设置对话框改为滚动区域（按钮栏固定可见），对话框最大高度限制为屏幕 85%；快捷键面板最大高度限制为屏幕 80%
+- 修复对话框内 QScrollArea 视口不随主题变色的问题（全局 QSS 补 QDialog QScrollArea 背景规则）
+
 ## v2.2.0
 
 **帮助中心**

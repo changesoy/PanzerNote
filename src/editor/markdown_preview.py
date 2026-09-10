@@ -1116,7 +1116,25 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
                 exc_info=True,
             )
             full_html = self._build_qtext_full_html_fallback(html_content)
+
+        # setHtml 会把预览滚动条归零。该"程序性归零"必须与用户滚动区分开：
+        # 否则会经 _on_preview_scroll 反向把编辑器拖回文档开头
+        # （点折叠标记/改文本/切主题触发的重渲染都会命中）。
+        # 先抑制反向同步，再在下一轮事件循环把预览重新对齐编辑器顶部行。
+        self._suppress_preview_sync = True
         self.preview.setHtml(full_html)
+        QTimer.singleShot(0, self._restore_preview_scroll)
+
+    def _restore_preview_scroll(self) -> None:
+        """重渲染后把预览重新对齐到编辑器当前顶部行，并解除反向同步抑制。"""
+        self._suppress_preview_sync = True
+        try:
+            frac_line, at_top, at_bottom = self._editor_top_fractional_line()
+            self.preview.scroll_to_source_line(frac_line, at_top, at_bottom)
+        except Exception:
+            get_logger(__name__).debug("预览滚动位置恢复失败", exc_info=True)
+        finally:
+            self._suppress_preview_sync = False
 
     def _qtext_theme_colors(self) -> dict[str, str]:
         """构建 QTextDocument 子集 CSS 的变量色值。

@@ -1,7 +1,8 @@
 # Hand-off：方案 B — WebEngine 单路径 + 打包瘦身
 
-> 对应分支：**`refactor20260910-webengine_single_path`**（尚未创建）
+> 对应分支：**`refactor20260910-webengine_single_path`**
 > 本文件是实施依据与交接文档，仓库根目录工作文档（沿用 Wave8-V1清理迁移方案.md 惯例）。
+> 实施进度与偏差见 §11（2026-09-10 更新）。
 
 | 项         | 值                                                                    |
 | ---------- | --------------------------------------------------------------------- |
@@ -9,6 +10,7 @@
 | 类型       | refactor（删除回退 + 打包配置优化）                                   |
 | 风险       | 低                                                                    |
 | 目标体积   | 538 MB → 约 300 MB（无功能损失）                                      |
+| 实测体积   | 约 362 MB（见 §11：未达 ≤ 320 MB 验收线）                             |
 | 与其他分支 | 基于 main 独立创建；不与方案 A 分支互相依赖（冲突处理见 §10）         |
 
 ---
@@ -142,13 +144,19 @@ src+tests 全量 0 命中，历史文档除外）。
 | `tests/test_markdown_preview.py`  | 回退测试删除/改写       |
 | `docs/architecture.md`            | 单路径描述同步          |
 
-## 6. 验收标准
+## 6. 验收标准（2026-09-10 复核状态）
 
-- [ ] Grep `HAS_WEBENGINE`/`WEBENGINE_AVAILABLE`/`PreviewBrowser` 于 src+tests 0 命中
-- [ ] 全量 tiered pytest 通过；全量 mypy 零错误
+- [x] Grep `HAS_WEBENGINE`/`WEBENGINE_AVAILABLE`/`PreviewBrowser` 于 src+tests 0 命中
+      （复核通过；`docs/architecture.md` 曾残留 `PreviewBrowser` 段，已在本轮文档同步中改为 WebEngine 实际实现）
+- [x] 全量 tiered pytest 通过；全量 mypy 零错误
+      （全量 collected 1474：1440 passed / 33 skipped / 1 failed；那 1 例是临时目录 `os.replace`
+      的 `PermissionError`（WinError 5），单独重跑该文件 13 passed，属环境抖动。
+      mypy：`no issues found in 124 source files`）
 - [ ] 打包体积 ≤ 320 MB（目标约 300 MB），`data/assets` 完整
+      **未达标**：实测约 362 MB（较基线 538 MB 降约 33%，但仍高于 320 MB 验收线）
 - [ ] 目标机启动正常：预览、PDF 导出、明暗主题、插件 4 项手工验证通过
-- [ ] WebEngine 加载失败 = 预览不可用（接受的行为变化，写入 CHANGELOG 说明）
+      本文件无独立记录可查；且本次导出渲染变更（见 §11）改变了导出产物，**该项需重做**
+- [x] WebEngine 加载失败 = 预览不可用（接受的行为变化，写入 CHANGELOG 说明）
 
 ## 7. 风险与回滚
 
@@ -190,3 +198,38 @@ $d = (Get-ChildItem -Recurse -File 'dist\PanzerNote' | Measure-Object -Property 
 - 建议 B 先行合入（低风险）。若 A 之后合入，A 会重新引入 QTextBrowser 并替换 B 的
   "删除回退"成果（预期，不视为冲突损失）；B 的打包裁剪成果由 A 继承并去掉
   WebEngine 相关排除项。
+
+## 11. 实施进度与偏差（2026-09-10）
+
+### 11.1 分支提交
+
+| 提交      | 内容                                                            |
+| --------- | --------------------------------------------------------------- |
+| `c45875a` | 新增本交接文档                                                  |
+| `62e0e2e` | UI：记事本设置/快捷键面板超高时移入滚动区域                     |
+| `55d3e98` | 导出：深色主题 PDF 白底不可读 → 配色固定亮色变体                |
+| `77b3b8b` | 导出：白名单外路径（如 D 盘）被拦截 → 补 `EXPORT_TARGET` 上下文 |
+| `19e6a3e` | 预览：删除 QTextBrowser 回退，WebEngine 单路径化                |
+| `604aa48` | 文档：单路径化同步 + 瘦身记录（CHANGELOG / architecture）       |
+| `bd9362b` | 构建：`PanzerNote.spec` 纳入版本控制（A/B 分支各自维护）        |
+| `014c81c` | 修复：折叠可见性变化后滚动范围与缩略图不同步（自 A 分支移植）   |
+| `14e8142` | 导出：补齐 GFM 表格/删除线/代码高亮 + 删除双分支共同死代码      |
+| `e7c64df` | 清理：fenced code 识别单一来源 + 删除导出无高亮的静默降级       |
+
+### 11.2 与 §3「非目标」的偏差（有意为之）
+
+§3 写「不改任何渲染行为、主题观感、导出格式」，但 `14e8142` 按用户后续要求
+（`111.txt` 第三部分）补齐了导出渲染：导出的表格 / 删除线 / 代码高亮从"无故降级"
+变为与预览一致。**导出格式属于有意变更**，因此 §6 的真机导出验证需重做；
+若以"导出格式零变化"作为终验判据会误判。
+
+### 11.3 待办
+
+1. 真机重验「导出 PDF / 导出 HTML」——本次改动直接改变导出产物，自动测试不覆盖
+   浏览器打印观感。
+2. 体积：实测约 362 MB 未达 320 MB 线。可选后续方向：Pygments lexer 裁剪、
+   PIL 插件裁剪、复核 qml/bin 的剩余项。
+3. 遗留物清理（低优先）：`markdown_preview._MK_S1/_MK_S2/_MK_E1/_MK_E2` 与
+   `.code-marker` 占位标记在单路径化后已无消费方，可评估删除。
+4. 跨分支共性问题（B1 重复实现、B2 静默降级）已记入 `111.txt`「六」「七」，
+   待 A 分支处理。

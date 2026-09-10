@@ -81,6 +81,11 @@ allowed 类别之一（v2 解析回退默认值 / 设计常量 / 游戏域常量
 > 复核方法：全库 `src/` 正则扫描 `#[0-9a-fA-F]{3,8}` + 逐文件分类；仅命中 1 处
 > `QColor("#...")`/裸 QSS 色（`resource_bar.py` 分隔线，仍为 v2_token 回退）。
 
+> 补充（2026-09-10，`refactor20260910-webengine_single_path`）：**导出/打印配色固定解析亮色变体**
+> （`consumer.v2_export_variant_id` → `variant_for_dark(False)`），不再随当前激活主题取色；语法高亮同理由
+> `highlight_code_html(..., variant_id)` 显式传入。目的是深色主题导出到白底 PDF/HTML 时保持白纸黑字。
+> 该行为未新增任何 hex 字面量，上表 `consumer.py` 计数（11）不变。
+
 ## Unreasonable Color Arrangements
 
 ### 1. Mixed Material and VS Code accent systems

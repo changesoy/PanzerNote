@@ -14,6 +14,23 @@
 - 翻译只保留 `qt_zh_CN.qm`；删除 WebEngine debug 资源（devtools/v8 快照）
 - qml 目录只保留 WebEngine 运行必需的 QtQml/QtQuick/QtWebEngine，联动裁剪 28 个 bin DLL
 - 删除 `opengl32sw.dll` 软件 OpenGL 兜底渲染器（正常 GPU 驱动环境不需要）
+- `PanzerNote.spec` 纳入版本控制：方案 A（去 WebEngine）与方案 B（WebEngine 单路径）需要不同的打包裁剪配置，而 spec 是跨分支共用的同一物理文件，纳入版本管理后由 git 随分支切换
+
+**导出修复**
+
+- 补齐导出 HTML/PDF 的 Markdown 渲染缺口：导出渲染启用 GFM 表格与删除线扩展，并经与预览同源的语法高亮回调渲染代码块。修复前导出的表格退化为一行竖线文本、删除线显示为字面 `~~…~~`、代码块完全没有高亮；预览走自有解析器不受影响，故表现为"预览正常、导出丢格式"
+- **深色主题下导出文档白底可读**：导出配色不再随当前激活主题取色，固定解析亮色变体（`v2_export_variant_id`），文本、代码块、引用块与语法高亮一律白纸黑字；亮色变体缺失时回退浅色常量，与明色主题下表现一致
+- 修复导出到白名单外路径（如 D 盘）被拦截：PDF 写入回调补 `FileAccessContext.EXPORT_TARGET`（该枚举预留但一直未接线），与另存为/导出 HTML 的既有授权语义一致，仍受文件大小限制与原子写入保护
+
+**编辑器修复**
+
+- 修复折叠可见性变化后滚动条范围与缩略图不同步：展开/折叠后强制重算文档高度并广播折叠状态，缩略图改按可见块序号定位（此前展开后末尾内容滚不到、缩略图停留在折叠前状态且整块漏画）
+
+**内部清理（无行为变化）**
+
+- 删除 A/B 两个实验分支共同的 10 项死代码（`get_preview_css`、`build_format`、`scale_size`、`scale_font`、`dp`、`get_all_flags`、`detect_eol`、`get_version`、`ComponentState`、`_get_code_highlight_theme`）
+- 收敛 fenced code 识别逻辑为单一来源：`secure_markdown_renderer.CODEBLOCK_RE` / `extract_language_from_code_attrs`，`markdown_preview` 改为导入复用，消除逐字重复的正则与职责重叠的语言提取实现
+- 导出渲染删除"无主题引擎则退化为纯文本代码块"的静默降级路径：`ExportService.render_content` / `export_html` / `export_pdf` 的 `theme_engine` 改为必填
 
 **UI 修复**
 

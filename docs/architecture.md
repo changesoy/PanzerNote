@@ -418,6 +418,8 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 
 - 主渲染路径为 `markdown_preview.py`（markdown-it-py，含源码行号注入 / 异步高亮 / 本地图片解析），渲染显示唯一路径为 QWebEngineView（WebEngine 单路径，QTextBrowser 回退已删除）；`secure_markdown_renderer.py` 为统一安全渲染与 HTML/PDF 导出入口（`render_markdown_to_safe_html` / `build_export_html_document`），兼作 `strip_dangerous_html` 清洗来源，非遗留渲染器。
 - 预览模板 `PREVIEW_HTML_TEMPLATE` 与导出文档共用 `secure_markdown_renderer.MARKDOWN_LAYOUT_CSS` 内容排版（单一来源），颜色经 CSS 变量由各端从主题 token 注入；文档外壳（body）与预览交互样式（TOC / 代码块容器 / 复制按钮 / 折叠 / 滚动条）保留各端局部。
+- fenced code 的识别与语言提取同样是单一来源：`secure_markdown_renderer.CODEBLOCK_RE` 与 `extract_language_from_code_attrs`（认 `language-` 与 `lang-` 两种 class 前缀），预览侧 `markdown_preview` 以 `_CODEBLOCK_RE` / `_extract_language_from_code_attrs` 导入复用，避免两处各留一份正则。
+- 导出渲染的代码高亮经 `render_markdown_to_safe_html(content, highlight)` 注入回调（`ExportService._code_highlighter` → `highlight_code_html`），与预览同源；导出配色固定解析亮色变体（`v2_export_variant_id`），`render_content` / `export_html` / `export_pdf` 的 `theme_engine` 为**必填**，不提供「无主题引擎则退化为纯文本代码块」的降级路径。
 
 **渲染管线**：
 
@@ -440,12 +442,11 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 - `IncrementalRenderer` 基于文本 MD5 哈希缓存渲染结果，相同文本直接返回缓存（全文级缓存，非行级增量）
 - **HTML render cache**（Wave 4 C）：`document_render_cache.py` 以 Document 为键缓存最终 HTML，Document 改动渲染一次、多 View 共用（revision 单调递增作为缓存键）；分屏多 View 场景避免每次编辑各自全量重渲染
 
-**浮动复制按钮** (`PreviewBrowser`)：
+**浮动复制按钮**（WebEngine 单路径后）：
 
-- 在每个代码块 HTML 首尾嵌入不可见 Unicode 标记（⌜N⌝ / ⌞N⌟）
-- `setHtml` 后用 `QTextDocument.find()` 缓存标记的 QTextCursor
-- `mouseMoveEvent` 判断鼠标是否在某代码块垂直范围内，是则显示浮动复制按钮
-- 防抖 30ms + 按钮 enter/leave 处理防止闪烁
+- 代码块容器 `.code-container` 内嵌 `<button class="code-copy-btn" data-code-index="N">`，由 CSS `.code-container:hover .code-copy-btn` 控制悬停显示；单路径化后不再需要 `QTextDocument` 命中测试与 `mouseMoveEvent` 判定
+- 点击由预览页内 JS 捕获（`e.target.closest('.code-copy-btn')`），经 `document.title = '__pncopy__:N'` 回传索引，Python 侧在标题变更回调中按索引取源码执行复制，并临时把按钮文案换成 ✔ 作为反馈
+- 代码块首尾仍插入 `<span class="code-marker">⌜N⌝ / ⌞N⌟</span>` 占位标记（CSS 以 1px 透明隐藏）；这些标记原用于 `QTextDocument.find()` 定位，单路径化后未见消费方，属待清理的遗留物
 
 **源码行号同步**：
 

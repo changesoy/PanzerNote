@@ -23,13 +23,14 @@ import re
 import time
 import json
 import html as html_module
-from typing import Optional, Union
+from typing import Optional
 
 from PyQt6.QtWidgets import (
-    QWidget, QSplitter, QVBoxLayout, QTextBrowser, QApplication, QPushButton
+    QWidget, QSplitter, QVBoxLayout, QApplication
 )
-from PyQt6.QtCore import Qt, QTimer, QUrl, QPoint, QEvent
-from PyQt6.QtGui import QFont, QDesktopServices, QCursor, QTextCursor
+from PyQt6.QtCore import Qt, QTimer, QUrl, QPoint
+from PyQt6.QtGui import QDesktopServices, QTextCursor
+from PyQt6.QtWebEngineWidgets import QWebEngineView
 
 try:
     from markdown_it import MarkdownIt as _MarkdownIt
@@ -42,16 +43,6 @@ try:
     HAS_MARKDOWN = True
 except ImportError:
     HAS_MARKDOWN = False
-
-try:
-    from PyQt6.QtWebEngineWidgets import QWebEngineView
-    HAS_WEBENGINE = True
-    _WEBENGINE_IMPORT_ERROR = ""
-except ImportError as _exc:
-    # 常见原因并非"未安装"，而是导入时机过晚：QtWebEngineWidgets 必须在
-    # QApplication 创建前导入，或在创建前设置 AA_ShareOpenGLContexts（见 main.py）。
-    HAS_WEBENGINE = False
-    _WEBENGINE_IMPORT_ERROR = str(_exc)
 
 from ..core.config import Config
 from ..editor.editor import Editor
@@ -555,201 +546,6 @@ def _build_preview_css_vars(theme_engine) -> str:
 
 
 # ════════════════════════════════════════════════════════
-#  PreviewBrowser —— 带浮动复制按钮的 QTextBrowser
-# ════════════════════════════════════════════════════════
-
-class PreviewBrowser(QTextBrowser):
-    """QTextBrowser 子类：鼠标悬停代码块时在右上角显示浮动复制按钮。
-
-    原理：
-      1. 在每个代码块 HTML 的首尾嵌入不可见 Unicode 标记（⌜N⌝ / ⌞N⌟）
-      2. setHtml 后，用 QTextDocument.find() 缓存标记对应的 QTextCursor
-      3. mouseMoveEvent 中，通过 cursorRect() 判断鼠标是否在某个代码块的
-         垂直范围内，是则在右上角显示浮动 QPushButton
-    """
-
-    def __init__(self, theme_engine, parent=None):
-        super().__init__(parent)
-        if theme_engine is None:
-            raise RuntimeError("PreviewBrowser 必须传入 theme_engine，不允许为 None")
-        self._theme_engine = theme_engine
-        self.setMouseTracking(True)
-        self.setOpenLinks(False)
-        self.anchorClicked.connect(self._on_anchor_clicked)
-
-        # 存储每个代码块的原始文本（用于复制）
-        self._code_blocks = []
-        # 缓存的 (start_cursor, end_cursor, index) 列表
-        self._code_cursors = []
-        # 当前悬停的代码块索引
-        self._hover_idx = -1
-        # 鼠标是否在复制按钮上
-        self._btn_hovered = False
-
-        # ── 浮动复制按钮（挂在 viewport 上，随内容滚动） ──
-        self._copy_btn = QPushButton("\U0001f4cb", self.viewport())
-        self._copy_btn.setFixedSize(26, 20)
-        self._copy_btn.setToolTip("复制到剪贴板")
-        self._copy_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        self._copy_btn.hide()
-        self._apply_copy_btn_style()
-        self._copy_btn.clicked.connect(self._copy_current)
-        self._copy_btn.installEventFilter(self)
-
-        # ── 悬停检测防抖定时器 ──
-        self._hover_timer = QTimer(self)
-        self._hover_timer.setSingleShot(True)
-        self._hover_timer.setInterval(30)
-        self._hover_timer.timeout.connect(self._check_hover)
-        self._mouse_pos = QPoint()
-
-    def _apply_copy_btn_style(self) -> None:
-        """使用主题 token 更新浮动复制按钮样式（B2：纯 v2，无 v1 回退）。"""
-        btn_bg = v2_token(self._theme_engine, "surface_raised", "#FFFFFF")
-        btn_border = v2_token(self._theme_engine, "border_muted", "#E0E0E0")
-        btn_hover_bg = v2_token(self._theme_engine, "surface_secondary", "#F5F5F5")
-        btn_hover_border = v2_token(self._theme_engine, "text_muted", "#BDBDBD")
-        self._copy_btn.setStyleSheet(
-            f"QPushButton {{"
-            f"  background: {btn_bg};"
-            f"  border: 1px solid {btn_border};"
-            f"  border-radius: 3px;"
-            f"  font-size: 12px;"
-            f"  padding: 0;"
-            f"}}"
-            f"QPushButton:hover {{"
-            f"  background: {btn_hover_bg};"
-            f"  border-color: {btn_hover_border};"
-            f"}}"
-        )
-
-    # ──────────── 公开方法 ────────────
-
-    def set_code_blocks(self, blocks: list):
-        """设置代码块原始文本列表（与 HTML 中的标记索引对应）"""
-        self._code_blocks = list(blocks)
-
-    def setHtml(self, html_str):
-        super().setHtml(html_str)
-        self._cache_cursors()
-
-    # ──────────── 标记位置缓存 ────────────
-
-    def _cache_cursors(self):
-        """在 QTextDocument 中查找所有代码块标记并缓存 cursor"""
-        doc = self.document()
-        if doc is None:
-            return
-        self._code_cursors = []
-        for i in range(len(self._code_blocks)):
-            s_marker = f"{_MK_S1}{i}{_MK_S2}"
-            e_marker = f"{_MK_E1}{i}{_MK_E2}"
-            sc = doc.find(s_marker)
-            ec = doc.find(e_marker)
-            if not sc.isNull() and not ec.isNull():
-                self._code_cursors.append((sc, ec, i))
-
-    # ──────────── 鼠标悬停检测 ────────────
-
-    def mouseMoveEvent(self, event):
-        super().mouseMoveEvent(event)
-        self._mouse_pos = event.pos()
-        self._hover_timer.start()
-
-    def _check_hover(self):
-        """检查鼠标当前位置是否在某个代码块的垂直范围内"""
-        y = self._mouse_pos.y()
-        for sc, ec, idx in self._code_cursors:
-            sr = self.cursorRect(sc)
-            er = self.cursorRect(ec)
-            top = min(sr.top(), sr.bottom())
-            bot = max(er.top(), er.bottom())
-            if top <= y <= bot:
-                self._show_btn(top, idx)
-                return
-        self._hide_btn()
-
-    def _show_btn(self, top_y, idx):
-        self._hover_idx = idx
-        vp = self.viewport()
-        if vp is None:
-            return
-        x = vp.width() - self._copy_btn.width() - 6
-        y = max(2, top_y + 3)
-        self._copy_btn.move(x, y)
-        self._copy_btn.show()
-        self._copy_btn.raise_()
-
-    def _hide_btn(self):
-        self._copy_btn.hide()
-        self._hover_idx = -1
-
-    # ──────────── 复制按钮的 enter/leave 处理 ────────────
-
-    def eventFilter(self, obj, event):
-        """拦截复制按钮的 Enter/Leave 事件，防止按钮在点击前消失"""
-        if obj is self._copy_btn:
-            if event.type() == QEvent.Type.Enter:
-                self._btn_hovered = True
-            elif event.type() == QEvent.Type.Leave:
-                self._btn_hovered = False
-                QTimer.singleShot(80, self._after_btn_leave)
-        return super().eventFilter(obj, event)
-
-    def _after_btn_leave(self):
-        vp = self.viewport()
-        if vp is None:
-            self._hide_btn()
-            return
-        local = vp.mapFromGlobal(QCursor.pos())
-        if vp.rect().contains(local):
-            self._mouse_pos = local
-            self._check_hover()
-        else:
-            self._hide_btn()
-
-    def leaveEvent(self, event):
-        super().leaveEvent(event)
-        QTimer.singleShot(80, self._maybe_hide)
-
-    def _maybe_hide(self):
-        if not self._btn_hovered:
-            self._hide_btn()
-
-    def scrollContentsBy(self, dx, dy):
-        super().scrollContentsBy(dx, dy)
-        if self._copy_btn.isVisible():
-            self._check_hover()
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        if self._copy_btn.isVisible():
-            self._check_hover()
-
-    # ──────────── 复制 / 链接处理 ────────────
-
-    def _copy_current(self):
-        if 0 <= self._hover_idx < len(self._code_blocks):
-            cb = QApplication.clipboard()
-            if cb is not None:
-                cb.setText(self._code_blocks[self._hover_idx])
-
-    def _on_anchor_clicked(self, url: QUrl):
-        url_str = url.toString()
-        if url_str.startswith("copy-code:"):
-            try:
-                idx = int(url_str.split(":")[1])
-                if 0 <= idx < len(self._code_blocks):
-                    cb = QApplication.clipboard()
-                    if cb is not None:
-                        cb.setText(self._code_blocks[idx])
-            except (ValueError, IndexError):
-                get_logger(__name__).debug("代码块复制链接解析失败: %s", url_str)
-        else:
-            QDesktopServices.openUrl(url)
-
-
-# ════════════════════════════════════════════════════════
 #  MarkdownPreviewWidget
 # ════════════════════════════════════════════════════════
 
@@ -832,18 +628,8 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self.editor = Editor(self.config, theme_engine=self._theme_engine)
         self.splitter.addWidget(self.editor)
 
-        # 右侧预览
-        self.preview: Union[QWebEngineView, PreviewBrowser]
-        if HAS_WEBENGINE:
-            self.preview = QWebEngineView()
-        else:
-            self.preview = PreviewBrowser(self._theme_engine, self)
-            self.preview.setFont(QFont("Microsoft YaHei", 11))
-            get_logger(__name__).warning(
-                "QWebEngineView 导入失败，预览回退到 QTextBrowser（源码行号同步不可用）。"
-                " 真实原因: %s",
-                _WEBENGINE_IMPORT_ERROR or "未知（HAS_WEBENGINE=False 但无异常信息）",
-            )
+        # 右侧预览（WebEngine 唯一路径）
+        self.preview = QWebEngineView()
 
         self.splitter.addWidget(self.preview)
         # 恢复编辑区/预览分栏占比（与侧栏分栏的 view_setting 模式一致）
@@ -852,11 +638,7 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self.splitter.setSizes([editor_w, preview_w])
         layout.addWidget(self.splitter)
 
-        if (
-            HAS_WEBENGINE
-            and isinstance(self.preview, QWebEngineView)
-            and self._webengine_runtime is not None
-        ):
+        if self._webengine_runtime is not None:
             self._webengine_runtime.notify_real_view_attached()
 
         # 防抖定时器
@@ -867,12 +649,11 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
 
         self._preview_visible = True
 
-        if HAS_WEBENGINE and isinstance(self.preview, QWebEngineView):
-            self.preview.loadFinished.connect(self._on_load_finished)
-            page = self.preview.page()
-            if page is not None:
-                # 预览 -> 编辑器：JS 经 document.title 回传顶部源码行
-                page.titleChanged.connect(self._on_preview_title)
+        self.preview.loadFinished.connect(self._on_load_finished)
+        page = self.preview.page()
+        if page is not None:
+            # 预览 -> 编辑器：JS 经 document.title 回传顶部源码行
+            page.titleChanged.connect(self._on_preview_title)
 
         # 拖动分隔条改变预览宽度后，锚点像素位置整体变化，需重新同步；
         # 同时保存编辑区/预览分栏占比
@@ -889,8 +670,6 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self._schedule_resync()
 
     def _apply_theme_colors(self):
-        if isinstance(self.preview, PreviewBrowser):
-            self.preview._apply_copy_btn_style()
         # 主题变更时清空 Document 级渲染缓存（高亮颜色/折叠样式依赖主题）
         clear_document_render_cache()
         # 主题变更时重建预览以应用新 CSS（重置标志让 _push_to_preview 走 setHtml 路径）
@@ -983,14 +762,11 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
     def _push_to_preview(self, html_content: str):
         """把渲染好的 HTML 推送到预览，供 _update_preview / _on_async_highlight_done 共用。
 
-        - QWebEngine 且模板已加载：仅更新 #content 的 innerHTML 并重同步(不重建整页 DOM，
+        - 模板已加载：仅更新 #content 的 innerHTML 并重同步(不重建整页 DOM，
           因此保留滚动位置)；
-        - 否则：整页 setHtml(首次加载 / QTextBrowser)。
+        - 否则：整页 setHtml(首次加载)。
         """
-        if isinstance(self.preview, PreviewBrowser):
-            self.preview.set_code_blocks(self._code_blocks)
-
-        if HAS_WEBENGINE and isinstance(self.preview, QWebEngineView) and self._html_template_loaded:
+        if self._html_template_loaded:
             escaped = json.dumps(html_content)
             doc = self.editor.document()
             assert doc is not None
@@ -1082,13 +858,10 @@ a {{
 {html_content}
 </body>
 </html>"""
-            if HAS_WEBENGINE and isinstance(self.preview, QWebEngineView):
-                if self._base_path:
-                    base_url = QUrl.fromLocalFile(self._base_path + '/')
-                    self.preview.setHtml(full_html, base_url)
-                else:
-                    self.preview.setHtml(full_html)
-            elif isinstance(self.preview, PreviewBrowser):
+            if self._base_path:
+                base_url = QUrl.fromLocalFile(self._base_path + '/')
+                self.preview.setHtml(full_html, base_url)
+            else:
                 self.preview.setHtml(full_html)
 
         # 同步当前折叠状态到预览
@@ -1301,8 +1074,6 @@ a {{
         folding = getattr(self.editor, '_folding', None)
         if folding is None:
             return
-        if not HAS_WEBENGINE or not isinstance(self.preview, QWebEngineView):
-            return
         if not self._html_template_loaded:
             return
 
@@ -1460,9 +1231,6 @@ a {{
     @staticmethod
     def _build_container(index: int, code_html: str, source_line: Optional[int] = None) -> str:
         """构建代码块 HTML 容器：浅蓝背景 + 首尾不可见标记 + 逐行锚点。
-
-        标记用于 PreviewBrowser 在 QTextDocument 中定位代码块的
-        垂直范围，从而在正确位置显示浮动复制按钮。
         """
         sm = f"{_MK_S1}{index}{_MK_S2}"
         em = f"{_MK_E1}{index}{_MK_E2}"
@@ -1613,33 +1381,20 @@ a {{
         self._last_at_top = at_top
         self._last_at_bottom = at_bottom
 
-        if HAS_WEBENGINE and isinstance(self.preview, QWebEngineView):
-            page = self.preview.page()
-            if page is None:
-                return
-            at = "true" if at_top else "false"
-            ab = "true" if at_bottom else "false"
-            js = (
-                f"window.__lastFracLine={frac_line:.4f};"
-                f"window.__lastTotalLines={total_lines};"
-                f"window.__lastAtTop={at};"
-                f"window.__lastAtBottom={ab};"
-                f"if(window.scrollToSourceLine){{"
-                f"window.scrollToSourceLine({frac_line:.4f},{total_lines},{at},{ab});}}"
-            )
-            page.runJavaScript(js)
+        page = self.preview.page()
+        if page is None:
             return
-
-        # QTextBrowser fallback：按源码行号比例滚动
-        if total_lines > 0:
-            line_ratio = min(frac_line / total_lines, 1.0)
-            try:
-                assert isinstance(self.preview, PreviewBrowser)
-                pb = self.preview.verticalScrollBar()
-                if pb is not None:
-                    pb.setValue(int(line_ratio * pb.maximum()))
-            except Exception:
-                get_logger(__name__).debug("QTextBrowser 同步失败", exc_info=True)
+        at = "true" if at_top else "false"
+        ab = "true" if at_bottom else "false"
+        js = (
+            f"window.__lastFracLine={frac_line:.4f};"
+            f"window.__lastTotalLines={total_lines};"
+            f"window.__lastAtTop={at};"
+            f"window.__lastAtBottom={ab};"
+            f"if(window.scrollToSourceLine){{"
+            f"window.scrollToSourceLine({frac_line:.4f},{total_lines},{at},{ab});}}"
+        )
+        page.runJavaScript(js)
 
     # ──────────── 预览 -> 编辑器 反向同步 ────────────
 

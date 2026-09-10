@@ -18,12 +18,7 @@ from .secure_markdown_renderer import (
     render_plain_text_to_safe_html,
     build_export_html_document,
 )
-
-try:
-    from PyQt6.QtWebEngineWidgets import QWebEngineView
-    HAS_WEBENGINE = True
-except ImportError:
-    HAS_WEBENGINE = False
+from PyQt6.QtWebEngineWidgets import QWebEngineView
 
 
 class ExportService:
@@ -105,12 +100,7 @@ class ExportService:
           title：文档标题
 
         返回：QWebEngineView 实例（调用方不应持有，由内部自动清理）
-
-        异常：WebEngine 不可用时抛出 RuntimeError
         """
-        if not HAS_WEBENGINE:
-            raise RuntimeError("导出PDF需要QtWebEngine组件")
-
         body_html = ExportService.render_content(content, is_markdown)
         full_html = build_export_html_document(body_html, colors, title)
 

@@ -9,14 +9,7 @@ from typing import Optional
 
 from PyQt6.QtCore import QObject, QTimer, Qt
 from PyQt6.QtWidgets import QWidget
-
-try:
-    from PyQt6.QtWebEngineWidgets import QWebEngineView
-
-    WEBENGINE_AVAILABLE = True
-except ImportError:
-    QWebEngineView = None  # type: ignore[assignment,misc]
-    WEBENGINE_AVAILABLE = False
+from PyQt6.QtWebEngineWidgets import QWebEngineView
 
 
 class WebEngineRuntime(QObject):
@@ -29,15 +22,8 @@ class WebEngineRuntime(QObject):
         self._anchor_view: Optional[QWebEngineView] = None
         self._real_view_attached = False
 
-    @property
-    def available(self) -> bool:
-        return WEBENGINE_AVAILABLE
-
     def prepare_startup_anchor(self, parent: QWidget) -> None:
         """在主窗口显示前挂载一个最小 WebEngine 控件。"""
-        if not self.available:
-            return
-
         if self._anchor_view is not None:
             return
 

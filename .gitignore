@@ -50,7 +50,6 @@ sdist/
 develop-eggs/
 *.whl
 *.manifest
-*.spec
 
 # --- 虚拟环境 ---
 venv/

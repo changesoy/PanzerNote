@@ -21,9 +21,8 @@ v1.6.2 改动：
 import os
 import re
 import time
-import json
 import html as html_module
-from typing import Optional, Union
+from typing import Optional
 
 from PyQt6.QtWidgets import (
     QWidget, QSplitter, QVBoxLayout, QTextBrowser, QApplication, QPushButton
@@ -43,22 +42,12 @@ try:
 except ImportError:
     HAS_MARKDOWN = False
 
-try:
-    from PyQt6.QtWebEngineWidgets import QWebEngineView
-    HAS_WEBENGINE = True
-    _WEBENGINE_IMPORT_ERROR = ""
-except ImportError as _exc:
-    # 常见原因并非"未安装"，而是导入时机过晚：QtWebEngineWidgets 必须在
-    # QApplication 创建前导入，或在创建前设置 AA_ShareOpenGLContexts（见 main.py）。
-    HAS_WEBENGINE = False
-    _WEBENGINE_IMPORT_ERROR = str(_exc)
-
 from ..core.config import Config
 from ..editor.editor import Editor
 from ..utils.logger import get_logger
 from ..utils.feature_flags import is_enabled
 from ..themes.theme_aware_mixin import ThemeAwareMixin
-from ..themes.theme_v2.consumer import v2_color, v2_style_value, v2_token
+from ..themes.theme_v2.consumer import v2_color, v2_token
 from .highlight_themes import highlight_code_html
 from .webengine_runtime import WebEngineRuntime
 
@@ -88,7 +77,7 @@ _MK_E1 = "\u231E"  # ⌞
 _MK_E2 = "\u231F"  # ⌟
 
 from .secure_markdown_renderer import (
-    MARKDOWN_LAYOUT_CSS as _MARKDOWN_LAYOUT_CSS,
+    convert_layout_css_for_qtext,
     strip_dangerous_html as _strip_dangerous_html,
 )
 from .document_render_cache import _DOC_RENDER_CACHE, clear_document_render_cache
@@ -781,7 +770,6 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self._last_render_text: str = ""
         self._last_render_html: str = ""
         self._md_parser = self._create_md_parser()
-        self._html_template_loaded = False
         self._preview_dirty = True
         self._last_sync_frac: float = 1.0
         self._last_at_top: bool = True
@@ -813,13 +801,7 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
 
         v1.5.4 新增
         """
-        if path != self._base_path:
-            self._html_template_loaded = False
         self._base_path = path
-
-    def _on_load_finished(self, ok):
-        if ok:
-            self._html_template_loaded = True
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
@@ -832,18 +814,9 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self.editor = Editor(self.config, theme_engine=self._theme_engine)
         self.splitter.addWidget(self.editor)
 
-        # 右侧预览
-        self.preview: Union[QWebEngineView, PreviewBrowser]
-        if HAS_WEBENGINE:
-            self.preview = QWebEngineView()
-        else:
-            self.preview = PreviewBrowser(self._theme_engine, self)
-            self.preview.setFont(QFont("Microsoft YaHei", 11))
-            get_logger(__name__).warning(
-                "QWebEngineView 导入失败，预览回退到 QTextBrowser（源码行号同步不可用）。"
-                " 真实原因: %s",
-                _WEBENGINE_IMPORT_ERROR or "未知（HAS_WEBENGINE=False 但无异常信息）",
-            )
+        # 右侧预览：QTextBrowser（QTextDocument 唯一渲染路径，方案 A）
+        self.preview = PreviewBrowser(self._theme_engine, self)
+        self.preview.setFont(QFont("Microsoft YaHei", 11))
 
         self.splitter.addWidget(self.preview)
         # 恢复编辑区/预览分栏占比（与侧栏分栏的 view_setting 模式一致）
@@ -852,13 +825,6 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self.splitter.setSizes([editor_w, preview_w])
         layout.addWidget(self.splitter)
 
-        if (
-            HAS_WEBENGINE
-            and isinstance(self.preview, QWebEngineView)
-            and self._webengine_runtime is not None
-        ):
-            self._webengine_runtime.notify_real_view_attached()
-
         # 防抖定时器
         self._preview_timer = QTimer(self)
         self._preview_timer.setSingleShot(True)
@@ -866,13 +832,6 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self._preview_timer.timeout.connect(self._update_preview)
 
         self._preview_visible = True
-
-        if HAS_WEBENGINE and isinstance(self.preview, QWebEngineView):
-            self.preview.loadFinished.connect(self._on_load_finished)
-            page = self.preview.page()
-            if page is not None:
-                # 预览 -> 编辑器：JS 经 document.title 回传顶部源码行
-                page.titleChanged.connect(self._on_preview_title)
 
         # 拖动分隔条改变预览宽度后，锚点像素位置整体变化，需重新同步；
         # 同时保存编辑区/预览分栏占比
@@ -889,12 +848,10 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self._schedule_resync()
 
     def _apply_theme_colors(self):
-        if isinstance(self.preview, PreviewBrowser):
-            self.preview._apply_copy_btn_style()
+        self.preview._apply_copy_btn_style()
         # 主题变更时清空 Document 级渲染缓存（高亮颜色/折叠样式依赖主题）
         clear_document_render_cache()
-        # 主题变更时重建预览以应用新 CSS（重置标志让 _push_to_preview 走 setHtml 路径）
-        self._html_template_loaded = False
+        # 主题变更时重建预览以应用新 CSS（QTextBrowser 走整页 setHtml）
         if getattr(self, 'editor', None) is not None:
             self._update_preview()
 
@@ -983,116 +940,72 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
     def _push_to_preview(self, html_content: str):
         """把渲染好的 HTML 推送到预览，供 _update_preview / _on_async_highlight_done 共用。
 
-        - QWebEngine 且模板已加载：仅更新 #content 的 innerHTML 并重同步(不重建整页 DOM，
-          因此保留滚动位置)；
-        - 否则：整页 setHtml(首次加载 / QTextBrowser)。
+        方案 A：唯一渲染路径为 QTextBrowser（QTextDocument CSS 子集），整页 setHtml。
         """
-        if isinstance(self.preview, PreviewBrowser):
-            self.preview.set_code_blocks(self._code_blocks)
+        self.preview.set_code_blocks(self._code_blocks)
 
-        if HAS_WEBENGINE and isinstance(self.preview, QWebEngineView) and self._html_template_loaded:
-            escaped = json.dumps(html_content)
-            doc = self.editor.document()
-            assert doc is not None
-            total_lines = doc.blockCount()
-            frac = getattr(self, '_last_sync_frac', 1.0)
-            at = "true" if getattr(self, '_last_at_top', True) else "false"
-            ab = "true" if getattr(self, '_last_at_bottom', False) else "false"
-            js = (
-                f"document.getElementById('content').innerHTML = {escaped};"
-                "_nodesVersion = null; _cachedNodes = null;"
-                f"window.__lastFracLine={frac:.4f};"
-                f"window.__lastTotalLines={total_lines};"
-                f"window.__lastAtTop={at};"
-                f"window.__lastAtBottom={ab};"
-                "if (window.resyncAfterImagesLoaded) { window.resyncAfterImagesLoaded(); }"
-                "requestAnimationFrame(function() {"
-                "  if (window.scrollToSourceLine) {"
-                f"    window.scrollToSourceLine({frac:.4f}, {total_lines}, {at}, {ab});"
-                "  }"
-                "});"
+        try:
+            full_html = self._build_qtext_full_html(html_content)
+        except Exception as exc:
+            get_logger(__name__).error(
+                "Markdown preview QTextDocument HTML 构建失败: %s",
+                exc,
+                exc_info=True,
             )
-            page = self.preview.page()
-            if page is not None:
-                page.runJavaScript(js)
-        else:
-            css_vars = _build_preview_css_vars(self._theme_engine)
-            # 滚动条尺寸与圆角：与 Qt 侧同一 scrollbar recipe（width/radius=w//2/margin）
-            sb_width = int(v2_style_value(self._theme_engine, "scrollbar", "width", 12))
-            sb_radius = sb_width // 2
-            sb_margin = int(v2_style_value(self._theme_engine, "scrollbar", "margin", 2))
-            template = PREVIEW_HTML_TEMPLATE
-            try:
-                full_html = template.format(
-                    content=html_content,
-                    layout_css=_MARKDOWN_LAYOUT_CSS,
-                    sb_width=sb_width,
-                    sb_radius=sb_radius,
-                    sb_margin=sb_margin,
-                ).replace(
-                    "</style>", css_vars + "\n</style>", 1
-                )
-            except Exception as exc:
-                get_logger(__name__).error(
-                    "Markdown preview template format failed: %s",
-                    exc,
-                    exc_info=True,
-                )
+            full_html = self._build_qtext_full_html_fallback(html_content)
+        self.preview.setHtml(full_html)
 
-                # B2：模板格式失败时的降级 HTML（B8：字面量 = v1 light 值，无 v1 回退）
-                fallback_bg = "#FFFFFF"
-                fallback_text = "#212121"
-                fallback_code_bg = "#EDF3FA"
-                fallback_border = "#D8DEE9"
-                fallback_link = "#2196F3"
-
-                full_html = f"""<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<style>
-body {{
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
-                 "Microsoft YaHei UI", "Microsoft YaHei", Arial, sans-serif;
-    font-size: 14px;
-    line-height: 1.7;
-    margin: 0;
-    padding: 12px 20px 40px 20px;
-    background: {fallback_bg};
-    color: {fallback_text};
-    word-wrap: break-word;
-}}
-pre {{
-    background: {fallback_code_bg};
-    color: {fallback_text};
-    border: 1px solid {fallback_border};
-    border-radius: 6px;
-    padding: 12px 14px;
-    overflow: auto;
-}}
-code {{
-    font-family: Consolas, "Courier New", monospace;
-}}
-a {{
-    color: {fallback_link};
-}}
-</style>
-</head>
-<body>
-{html_content}
-</body>
-</html>"""
-            if HAS_WEBENGINE and isinstance(self.preview, QWebEngineView):
-                if self._base_path:
-                    base_url = QUrl.fromLocalFile(self._base_path + '/')
-                    self.preview.setHtml(full_html, base_url)
-                else:
-                    self.preview.setHtml(full_html)
-            elif isinstance(self.preview, PreviewBrowser):
-                self.preview.setHtml(full_html)
-
-        # 同步当前折叠状态到预览
+        # 同步当前折叠状态到预览（QTextDocument 下为降级 no-op，见 _sync_folds_to_preview）
         self._sync_folds_to_preview()
+
+    def _qtext_theme_colors(self) -> dict[str, str]:
+        """构建 QTextDocument 子集 CSS 的变量色值。
+
+        键与 MARKDOWN_LAYOUT_CSS 的 CSS 变量一致（无 -- 前缀），
+        经 convert_layout_css_for_qtext 注入为具体色值。
+        """
+        te = self._theme_engine
+        return {
+            "text-primary": v2_token(te, "text_primary", "#212121"),
+            "text-secondary": v2_token(te, "text_secondary", "#757575"),
+            "text-muted": v2_token(te, "text_muted", "#BDBDBD"),
+            "border": v2_token(te, "border_muted", "#E0E0E0"),
+            "border-soft": v2_token(te, "border_muted", "#EEEEEE"),
+            "divider": v2_token(te, "border_muted", "#EEEEEE"),
+            "surface": v2_token(te, "surface_secondary", "#F5F5F5"),
+            "surface-soft": v2_token(te, "surface_secondary", "#F5F5F5"),
+            "surface-hover": v2_token(te, "surface_raised", "#FAFAFA"),
+            "primary": v2_token(te, "accent", "#2196F3"),
+            "primary-hover": v2_token(te, "focus", "#1976D2"),
+            "bg-codeblock": v2_token(te, "md_preview_code_block_bg", "#EDF3FA"),
+            "scrollbar-thumb-hover": v2_color(te, "scrollbar", "handle_hover", "#BDBDBD"),
+        }
+
+    def _build_qtext_full_html(self, html_content: str) -> str:
+        """构建 QTextDocument 渲染的完整 HTML：布局 CSS 子集 + body 具体色值。"""
+        layout_css = convert_layout_css_for_qtext(self._qtext_theme_colors())
+        bg = v2_token(self._theme_engine, "surface_primary", "#FFFFFF")
+        fg = v2_token(self._theme_engine, "text_primary", "#212121")
+        return (
+            "<html><head><style>\n"
+            "body { font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;"
+            " font-size: 14px; line-height: 1.7; }\n"
+            f"{layout_css}"
+            "</style></head>"
+            f'<body style="background-color:{bg};color:{fg};">'
+            f"{html_content}</body></html>"
+        )
+
+    def _build_qtext_full_html_fallback(self, html_content: str) -> str:
+        """CSS 构建失败时的降级 HTML（字面量 = v1 light 值，B8 语义）。"""
+        return (
+            "<html><head><style>\n"
+            "body { font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;"
+            " font-size: 14px; line-height: 1.7; }\n"
+            "</style></head>"
+            '<body style="background-color:#FFFFFF;color:#212121;">'
+            f"{html_content}</body></html>"
+        )
 
     @staticmethod
     def _create_md_parser():
@@ -1295,22 +1208,12 @@ a {{
     # ──────────── 折叠同步 ────────────
 
     def _sync_folds_to_preview(self) -> None:
-        """将编辑器 FoldingManager 的折叠状态同步到预览 DOM。"""
-        if not self.editor:
-            return
-        folding = getattr(self.editor, '_folding', None)
-        if folding is None:
-            return
-        if not HAS_WEBENGINE or not isinstance(self.preview, QWebEngineView):
-            return
-        if not self._html_template_loaded:
-            return
+        """将编辑器 FoldingManager 的折叠状态同步到预览。
 
-        collapsed = folding.get_collapsed_lines()
-        js = f"window.updateFoldVisibility('{json.dumps(collapsed)}');"
-        page = self.preview.page()
-        if page is not None:
-            page.runJavaScript(js)
+        方案 A：QTextDocument 无 JS 层，折叠区段隐藏降级为 no-op
+        （保留信号槽形状；A2 按"保留/降级/暂缓"清单决策是否实现）。
+        """
+        return
 
     # ──────────── 代码块后处理 ────────────
 
@@ -1323,9 +1226,25 @@ a {{
         """
         return self._theme_engine
 
+    def _qtext_code_container_style(self) -> str:
+        """构建 QTextDocument 代码块 <pre> 容器的 inline style（当前主题色值）。
+
+        QTextDocument 的 class 选择器支持有限，代码块容器直接用
+        inline style，与 _build_container 的 container_style 参数配套。
+        """
+        bg = v2_token(self._theme_engine, "md_preview_code_block_bg", "#EDF3FA")
+        border = v2_token(self._theme_engine, "border_muted", "#D8DEE9")
+        fg = v2_token(self._theme_engine, "text_primary", "#212121")
+        return (
+            f"background-color:{bg};border:1px solid {border};padding:10px;"
+            f"color:{fg};font-family:Consolas,'Courier New',monospace;"
+            f"font-size:14px;line-height:1.55;"
+        )
+
     def _process_code_blocks(self, html: str) -> str:
-        """替换所有 <pre><code> 块：语法高亮 + 浅蓝容器 + 嵌入位置标记"""
+        """替换所有 <pre><code> 块：语法高亮 + 容器 + 嵌入位置标记"""
         self._code_blocks = []
+        container_style = self._qtext_code_container_style()
 
         def _replace(m):
             code_attrs = m.group("code_attrs") or ""
@@ -1343,13 +1262,14 @@ a {{
                     source_line = self._code_block_source_lines[idx]
 
             highlighted = highlight_code_html(raw, lang, self._theme_engine)
-            return self._build_container(idx, highlighted, source_line)
+            return self._build_container(idx, highlighted, source_line, container_style)
 
         return _CODEBLOCK_RE.sub(_replace, html)
 
     def _process_code_blocks_async(self, html: str) -> str:
         """异步版本的代码块处理：先渲染占位符，再异步替换高亮结果"""
         self._code_blocks = []
+        container_style = self._qtext_code_container_style()
 
         if self._pending_async_task:
             if self._async_renderer is not None:
@@ -1370,7 +1290,7 @@ a {{
                     source_line = self._code_block_source_lines[idx]
 
             escaped = html_module.escape(raw)
-            return self._build_container(idx, escaped, source_line)
+            return self._build_container(idx, escaped, source_line, container_style)
 
         result = _CODEBLOCK_RE.sub(_replace, html)
 
@@ -1402,6 +1322,7 @@ a {{
 
         self._code_blocks = []
         block_idx = [0]
+        container_style = self._qtext_code_container_style()
 
         def _replace_sync(m):
             raw = html_module.unescape(m.group("body"))
@@ -1417,8 +1338,8 @@ a {{
                     source_line = self._code_block_source_lines[idx]
 
             if idx < len(highlighted_blocks):
-                return self._build_container(idx, highlighted_blocks[idx], source_line)
-            return self._build_container(idx, html_module.escape(raw), source_line)
+                return self._build_container(idx, highlighted_blocks[idx], source_line, container_style)
+            return self._build_container(idx, html_module.escape(raw), source_line, container_style)
 
         block_idx_ref = block_idx
 
@@ -1458,11 +1379,20 @@ a {{
         return "\n".join(wrapped)
 
     @staticmethod
-    def _build_container(index: int, code_html: str, source_line: Optional[int] = None) -> str:
-        """构建代码块 HTML 容器：浅蓝背景 + 首尾不可见标记 + 逐行锚点。
+    def _build_container(
+        index: int,
+        code_html: str,
+        source_line: Optional[int] = None,
+        container_style: str = "",
+    ) -> str:
+        """构建代码块 HTML 容器：背景容器 + 首尾不可见标记 + 逐行锚点。
 
         标记用于 PreviewBrowser 在 QTextDocument 中定位代码块的
-        垂直范围，从而在正确位置显示浮动复制按钮。
+        垂直范围，从而在正确位置显示浮动复制按钮（Qt 原生浮层，
+        无 HTML button——QTextDocument 不认识 button 标签）。
+
+        container_style：<pre> 容器的 inline style（QTextDocument CSS 子集），
+        由调用方按当前主题构建，默认空字符串。
         """
         sm = f"{_MK_S1}{index}{_MK_S2}"
         em = f"{_MK_E1}{index}{_MK_E2}"
@@ -1474,13 +1404,12 @@ a {{
             code_html, source_line
         )
 
+        style_attr = f' style="{container_style}"' if container_style else ""
         return (
             f'<div class="code-container src-line"{line_attr}>'
-            f'<button class="code-copy-btn" data-code-index="{index}"'
-            f' title="复制到剪贴板">\U0001f4cb</button>'
-            f'<span class="code-marker">{sm}</span>'
-            f'<pre class="code-pre"><code class="code-block">{code_html}</code></pre>'
-            f'<span class="code-marker">{em}</span>'
+            f'<span class="code-marker" style="font-size:1px;color:transparent;">{sm}</span>'
+            f'<pre class="code-pre"{style_attr}><code class="code-block">{code_html}</code></pre>'
+            f'<span class="code-marker" style="font-size:1px;color:transparent;">{em}</span>'
             f'</div>'
         )
 
@@ -1613,63 +1542,15 @@ a {{
         self._last_at_top = at_top
         self._last_at_bottom = at_bottom
 
-        if HAS_WEBENGINE and isinstance(self.preview, QWebEngineView):
-            page = self.preview.page()
-            if page is None:
-                return
-            at = "true" if at_top else "false"
-            ab = "true" if at_bottom else "false"
-            js = (
-                f"window.__lastFracLine={frac_line:.4f};"
-                f"window.__lastTotalLines={total_lines};"
-                f"window.__lastAtTop={at};"
-                f"window.__lastAtBottom={ab};"
-                f"if(window.scrollToSourceLine){{"
-                f"window.scrollToSourceLine({frac_line:.4f},{total_lines},{at},{ab});}}"
-            )
-            page.runJavaScript(js)
-            return
-
-        # QTextBrowser fallback：按源码行号比例滚动
+        # QTextBrowser（方案 A）：按源码行号比例滚动（A2 强化精度）
         if total_lines > 0:
             line_ratio = min(frac_line / total_lines, 1.0)
             try:
-                assert isinstance(self.preview, PreviewBrowser)
                 pb = self.preview.verticalScrollBar()
                 if pb is not None:
                     pb.setValue(int(line_ratio * pb.maximum()))
             except Exception:
                 get_logger(__name__).debug("QTextBrowser 同步失败", exc_info=True)
-
-    # ──────────── 预览 -> 编辑器 反向同步 ────────────
-
-    def _on_preview_title(self, title: str):
-        """JS 经 document.title 回传消息，据此滚动编辑器、执行复制或打开链接。"""
-        if not title:
-            return
-        if title.startswith("__pnopen__:"):
-            self._open_external_link(title[len("__pnopen__:"):])
-            return
-        if title.startswith("__pncopy__:"):
-            try:
-                idx = int(title.split(":")[1])
-                if 0 <= idx < len(self._code_blocks):
-                    cb = QApplication.clipboard()
-                    if cb is not None:
-                        cb.setText(self._code_blocks[idx])
-            except (ValueError, IndexError):
-                pass
-            return
-        if not title.startswith("__pzsync__:"):
-            return
-        parts = title.split(":")
-        if len(parts) < 2:
-            return
-        try:
-            frac_line = float(parts[1])
-        except ValueError:
-            return
-        self._scroll_editor_to_line(frac_line)
 
     @staticmethod
     def _open_external_link(url: str) -> None:

@@ -304,3 +304,55 @@ pre code {
 {body_html}
 </body>
 </html>"""
+
+
+# ════════════════════════════════════════════════════════
+#  QTextDocument CSS 子集转换（方案 A：去 WebEngine）
+# ════════════════════════════════════════════════════════
+
+def convert_layout_css_for_qtext(theme_colors: dict[str, str]) -> str:
+    """把 MARKDOWN_LAYOUT_CSS 转换为 QTextDocument 支持的 CSS 子集。
+
+    QTextDocument 富文本 CSS 子集不支持：
+      - :root 变量与 var() 引用（此处以具体色值注入）
+      - 伪类（:hover）、nth-child、属性选择器、::-webkit-scrollbar
+      - border-radius / max-width（QTextDocument 忽略，直接剔除）
+
+    theme_colors 键（不带 -- 前缀，与 MARKDOWN_LAYOUT_CSS 变量名一致）：
+      text-primary / text-secondary / text-muted / border / border-soft /
+      divider / surface / surface-soft / surface-hover / primary /
+      primary-hover / bg-codeblock / scrollbar-thumb-hover
+    缺失键会抛 ValueError（显式失败，避免静默渲染错误色）。
+
+    返回值是纯字符串 CSS，供 QTextDocument 的 <style> 块使用；
+    代码块容器等 class 级样式由调用方（markdown_preview）单独注入。
+    """
+    result = MARKDOWN_LAYOUT_CSS
+    # 1. 剔除 :root 变量定义块（QTextDocument 不支持 CSS 变量）
+    result = re.sub(r':root\s*\{[^{}]*\}', '', result)
+
+    # 2. var(--xxx) → 具体色值
+    def _replace_var(match: re.Match[str]) -> str:
+        name = match.group(1)
+        try:
+            return theme_colors[name]
+        except KeyError:
+            raise ValueError(
+                f"QTextDocument CSS 转换缺少变量色值: {name}"
+            ) from None
+
+    result = re.sub(r'var\(--([\w-]+)\)', _replace_var, result)
+
+    # 3. 剔除不支持的规则（伪类 / nth-child / 属性选择器 / 滚动条）
+    result = re.sub(r'::-webkit-scrollbar[^{}]*\{[^{}]*\}', '', result)
+    result = re.sub(r'tr:nth-child\([^)]*\)\s*\{[^{}]*\}', '', result)
+    result = re.sub(r'[^{}\n]*:hover[^{}]*\{[^{}]*\}', '', result)
+    result = re.sub(r'section\[[^\]]*\]\s*\{[^{}]*\}', '', result)
+    result = re.sub(r'li\s+input\[[^\]]*\]\s*\{[^{}]*\}', '', result)
+    result = result.replace(':not(pre) > code', 'code')
+
+    # 4. 剔除 QTextDocument 不支持的观感属性（忽略无害，去掉避免误读）
+    result = re.sub(r'\s*border-radius\s*:\s*[^;]+;', '', result)
+    result = re.sub(r'\s*max-width\s*:\s*[^;]+;', '', result)
+    return result
+

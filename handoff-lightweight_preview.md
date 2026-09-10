@@ -3,13 +3,13 @@
 > 对应分支：**`refactor20260910-lightweight_preview`**（尚未创建）
 > 本文件是实施依据与交接文档，仓库根目录工作文档（沿用 Wave8-V1清理迁移方案.md 惯例）。
 
-| 项 | 值 |
-| --- | --- |
-| 基线 | `main @ c878f0b`（Merge PR #12，Wave 8 主题体系，v2.2.0，工作区干净） |
-| 类型 | refactor（渲染引擎替换，架构级变更） |
-| 风险 | 高（触发项目约束的高风险审批门槛：架构方向需用户决策） |
-| 目标体积 | 约 60–100 MB（去除 WebEngine 约 400 MB） |
-| 与其他分支 | 基于 main 独立创建；与方案 B 互斥（冲突处理见 §10） |
+| 项         | 值                                                                    |
+| ---------- | --------------------------------------------------------------------- |
+| 基线       | `main @ c878f0b`（Merge PR #12，Wave 8 主题体系，v2.2.0，工作区干净） |
+| 类型       | refactor（渲染引擎替换，架构级变更）                                  |
+| 风险       | 高（触发项目约束的高风险审批门槛：架构方向需用户决策）                |
+| 目标体积   | 约 60–100 MB（去除 WebEngine 约 400 MB）                              |
+| 与其他分支 | 基于 main 独立创建；与方案 B 互斥（冲突处理见 §10）                   |
 
 ---
 
@@ -29,21 +29,21 @@
 
 ### 2.1 现有可复用资产
 
-| 资产 | 位置 | 说明 |
-| --- | --- | --- |
-| 双路径外壳 | `src/editor/markdown_preview.py:46-54, 561-562` | `HAS_WEBENGINE` 守卫 + `PreviewBrowser`（现为打包死代码，A 将其扶正为唯一路径） |
-| md → HTML 管线 | `src/editor/secure_markdown_renderer.py`（markdown-it-py + 净化） | **不变**：继续产出 HTML，仅渲染端改变 |
-| 内联样式高亮 | `src/editor/highlight_themes.py`（Pygments formatter，标注"适用于 QTextBrowser"） | 现成，供 QTextDocument 渲染 |
-| 比例滚动同步 | `markdown_preview.py:1633-1642` | 已有的非引擎行号同步 fallback，需强化精度 |
-| CSS 模板 | `secure_markdown_renderer.MARKDOWN_LAYOUT_CSS` | 使用 `:root` 变量/现代 CSS，QTextDocument 只支持有限子集，需转换 |
-| PDF 导出 | `src/editor/export_service.py:23-26, 111, 129` | 现走 `printToPdf`；A 改为 `QPrinter` + `QTextDocument.print_()` |
+| 资产           | 位置                                                                              | 说明                                                                            |
+| -------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| 双路径外壳     | `src/editor/markdown_preview.py:46-54, 561-562`                                   | `HAS_WEBENGINE` 守卫 + `PreviewBrowser`（现为打包死代码，A 将其扶正为唯一路径） |
+| md → HTML 管线 | `src/editor/secure_markdown_renderer.py`（markdown-it-py + 净化）                 | **不变**：继续产出 HTML，仅渲染端改变                                           |
+| 内联样式高亮   | `src/editor/highlight_themes.py`（Pygments formatter，标注"适用于 QTextBrowser"） | 现成，供 QTextDocument 渲染                                                     |
+| 比例滚动同步   | `markdown_preview.py:1633-1642`                                                   | 已有的非引擎行号同步 fallback，需强化精度                                       |
+| CSS 模板       | `secure_markdown_renderer.MARKDOWN_LAYOUT_CSS`                                    | 使用 `:root` 变量/现代 CSS，QTextDocument 只支持有限子集，需转换                |
+| PDF 导出       | `src/editor/export_service.py:23-26, 111, 129`                                    | 现走 `printToPdf`；A 改为 `QPrinter` + `QTextDocument.print_()`                 |
 
 ### 2.2 体积对照
 
-| 路线 | 预计体积 |
-| --- | --- |
-| 现状 | 538 MB |
-| 仅方案 B 打包瘦身 | 约 300 MB（上限） |
+| 路线                                 | 预计体积             |
+| ------------------------------------ | -------------------- |
+| 现状                                 | 538 MB               |
+| 仅方案 B 打包瘦身                    | 约 300 MB（上限）    |
 | 方案 A（去 WebEngine + 继承 B 成果） | 约 60–100 MB（目标） |
 
 ## 3. 目标 / 非目标
@@ -112,18 +112,18 @@
 
 ## 5. 关键文件清单
 
-| 文件 | 改动 |
-| --- | --- |
-| `scripts/proto_qtextbrowser_preview.py`（新） | A0 原型，验证后保留或删除 |
-| `src/editor/markdown_preview.py` | 渲染唯一化、同步/交互替代 |
-| `src/editor/secure_markdown_renderer.py` | CSS 子集转换（管线不动） |
-| `src/editor/export_service.py` | QPrinter 替换 printToPdf |
-| `src/editor/webengine_runtime.py` | 删除 |
-| `main.py` | WebEngine 相关导入与时序删除 |
-| `pyproject.toml` / `requirements.txt` | 摘除 PyQt6-WebEngine |
-| `PanzerNote.spec` | WebEngine 收集删除、排除清单继承 |
-| `tests/` | 涉及 WebEngine 抓帧/回退的测试改写 |
-| `docs/architecture.md` / `docs/roadmap.md` / `CHANGELOG.md` | 同步 |
+| 文件                                                        | 改动                               |
+| ----------------------------------------------------------- | ---------------------------------- |
+| `scripts/proto_qtextbrowser_preview.py`（新）               | A0 原型，验证后保留或删除          |
+| `src/editor/markdown_preview.py`                            | 渲染唯一化、同步/交互替代          |
+| `src/editor/secure_markdown_renderer.py`                    | CSS 子集转换（管线不动）           |
+| `src/editor/export_service.py`                              | QPrinter 替换 printToPdf           |
+| `src/editor/webengine_runtime.py`                           | 删除                               |
+| `main.py`                                                   | WebEngine 相关导入与时序删除       |
+| `pyproject.toml` / `requirements.txt`                       | 摘除 PyQt6-WebEngine               |
+| `PanzerNote.spec`                                           | WebEngine 收集删除、排除清单继承   |
+| `tests/`                                                    | 涉及 WebEngine 抓帧/回退的测试改写 |
+| `docs/architecture.md` / `docs/roadmap.md` / `CHANGELOG.md` | 同步                               |
 
 ## 6. 验收标准
 
@@ -153,6 +153,10 @@ Remove-Item -Recurse -Force build, dist -ErrorAction SilentlyContinue
 .\.venv\Scripts\pyinstaller.exe --noconfirm --clean PanzerNote.spec
 $d = (Get-ChildItem -Recurse -File 'dist\PanzerNote' | Measure-Object -Property Length -Sum).Sum
 '{0:N1} MB' -f ($d / 1MB)
+
+# 保留产物以便与方案 B 快速对比（B 已存为 dist\PanzerNote-B-WebEngine）
+# 注意：-NewName 只给名称，不能带路径
+Rename-Item -Path dist\PanzerNote -NewName PanzerNote-A-Light
 
 # 测试与类型检查（详见 pytest-tiered-timeout-hunter / python-virtualenv-quick-reference）
 .\.venv\Scripts\python.exe -m pytest

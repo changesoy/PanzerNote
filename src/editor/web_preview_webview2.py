@@ -22,7 +22,8 @@
 关键实现约束：
   - 创建是异步的，而接口是同步的 → 就绪前的调用入队，就绪后补发。
   - bounds 使用**物理像素**而 Qt 用逻辑像素 → dpr 换算封装在本文件内部，
-    上层不得感知（C1.6 目视检查得出的必办项）。
+    且原点取容器自身客户区（容器是独立 HWND），上层不得感知（C1.6 目视检查
+    得出的必办项）。
   - 预览模板经 document.title 回传消息，WebView2 无 titleChanged 信号 →
     注入 JS 劫持 title setter 转发到 chrome.webview.postMessage，
     模板与 markdown_preview.py 无需改动。
@@ -42,7 +43,10 @@ import winrt.windows.foundation as wf
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QWidget
 
+from ..utils.logger import get_logger
 from .web_preview import WebPreviewAdapter
+
+_log = get_logger(__name__)
 
 # 虚拟主机名：资源根目录映射用（与 WebEngine 的 base_url 同职责）
 VHOST = "pnassets"
@@ -168,10 +172,11 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
             self._nav_event = asyncio.Event()
             self._apply_bounds()
             self._ready = True
+            _log.info("WebView2 后端已就绪")
             self._ready_signal.emit()
         except Exception:  # noqa: BLE001
-            # 初始化失败：保持静默，预览区留空；由上层/C3-B 的门槛校验暴露
-            pass
+            # 初始化失败：预览区留空。必须留日志，否则故障完全不可见
+            _log.error("WebView2 初始化失败，预览将留空", exc_info=True)
 
     def _flush_pending(self) -> None:
         """初始化完成后补发就绪前积压的调用，保持调用顺序。"""
@@ -207,16 +212,22 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
     def _apply_bounds(self) -> None:
         if self._controller is None:
             return
-        # WebView2 bounds = 父窗口客户区物理像素；Qt geometry() = 逻辑像素。
-        # 漏掉 dpr 换算会让 WebView2 只覆盖 1/dpr 的宽高（dpr=2.0 时正好 1/4 面积）。
+        # WebView2 bounds = **父 HWND 客户区**的物理像素；Qt geometry() = 逻辑像素。
+        # 两个易错点：
+        # 1) 尺寸必须乘 dpr，否则只覆盖 1/dpr 的宽高（dpr=2.0 时正好 1/4 面积）；
+        # 2) 原点是本容器客户区的 (0,0)，**不能**用 geometry().x()/y() —— 容器带
+        #    WA_NativeWindow，已是独立 HWND，而 geometry() 是相对 splitter 的
+        #    坐标，把它当原点会把视图整体推出容器外（预览整片空白）。
         dpr = self._container.devicePixelRatioF()
-        g = self._container.geometry()
+        w = self._container.width()
+        h = self._container.height()
+        _log.debug("WebView2 bounds: %dx%d dpr=%s", w, h, dpr)
         self._controller.set_bounds_and_zoom_factor(
             wf.Rect(
-                float(g.x()) * dpr,
-                float(g.y()) * dpr,
-                float(g.width()) * dpr,
-                float(g.height()) * dpr,
+                0.0,
+                0.0,
+                float(w) * dpr,
+                float(h) * dpr,
             ),
             1.0,
         )
@@ -226,6 +237,7 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
             return
         if self._nav_event is not None:
             self._nav_event.clear()
+        _log.debug("WebView2 导航：html %d 字符，资源根=%s", len(html), self._resource_root)
         self._webview.navigate_to_string(self._inject(html))
 
     def _inject(self, html: str) -> str:
@@ -258,6 +270,7 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
             ok = bool(args.is_success)
         except Exception:  # noqa: BLE001
             ok = True
+        _log.debug("WebView2 导航完成: success=%s", ok)
         if self._nav_event is not None:
             self._nav_event.set()
         self.load_finished.emit(ok)
@@ -282,6 +295,9 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
             fd, path = tempfile.mkstemp(suffix=".pdf", prefix="pn_preview_")
             os.close(fd)
             settings = env.create_print_settings()
+            # WebView2 的 PrintSettings 默认**不打印背景**（缺省 False），会让代码块
+            # 底色与高亮背景整片丢失。WebEngine 的 printToPdf 默认打印背景，此处对齐。
+            settings.should_print_backgrounds = True
             ret = await webview.print_to_pdf_async(path, settings)
             data = b""
             if ret:

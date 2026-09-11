@@ -5,7 +5,7 @@
 
 创建者：MainWindow（_init_ui 之后构造注入）
 持有者：MainWindow
-完成通知：见 ExportService（HTML 同步完成；PDF 经 QWebEngineView.printToPdf 回调）
+完成通知：见 ExportService（HTML 同步完成；PDF 经 WebView2 print_to_pdf_async 回调）
 """
 
 import os
@@ -48,7 +48,7 @@ class ExportActionController:
         return str(value or DEFAULT_CODE_FONT_FAMILY)
 
     def export_pdf(self) -> None:
-        """导出当前文档为 PDF（经 QWebEngineView.printToPdf 异步生成）。"""
+        """导出当前文档为 PDF（经 WebView2 print_to_pdf_async 异步生成）。"""
         from .export_service import ExportService
         try:
             editor = self._editor_tabs.current_editor()

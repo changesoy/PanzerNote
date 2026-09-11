@@ -103,7 +103,7 @@ def _activate_crash_log_dir(new_dir):
     _crash_log_dir = new_dir
 
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import Qt, QCoreApplication, QEvent
+from PyQt6.QtCore import QCoreApplication, QEvent
 from PyQt6.QtGui import QFont, QIcon
 from qasync import QEventLoop
 
@@ -139,14 +139,6 @@ def _verify_version_consistency(logger):
 
 def main():
     profiler = get_startup_profiler()
-
-    # ── 关键：必须在创建 QApplication 之前设置 ──────────────────────────────
-    # MainWindow（及其依赖 markdown_preview）是延迟导入的（见下方 PHASE_WINDOW_CREATE），
-    # 此时 QApplication 已存在。若不预先设置 AA_ShareOpenGLContexts，
-    # markdown_preview 里的 `from PyQt6.QtWebEngineWidgets import QWebEngineView`
-    # 会抛 ImportError（"must be set before a QCoreApplication instance is created"）。
-    # 设置此属性即可让稍后的 WebEngine 导入成功。
-    QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
 
     app = QApplication(sys.argv)
     app.setApplicationName("PanzerNote")
@@ -193,6 +185,13 @@ def main():
 
     _verify_version_consistency(logger)
     profiler.end_phase()
+
+    # ── C3-D：WebView2 Runtime 检测 ────────────────────────────────────────
+    # 摘除 WebEngine 后 WebView2 是唯一预览 / 导出后端，缺失即预览不可用；
+    # 检测只读注册表（不导入 PyWinRT），故绑定损坏时也能报出真正原因。
+    from src.editor.webview2_runtime import INSTALL_HINT, log_availability
+
+    webview2_ready = log_availability()
 
     crash_logs = list(_iter_crash_logs(log_dir))
     if crash_logs:
@@ -251,6 +250,13 @@ def main():
     profiler.begin_phase(PHASE_WINDOW_SHOW)
     window.present()
     profiler.end_phase()
+
+    if not webview2_ready:
+        # 可见提示：否则用户只会看到「预览空白」而无从判断原因
+        # （预览区本身也会显示同一份指引，见 web_preview_webview2._show_hint）
+        from PyQt6.QtWidgets import QMessageBox
+
+        QMessageBox.warning(window, "缺少 WebView2 Runtime", INSTALL_HINT)
 
     logger.info(profiler.get_report())
 

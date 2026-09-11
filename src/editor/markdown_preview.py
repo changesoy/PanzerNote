@@ -52,7 +52,6 @@ from ..utils.feature_flags import is_enabled
 from ..themes.theme_aware_mixin import ThemeAwareMixin
 from ..themes.theme_v2.consumer import v2_color, v2_style_value, v2_token
 from .highlight_themes import highlight_code_html
-from .webengine_runtime import WebEngineRuntime
 
 # ════════════════════════════════════════════════════════
 #  正则 / 常量
@@ -103,6 +102,9 @@ PREVIEW_HTML_TEMPLATE = """<!DOCTYPE html>
     --scrollbar-thumb: var(--css-scrollbar-thumb);
     --scrollbar-thumb-hover: var(--css-scrollbar-thumb-hover);
     --code-font: var(--css-code-font);
+    --sb-width: var(--css-sb-width);
+    --sb-radius: var(--css-sb-radius);
+    --sb-margin: var(--css-sb-margin);
 }}
 
 /* ========== 基础 ========== */
@@ -222,16 +224,16 @@ section[data-fold-heading].folded {{
 
 /* ========== 滚动条（与编辑器样式一致：同一 scrollbar recipe 供值） ========== */
 ::-webkit-scrollbar {{
-    width: {sb_width}px;
-    height: {sb_width}px;
+    width: var(--sb-width);
+    height: var(--sb-width);
 }}
 ::-webkit-scrollbar-track {{
     background: var(--scrollbar-track);
 }}
 ::-webkit-scrollbar-thumb {{
     background: var(--scrollbar-thumb);
-    border-radius: {sb_radius}px;
-    border: {sb_margin}px solid var(--scrollbar-track);
+    border-radius: var(--sb-radius);
+    border: var(--sb-margin) solid var(--scrollbar-track);
 }}
 ::-webkit-scrollbar-thumb:hover {{
     background: var(--scrollbar-thumb-hover);
@@ -452,7 +454,7 @@ window.updateFoldVisibility = function(collapsedLinesJson) {{
 
 (function() {{
     document.addEventListener('click', function(e) {{
-        // 链接点击 → 外部浏览器打开（经 document.title 桥回传，阻止 WebEngine 内部导航）
+        // 链接点击 → 外部浏览器打开（经 document.title 桥回传，阻止预览内部导航）
         var a = e.target.closest('a');
         if (a) {{
             var href = a.getAttribute('href');
@@ -481,15 +483,20 @@ window.updateFoldVisibility = function(collapsedLinesJson) {{
 #  预览模板 CSS 变量注入（替代旧的正则颜色替换）
 # ════════════════════════════════════════════════════════
 
-def _build_preview_css_vars(theme_engine, code_font_family: str | None = None) -> str:
-    """根据主题引擎构造 :root CSS 变量覆盖块。
+def _preview_css_vars(theme_engine, code_font_family: str | None = None) -> dict[str, str]:
+    """预览 CSS 变量表（键为 CSS 变量短名，值为实际值）。
 
-    B2：纯消费 Theme v2（semantic token + markdown/scrollbar recipe），无 v1 回退。
-    theme_engine 必须传入，不允许为 None。
-    code_font_family：设置项「代码字体」族名，缺省回退默认值。
+    单一真相源：首屏模板注入块（_build_preview_css_vars）与主题切换时的
+    运行时更新（_css_vars_update_js）都从本表取值，避免两处漂移。
+
+    覆盖范围 = 预览中**全部随主题变化的样式**：颜色 token + 代码字体 +
+    滚动条尺寸。滚动条尺寸也纳入变量，主题切换才能不重载页面
+    （否则只能整页 set_html 重新灌入模板里的字面量）。
     """
+    sb_width = int(v2_style_value(theme_engine, "scrollbar", "width", 12))
+    sb_margin = int(v2_style_value(theme_engine, "scrollbar", "margin", 2))
     # 颜色语义映射：CSS 变量名 → v2 token / recipe 值（B8：字面量 fallback = v1 light 值）
-    vars_map = {
+    return {
         "code-font": _code_font_css_stack(code_font_family),
         "bg-card": v2_token(theme_engine, "surface_primary", "#FFFFFF"),
         "text-primary": v2_token(theme_engine, "text_primary", "#212121"),
@@ -509,12 +516,45 @@ def _build_preview_css_vars(theme_engine, code_font_family: str | None = None) -
         "scrollbar-track": v2_color(theme_engine, "scrollbar", "track", "#F5F5F5"),
         "scrollbar-thumb": v2_color(theme_engine, "scrollbar", "handle", "#E0E0E0"),
         "scrollbar-thumb-hover": v2_color(theme_engine, "scrollbar", "handle_hover", "#BDBDBD"),
+        # 滚动条尺寸（与 Qt 侧同一 scrollbar recipe；radius 取宽度一半）
+        # 必须带 px 单位：CSS 变量替换是纯文本替换，写成裸数字会让
+        # `width: var(--sb-width)` 解析为 `width: 10`（无效）致整条规则被丢弃。
+        "sb-width": f"{sb_width}px",
+        "sb-radius": f"{sb_width // 2}px",
+        "sb-margin": f"{sb_margin}px",
     }
+
+
+def _build_preview_css_vars(theme_engine, code_font_family: str | None = None) -> str:
+    """根据主题引擎构造 :root CSS 变量覆盖块（首屏整页模板注入用）。
+
+    B2：纯消费 Theme v2（semantic token + markdown/scrollbar recipe），无 v1 回退。
+    theme_engine 必须传入，不允许为 None。
+    code_font_family：设置项「代码字体」族名，缺省回退默认值。
+    """
     lines = [":root {"]
-    for k, v in vars_map.items():
+    for k, v in _preview_css_vars(theme_engine, code_font_family).items():
         lines.append(f"    --css-{k}: {v};")
     lines.append("}")
     return "\n".join(lines)
+
+
+def _css_vars_update_js(vars_map: dict[str, str]) -> str:
+    """生成「就地更新预览 CSS 变量」的 JS。
+
+    写进 documentElement 的内联样式，优先级高于样式表里的 :root 块，
+    因此无需重新导航即可让新主题立即生效 —— 这是主题切换不闪烁的关键：
+    整页 set_html 会拆掉旧文档、新文档首帧前出现空档，切深色时最显眼。
+    """
+    pairs = ",".join(
+        f"[{json.dumps('--css-' + k)},{json.dumps(v)}]" for k, v in vars_map.items()
+    )
+    return (
+        f"var _pnVars=[{pairs}];"
+        "for (var i=0;i<_pnVars.length;i++){"
+        "document.documentElement.style.setProperty(_pnVars[i][0],_pnVars[i][1]);"
+        "}"
+    )
 
 
 # ════════════════════════════════════════════════════════
@@ -531,7 +571,6 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self,
         config: Config,
         theme_engine,
-        webengine_runtime: WebEngineRuntime | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -539,7 +578,6 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             raise RuntimeError("MarkdownPreviewWidget 必须传入 theme_engine，不允许为 None")
         self.config = config
         self._theme_engine = theme_engine
-        self._webengine_runtime = webengine_runtime
         self.tab_id = None
 
         self._code_blocks: list[str] = []
@@ -610,9 +648,6 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self.splitter.setSizes([editor_w, preview_w])
         layout.addWidget(self.splitter)
 
-        if self._webengine_runtime is not None:
-            self._webengine_runtime.notify_real_view_attached()
-
         # 防抖定时器
         self._preview_timer = QTimer(self)
         self._preview_timer.setSingleShot(True)
@@ -640,12 +675,28 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self._schedule_resync()
 
     def _apply_theme_colors(self):
-        # 主题变更时清空 Document 级渲染缓存（高亮颜色/折叠样式依赖主题）
+        # 主题变更时清空渲染缓存（高亮颜色/折叠样式依赖主题）。
+        # Document 级缓存之外还要清 widget 级渲染记忆：_render_full 对「文本未变」
+        # 会直接返回上次产物，而高亮颜色由主题决定 —— 只清 Document 缓存时，
+        # 文本未改动的情况下切主题会沿用旧主题的 token 颜色。
         clear_document_render_cache()
-        # 主题变更时重建预览以应用新 CSS（重置标志让 _push_to_preview 走 setHtml 路径）
-        self._html_template_loaded = False
+        self._last_render_text = ""
+        self._last_render_html = ""
+        # 已加载的页面就地更新 CSS 变量（含代码字体/滚动条尺寸）；未加载则首屏整页灌入。
+        # 不再强制整页重载：重载会拆掉旧文档，新文档首帧前出现空档 → 切深色时明显闪烁。
+        self._apply_preview_css_vars()
         if getattr(self, 'editor', None) is not None:
             self._update_preview()
+
+    def _apply_preview_css_vars(self) -> None:
+        """把当前主题的 CSS 变量就地写入已加载页面（不重新导航）。
+
+        模板尚未加载时不做任何事：此时变量会随首屏整页 set_html 一起灌入。
+        """
+        if not self._html_template_loaded:
+            return
+        vars_map = _preview_css_vars(self._theme_engine, self._code_font_family())
+        self.preview.run_javascript(_css_vars_update_js(vars_map))
 
     def _code_font_family(self) -> str:
         """当前设置的代码字体族名（缺省/未初始化时回退默认值）"""
@@ -655,12 +706,12 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         return str(value or _DEFAULT_CODE_FONT_FAMILY)
 
     def refresh_code_font_setting(self) -> None:
-        """「代码字体」设置变更后重建预览以应用新 CSS。
+        """「代码字体」设置变更后应用新 CSS（--code-font）。
 
-        与主题变更为同一重建路径（重置标志让 _push_to_preview 走 setHtml）。
+        与主题变更同一路径：已加载则就地更新变量，未加载则由首屏整页灌入。
         渲染产物不含字体信息（字体纯 CSS），故无需清 Document 渲染缓存。
         """
-        self._html_template_loaded = False
+        self._apply_preview_css_vars()
         self._update_preview()
 
     def _connect_signals(self) -> None:
@@ -779,18 +830,11 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             css_vars = _build_preview_css_vars(
                 self._theme_engine, self._code_font_family()
             )
-            # 滚动条尺寸与圆角：与 Qt 侧同一 scrollbar recipe（width/radius=w//2/margin）
-            sb_width = int(v2_style_value(self._theme_engine, "scrollbar", "width", 12))
-            sb_radius = sb_width // 2
-            sb_margin = int(v2_style_value(self._theme_engine, "scrollbar", "margin", 2))
             template = PREVIEW_HTML_TEMPLATE
             try:
                 full_html = template.format(
                     content=html_content,
                     layout_css=_MARKDOWN_LAYOUT_CSS,
-                    sb_width=sb_width,
-                    sb_radius=sb_radius,
-                    sb_margin=sb_margin,
                 ).replace(
                     "</style>", css_vars + "\n</style>", 1
                 )

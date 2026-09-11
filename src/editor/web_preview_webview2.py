@@ -21,6 +21,8 @@
 
 关键实现约束：
   - 创建是异步的，而接口是同步的 → 就绪前的调用入队，就绪后补发。
+  - 协程必须有运行中的事件循环（qasync）；循环缺失或运行时缺失/初始化失败
+    一律转入失败态并在预览区显示可读提示，不做构造期崩溃、不留空白。
   - bounds 使用**物理像素**而 Qt 用逻辑像素 → dpr 换算封装在本文件内部，
     且原点取容器自身客户区（容器是独立 HWND），上层不得感知（C1.6 目视检查
     得出的必办项）。
@@ -36,14 +38,15 @@ import ctypes
 import os
 import tempfile
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Coroutine
 
 import webview2.microsoft.web.webview2.core as core
 import winrt.windows.foundation as wf
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import QWidget
+from PyQt6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from ..utils.logger import get_logger
+from . import webview2_runtime
 from .web_preview import WebPreviewAdapter
 
 _log = get_logger(__name__)
@@ -95,6 +98,9 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
         self._webview: core.CoreWebView2 | None = None
         self._env: core.CoreWebView2Environment | None = None
         self._ready = False
+        # 初始化失败（含运行时缺失 / 无事件循环）：预览区转为可见提示
+        self._failed = False
+        self._hint_label: QLabel | None = None
 
         self._resource_root: str | None = None
         self._pending_html: str | None = None
@@ -103,7 +109,7 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
         self._nav_event: asyncio.Event | None = None
 
         self._ready_signal.connect(self._flush_pending)
-        asyncio.ensure_future(self._init_async())
+        self._schedule(self._init_async())
 
     # ── 接口实现 ────────────────────────────────────────────────────────
     def widget(self) -> QWidget:
@@ -119,11 +125,7 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
         if not self._ready:
             self._pending_scripts.append(script)
             return
-        webview = self._webview
-        if webview is None:
-            return
-        task = asyncio.ensure_future(webview.execute_script_async(script))
-        task.add_done_callback(_swallow)
+        self._schedule(self._execute_script(script))
 
     def set_visible(self, visible: bool) -> None:
         if self._controller is not None:
@@ -141,12 +143,74 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
         if not self._ready:
             self._pending_export = (html, on_done)
             return
-        task = asyncio.ensure_future(self._export_async(html, on_done))
+        self._schedule(self._export_async(html, on_done))
+
+    # ── 协程调度 ────────────────────────────────────────────────────────
+    async def _execute_script(self, script: str) -> None:
+        """执行 JS。
+
+        ``execute_script_async`` 返回 WinRT 的 IAsyncOperation（可等待对象，
+        不是协程），故必须包在协程里 await —— ``loop.create_task`` 只接受协程。
+        """
+        webview = self._webview
+        if webview is None:
+            return
+        await webview.execute_script_async(script)
+
+    def _schedule(self, coro: "Coroutine[object, object, None]") -> None:
+        """把协程投递到当前事件循环。
+
+        用 ``get_event_loop()`` 而非 ``get_running_loop()``：主窗口是在
+        ``loop.run_forever()`` **之前**构造的（见 main.py），此时循环已 set
+        但尚未 run，任务仍应正常入队、待循环启动后执行。
+
+        完全没有循环时**不抛异常**：适配器可能被构造在循环之外（测试宿主、
+        非 qasync 启动路径），此时转入失败态并给出可见提示，
+        避免把「后端不可用」表现为构造期崩溃。
+        """
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            coro.close()
+            self._fail(
+                "当前没有事件循环，无法初始化 WebView2 预览。\n"
+                "应用需经 qasync 事件循环启动（见 main.py）。"
+            )
+            return
+        task = loop.create_task(coro)
         task.add_done_callback(_swallow)
+
+    def _fail(self, message: str) -> None:
+        """转入失败态：记录日志并在预览区显示可读提示（不再是空白）。"""
+        self._failed = True
+        _log.error("WebView2 预览不可用：%s", message.replace("\n", " "))
+        self._show_hint(message)
+
+    def _show_hint(self, message: str) -> None:
+        if self._hint_label is not None:
+            return
+        label = QLabel(message, self._container)
+        label.setWordWrap(True)
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # 允许选中 / 点开安装地址，便于用户自助恢复
+        label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+            | Qt.TextInteractionFlag.LinksAccessibleByMouse
+        )
+        label.setOpenExternalLinks(True)
+        layout = QVBoxLayout(self._container)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.addWidget(label)
+        label.show()
+        self._hint_label = label
 
     # ── 初始化 ──────────────────────────────────────────────────────────
     async def _init_async(self) -> None:
         global _ENV
+        if not webview2_runtime.is_available():
+            # 运行时缺失：先失败退出，不进入 create_async 的晦涩报错
+            self._fail(webview2_runtime.INSTALL_HINT)
+            return
         try:
             ctypes.windll.ole32.CoInitialize(None)
             if _ENV is None:
@@ -174,9 +238,10 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
             self._ready = True
             _log.info("WebView2 后端已就绪")
             self._ready_signal.emit()
-        except Exception:  # noqa: BLE001
-            # 初始化失败：预览区留空。必须留日志，否则故障完全不可见
-            _log.error("WebView2 初始化失败，预览将留空", exc_info=True)
+        except Exception as exc:  # noqa: BLE001
+            # 初始化失败：必须留日志 + 可见提示，否则故障完全不可见
+            _log.error("WebView2 初始化失败", exc_info=True)
+            self._fail(f"WebView2 初始化失败：{exc}")
 
     def _flush_pending(self) -> None:
         """初始化完成后补发就绪前积压的调用，保持调用顺序。"""
@@ -191,8 +256,7 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
         if html is not None:
             if on_done is not None:
                 self._navigate(html)
-                task = asyncio.ensure_future(self._print_current(on_done))
-                task.add_done_callback(_swallow)
+                self._schedule(self._print_current(on_done))
             else:
                 self._navigate(html)
 

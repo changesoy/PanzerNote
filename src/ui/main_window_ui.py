@@ -28,7 +28,6 @@ from ..core.shortcut_manager import ShortcutManager
 from ..editor.editor_tabs import EditorTabWidget
 from ..editor.find_in_files_panel import FindInFilesPanel
 from ..editor.find_replace import FindReplaceBar
-from ..editor.webengine_runtime import WebEngineRuntime
 from ..game.game_sidebar import GameSidebar
 from ..game.resource_bar import ResourceBar
 from ..game.secretary_widget import SecretaryWidget
@@ -67,7 +66,7 @@ class BuiltUI:
 class MainWindowUIBuilder:
     """主窗口 UI 组装器：只创建与布局，不连接信号。
 
-    构造注入 config/theme_engine/shortcut_manager/webengine_runtime，
+    构造注入 config/theme_engine/shortcut_manager，
     build() 把 MainWindow 当挂载点，返回 BuiltUI。
     """
 
@@ -76,13 +75,11 @@ class MainWindowUIBuilder:
         config: Config,
         theme_engine: ThemeEngine,
         shortcut_manager: ShortcutManager,
-        webengine_runtime: WebEngineRuntime,
         document_registry=None,
     ) -> None:
         self._config = config
         self._theme_engine = theme_engine
         self._shortcut_manager = shortcut_manager
-        self._webengine_runtime = webengine_runtime
         # 3.5.8（批次 4a）：主面板与分屏共享同一 DocumentRegistry
         self._document_registry = document_registry
 
@@ -176,7 +173,6 @@ class MainWindowUIBuilder:
         editor_tabs = EditorTabWidget(
             self._config,
             theme_engine=self._theme_engine,
-            webengine_runtime=self._webengine_runtime,
             document_registry=self._document_registry,
         )
         editor_tabs.set_find_bar(find_replace_bar)

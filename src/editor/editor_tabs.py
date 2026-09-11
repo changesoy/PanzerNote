@@ -40,7 +40,6 @@ from .find_replace import FindReplaceBar
 from .save_task_manager import SaveTaskManager, SaveState
 from .temp_session_manager import TempSessionManager
 from .eol_utils import detect_eol_from_bytes
-from .webengine_runtime import WebEngineRuntime
 
 
 # ════════════════════════════════════════════════════════
@@ -319,7 +318,6 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self,
         config: Config,
         theme_engine,
-        webengine_runtime: WebEngineRuntime | None = None,
         document_registry=None,
         session_manager=None,
         panel_name: str = "main",
@@ -330,7 +328,6 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             raise RuntimeError("EditorTabs 必须传入 theme_engine，不允许为 None")
         self.config = config
         self._theme_engine = theme_engine
-        self._webengine_runtime = webengine_runtime
         # 3.5.8（R6）：面板标识——崩溃恢复时 autosave 按此字段路由回原面板
         # （主面板 "main"，分屏 "split_0" / "split_1" ...）
         self._panel_name = panel_name
@@ -739,7 +736,6 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             widget = MarkdownPreviewWidget(
                 self.config,
                 theme_engine=self._theme_engine,
-                webengine_runtime=self._webengine_runtime,
             )
             widget.editor.attach_shared_document(shared_doc)
             widget.editor.load_content(content)  # 幂等重建补全词集/折叠（内容相同）
@@ -844,7 +840,6 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             widget = MarkdownPreviewWidget(
                 self.config,
                 theme_engine=self._theme_engine,
-                webengine_runtime=self._webengine_runtime,
             )
             editor = widget.editor
         else:

@@ -17,12 +17,13 @@ from ..themes.theme_engine import ThemeEngine
 from ..themes.theme_v2.consumer import v2_export_variant_id
 from .highlight_themes import highlight_code_html
 from .secure_markdown_renderer import (
+    DEFAULT_CODE_FONT_FAMILY,
     CodeHighlighter,
     render_markdown_to_safe_html,
     render_plain_text_to_safe_html,
     build_export_html_document,
 )
-from .web_preview_webengine import WebEnginePreviewAdapter
+from .web_preview import create_preview_adapter
 
 
 class ExportService:
@@ -89,7 +90,8 @@ class ExportService:
     @staticmethod
     def export_html(content: str, is_markdown: bool, filepath: str, colors,
                     theme_engine: ThemeEngine, title: str = "",
-                    file_guard=None) -> None:
+                    file_guard=None,
+                    code_font: str = DEFAULT_CODE_FONT_FAMILY) -> None:
         """导出为 HTML 文件
 
         参数：
@@ -100,11 +102,12 @@ class ExportService:
           theme_engine：主题引擎，用于代码块语法高亮（必填）
           title：文档标题
           file_guard：FileGuard 实例（必填），写入经 safe_write_bytes 安全执行
+          code_font：代码块字体族名（设置项「代码字体」）
 
         异常：文件写入失败时抛出 IOError
         """
         body_html = ExportService.render_content(content, is_markdown, theme_engine)
-        full_html = build_export_html_document(body_html, colors, title)
+        full_html = build_export_html_document(body_html, colors, title, code_font)
 
         file_guard.safe_write_bytes(
             filepath,
@@ -115,7 +118,8 @@ class ExportService:
     @staticmethod
     def export_pdf(content: str, is_markdown: bool, parent_widget,
                    on_pdf_generated, colors, theme_engine: ThemeEngine,
-                   title: str = "") -> object:
+                   title: str = "",
+                   code_font: str = DEFAULT_CODE_FONT_FAMILY) -> object:
         """导出为 PDF 文件
 
         参数：
@@ -126,13 +130,14 @@ class ExportService:
           colors：v2_export_colors 产物（dict），提供主题色值
           theme_engine：主题引擎，用于代码块语法高亮（必填）
           title：文档标题
+          code_font：代码块字体族名（设置项「代码字体」）
 
         返回：离屏预览控件（调用方不应持有，由内部自动清理）
         """
         body_html = ExportService.render_content(content, is_markdown, theme_engine)
-        full_html = build_export_html_document(body_html, colors, title)
+        full_html = build_export_html_document(body_html, colors, title, code_font)
 
-        # PDF 导出经 Web 预览适配器（离屏实例），不再直接依赖具体 Web 控件
-        adapter = WebEnginePreviewAdapter(parent_widget)
+        # PDF 导出经 Web 预览适配器（离屏实例），后端由 create_preview_adapter 选择
+        adapter = create_preview_adapter(parent_widget)
         adapter.export_pdf(full_html, on_pdf_generated)
         return adapter.widget()

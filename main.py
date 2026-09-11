@@ -213,6 +213,21 @@ def main():
             else:
                 subprocess.Popen(['xdg-open', crash_path])
 
+    # ── C3-B：事件循环改造（qasync）────────────────────────────────────────
+    # WebView2 后端（PyWinRT）要求 asyncio 与 Qt 事件循环在**同一线程合并**：
+    # PyWinRT 禁止在 STA 上阻塞等待（.get() 报错），而 await 需要事件循环；
+    # 主线程 asyncio.run() 会停掉 Qt 消息泵（死锁），后台 asyncio 循环会让
+    # controller 创建永久挂起（见 111.txt 的 C1.6 判定性实验）。
+    # 因此以 qasync.QEventLoop 取代 app.exec()。
+    #
+    # 循环须**早于主窗口创建**：WebView2 预览后端在构造期即
+    # asyncio.ensure_future 启动 controller 创建协程，此刻若当前线程还没有
+    # 事件循环，会直接 RuntimeError: There is no current event loop。
+    loop = QEventLoop(app)
+    asyncio.set_event_loop(loop)
+    # 关窗 → quitOnLastWindowClosed → aboutToQuit → 停止 asyncio 循环
+    app.aboutToQuit.connect(loop.stop)
+
     profiler.begin_phase(PHASE_WINDOW_CREATE)
     from src.main_window import MainWindow
     from src.themes.theme_v2.errors import ThemeLoadError
@@ -238,17 +253,6 @@ def main():
     profiler.end_phase()
 
     logger.info(profiler.get_report())
-
-    # ── C3-B：事件循环改造（qasync）────────────────────────────────────────
-    # WebView2 后端（PyWinRT）要求 asyncio 与 Qt 事件循环在**同一线程合并**：
-    # PyWinRT 禁止在 STA 上阻塞等待（.get() 报错），而 await 需要事件循环；
-    # 主线程 asyncio.run() 会停掉 Qt 消息泵（死锁），后台 asyncio 循环会让
-    # controller 创建永久挂起（见 111.txt 的 C1.6 判定性实验）。
-    # 因此以 qasync.QEventLoop 取代 app.exec()。
-    loop = QEventLoop(app)
-    asyncio.set_event_loop(loop)
-    # 关窗 → quitOnLastWindowClosed → aboutToQuit → 停止 asyncio 循环
-    app.aboutToQuit.connect(loop.stop)
 
     with loop:
         loop.run_forever()

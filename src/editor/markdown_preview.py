@@ -31,7 +31,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, QUrl, QPoint
 from PyQt6.QtGui import QDesktopServices, QTextCursor
 
-from .web_preview_webengine import WebEnginePreviewAdapter
+from .web_preview import create_preview_adapter
 
 try:
     from markdown_it import MarkdownIt as _MarkdownIt
@@ -66,7 +66,9 @@ _IMG_SRC_RE = re.compile(
 
 from .secure_markdown_renderer import (
     CODEBLOCK_RE as _CODEBLOCK_RE,
+    DEFAULT_CODE_FONT_FAMILY as _DEFAULT_CODE_FONT_FAMILY,
     MARKDOWN_LAYOUT_CSS as _MARKDOWN_LAYOUT_CSS,
+    code_font_css_stack as _code_font_css_stack,
     extract_language_from_code_attrs as _extract_language_from_code_attrs,
     strip_dangerous_html as _strip_dangerous_html,
 )
@@ -100,6 +102,7 @@ PREVIEW_HTML_TEMPLATE = """<!DOCTYPE html>
     --scrollbar-track: var(--css-scrollbar-track);
     --scrollbar-thumb: var(--css-scrollbar-thumb);
     --scrollbar-thumb-hover: var(--css-scrollbar-thumb-hover);
+    --code-font: var(--css-code-font);
 }}
 
 /* ========== 基础 ========== */
@@ -162,7 +165,7 @@ body {{
     padding: 0 !important;
     background: transparent !important;
     border-radius: 0 !important;
-    font-family: Consolas, "Courier New", monospace;
+    font-family: var(--code-font);
     font-size: 14px;
     line-height: 1.55;
     white-space: pre;
@@ -478,14 +481,16 @@ window.updateFoldVisibility = function(collapsedLinesJson) {{
 #  预览模板 CSS 变量注入（替代旧的正则颜色替换）
 # ════════════════════════════════════════════════════════
 
-def _build_preview_css_vars(theme_engine) -> str:
+def _build_preview_css_vars(theme_engine, code_font_family: str | None = None) -> str:
     """根据主题引擎构造 :root CSS 变量覆盖块。
 
     B2：纯消费 Theme v2（semantic token + markdown/scrollbar recipe），无 v1 回退。
     theme_engine 必须传入，不允许为 None。
+    code_font_family：设置项「代码字体」族名，缺省回退默认值。
     """
     # 颜色语义映射：CSS 变量名 → v2 token / recipe 值（B8：字面量 fallback = v1 light 值）
     vars_map = {
+        "code-font": _code_font_css_stack(code_font_family),
         "bg-card": v2_token(theme_engine, "surface_primary", "#FFFFFF"),
         "text-primary": v2_token(theme_engine, "text_primary", "#212121"),
         "text-secondary": v2_token(theme_engine, "text_secondary", "#757575"),
@@ -595,8 +600,8 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self.editor = Editor(self.config, theme_engine=self._theme_engine)
         self.splitter.addWidget(self.editor)
 
-        # 右侧预览（经 Web Preview Adapter，具体后端可替换）
-        self.preview = WebEnginePreviewAdapter()
+        # 右侧预览（经 Web Preview Adapter，后端由 create_preview_adapter 选择）
+        self.preview = create_preview_adapter()
 
         self.splitter.addWidget(self.preview.widget())
         # 恢复编辑区/预览分栏占比（与侧栏分栏的 view_setting 模式一致）
@@ -641,6 +646,22 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self._html_template_loaded = False
         if getattr(self, 'editor', None) is not None:
             self._update_preview()
+
+    def _code_font_family(self) -> str:
+        """当前设置的代码字体族名（缺省/未初始化时回退默认值）"""
+        value = self.config.get_editor_setting(
+            "code_font_family", _DEFAULT_CODE_FONT_FAMILY
+        )
+        return str(value or _DEFAULT_CODE_FONT_FAMILY)
+
+    def refresh_code_font_setting(self) -> None:
+        """「代码字体」设置变更后重建预览以应用新 CSS。
+
+        与主题变更为同一重建路径（重置标志让 _push_to_preview 走 setHtml）。
+        渲染产物不含字体信息（字体纯 CSS），故无需清 Document 渲染缓存。
+        """
+        self._html_template_loaded = False
+        self._update_preview()
 
     def _connect_signals(self) -> None:
         self.editor.textChanged.connect(self._on_text_changed)
@@ -755,7 +776,9 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             )
             self.preview.run_javascript(js)
         else:
-            css_vars = _build_preview_css_vars(self._theme_engine)
+            css_vars = _build_preview_css_vars(
+                self._theme_engine, self._code_font_family()
+            )
             # 滚动条尺寸与圆角：与 Qt 侧同一 scrollbar recipe（width/radius=w//2/margin）
             sb_width = int(v2_style_value(self._theme_engine, "scrollbar", "width", 12))
             sb_radius = sb_width // 2

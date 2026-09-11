@@ -26,6 +26,8 @@ from typing import Callable
 from PyQt6.QtCore import QObject, pyqtSignal
 from PyQt6.QtWidgets import QWidget
 
+from ..utils.feature_flags import is_enabled
+
 
 class _AdapterMeta(type(QObject), ABCMeta):  # type: ignore[misc]
     """组合 PyQt 的 sip 元类与 ABCMeta。
@@ -76,3 +78,20 @@ class WebPreviewAdapter(QObject, ABC, metaclass=_AdapterMeta):
         本方法是**一次性**的：调用后适配器即进入终结流程，回调触发后
         自动释放（控件与适配器本身一并销毁）。因此不要对预览用的实例调用本方法。
         """
+
+
+def create_preview_adapter(parent: QWidget | None = None) -> WebPreviewAdapter:
+    """按 feature flag `webview2_preview` 选择后端并构造适配器。
+
+    上层只应经本函数取得适配器，不得直接构造具体后端 —— 这样切换后端
+    不会波及预览与导出两处调用点。
+
+    实现类在此惰性导入：两个后端模块都 import 本模块，模块级导入会成环。
+    """
+    if is_enabled("webview2_preview"):
+        from .web_preview_webview2 import WebView2PreviewAdapter
+
+        return WebView2PreviewAdapter(parent)
+    from .web_preview_webengine import WebEnginePreviewAdapter
+
+    return WebEnginePreviewAdapter(parent)

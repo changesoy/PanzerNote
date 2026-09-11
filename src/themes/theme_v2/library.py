@@ -10,8 +10,11 @@
 """
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from ...utils.logger import get_logger
 from .constants import COLOR_VALUE_PATTERN
 from .service import ThemeV2Service
 
@@ -34,12 +37,38 @@ CORE_RECIPES: tuple[str, ...] = (
 # 结构辅助 recipe（B3 设计文档 5.2 契约说明）：不在 Core 原子性判据内，存在则输出。
 STRUCTURAL_RECIPES: tuple[str, ...] = ("group_box", "dialog")
 
-# 已定义但 QSS 暂无法表达的键（预留：B6 polish / icons 资源提供后启用）。
-# arrow/arrow_hover 需 image 资源；indicator_checked_fg 需勾选图形 image。
+# 已定义但 QSS 暂无法表达的键（预留：B6 polish 资源提供后启用）。
+# arrow_hover 需 hover 态第二张 image；indicator_checked_fg 需勾选图形 image。
+# arrow 已接线（combo_box 按 arrow token 颜色生成箭头 SVG）；
 # placeholder 已随补漏 C 接线（QSS placeholder-text-color，仅 QLineEdit）。
 _PENDING_KEYS: frozenset[str] = frozenset(
-    {"arrow", "arrow_hover", "indicator_checked_fg"}
+    {"arrow_hover", "indicator_checked_fg"}
 )
+
+# 下拉箭头 SVG 模板：颜色由 combo_box recipe 的 arrow token 解析值填充。
+_ARROW_SVG_TEMPLATE = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10">'
+    '<polygon points="5,7 1.5,3 8.5,3" fill="{color}"/></svg>'
+)
+
+
+def _arrow_image_url(color: str) -> str:
+    """按 arrow token 颜色生成（并缓存）下拉箭头 SVG，返回 QSS image url。
+
+    Qt QSS 的 ``::down-arrow`` 无法给 image 重新上色，故按 token 颜色落成独立
+    SVG 文件；颜色变则文件名变，天然跟随主题变体切换。
+    生成失败时返回空串（该控件退化为无箭头），并记录警告，不静默吞掉。
+    """
+    cache_dir = Path(tempfile.gettempdir()) / "PanzerNote" / "theme_icons"
+    path = cache_dir / f"down_arrow_{color.lstrip('#').lower()}.svg"
+    try:
+        if not path.exists():
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            path.write_text(_ARROW_SVG_TEMPLATE.format(color=color), encoding="utf-8")
+    except OSError as e:
+        get_logger(__name__).warning("生成下拉箭头图标失败: %s", e)
+        return ""
+    return str(path).replace("\\", "/")
 
 
 class ThemeComponentLibrary:
@@ -154,18 +183,27 @@ QLineEdit:disabled, QSpinBox:disabled {{
 
 def _b_combo_box(s: Mapping[str, Any]) -> str:
     pad_v, pad_h = s["padding"], s["padding"] * 2
+    arrow_url = _arrow_image_url(s["arrow"])
+    arrow_rule = f'image: url("{arrow_url}");' if arrow_url else ""
     return f"""
-QComboBox {{
+QComboBox, QFontComboBox {{
     background-color: {s['background']};
     border: 1px solid {s['border']};
     border-radius: {s['radius']}px;
-    padding: {pad_v}px {pad_h}px;
+    padding: {pad_v}px 26px {pad_v}px {pad_h}px;
     color: {s['text']};
 }}
-QComboBox:focus {{ border-color: {s['focus_border']}; }}
-QComboBox::drop-down {{
+QComboBox:focus, QFontComboBox:focus {{ border-color: {s['focus_border']}; }}
+QComboBox::drop-down, QFontComboBox::drop-down {{
+    subcontrol-origin: padding;
+    subcontrol-position: right center;
     border: none;
-    width: 20px;
+    width: 24px;
+}}
+QComboBox::down-arrow, QFontComboBox::down-arrow {{
+    {arrow_rule}
+    width: 10px;
+    height: 10px;
 }}
 QComboBox QAbstractItemView {{
     background-color: {s['popup_background']};

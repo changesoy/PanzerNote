@@ -10,17 +10,98 @@ v1.5.5 改动：
   - 显示行号 / 高亮当前行开关现在可以正确应用
 """
 
+import time
+
 from PyQt6.QtWidgets import (
     QWidget, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox,
     QPushButton, QSpinBox, QComboBox, QGroupBox, QFormLayout,
     QFontComboBox, QSlider, QScrollArea, QApplication
 )
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
+from PyQt6.QtCore import QObject, QEvent, Qt
+from PyQt6.QtGui import QFont, QWheelEvent
 
 from ..core.config import Config
 from ..core.settings_store import DEFAULT_CODE_FONT_FAMILY
 from ..utils.feature_flags import is_enabled as _feature_is_enabled
+
+
+class _WheelGuard(QObject):
+    """按控件类别管理滚轮行为，避免滚动设置对话框时误改取值。
+
+    焦点判据在这里不可用：对话框弹出时焦点默认落在第一个可聚焦控件（数字框）上，
+    且 QLineEdit 是 spinbox 的 focus proxy，实测 hasFocus() 恒为真。故改用
+    **滚动条是否刚移动过**判定「是否正在滚动」，并按控件类别分流：
+
+    - 数值类（QSpinBox / QSlider）：正在滚动时把滚轮转交滚动区（只滚不改）；
+      界面静止时放行，滚轮正常作用于控件（悬停即可调值，无需点击）。
+    - 选择类（QComboBox / QFontComboBox）：一律转交滚动区，滚轮永不改选项。
+
+    过滤器还必须覆盖**鼠标实际落点**：QSpinBox / QFontComboBox 的中心是其内部
+    QLineEdit（childAt 实测），只装在控件自身不会触发，故登记时一并覆盖内部
+    编辑框，并按 parentWidget 链回溯识别受保护控件。
+    """
+
+    #: 判定「仍在滚动」的时间窗（秒）
+    _SCROLL_QUIET_SECONDS = 0.3
+
+    def __init__(self, scroll_area: QScrollArea, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._viewport = scroll_area.viewport()
+        self._value_widgets: set[QWidget] = set()
+        self._selection_widgets: set[QWidget] = set()
+        self._last_scroll_at = 0.0
+        for scrollbar in (
+            scroll_area.verticalScrollBar(),
+            scroll_area.horizontalScrollBar(),
+        ):
+            if scrollbar is not None:  # 横向滚动条可能未创建
+                scrollbar.valueChanged.connect(self._on_scrolled)
+
+    def guard_value(self, widget: QWidget) -> None:
+        """登记数值类控件：界面静止时滚轮可调值"""
+        self._value_widgets.add(widget)
+        self._install(widget)
+
+    def guard_selection(self, widget: QWidget) -> None:
+        """登记选择类控件：滚轮永不改选项"""
+        self._selection_widgets.add(widget)
+        self._install(widget)
+
+    def _install(self, widget: QWidget) -> None:
+        """对控件及其内部编辑框安装过滤器（内部编辑框才是鼠标实际落点）"""
+        widget.installEventFilter(self)
+        get_line_edit = getattr(widget, "lineEdit", None)
+        editor = get_line_edit() if callable(get_line_edit) else None
+        if isinstance(editor, QWidget):
+            editor.installEventFilter(self)
+
+    def _on_scrolled(self, _value: int) -> None:
+        self._last_scroll_at = time.monotonic()
+
+    def _resolve(self, widget: QWidget) -> QWidget | None:
+        """沿 parentWidget 链回溯到最近的受保护控件"""
+        current: QWidget | None = widget
+        while current is not None:
+            if current in self._value_widgets or current in self._selection_widgets:
+                return current
+            current = current.parentWidget()
+        return None
+
+    def _should_scroll(self, owner: QWidget) -> bool:
+        if owner in self._selection_widgets:
+            return True
+        return (time.monotonic() - self._last_scroll_at) < self._SCROLL_QUIET_SECONDS
+
+    def eventFilter(self, obj: QObject | None, event: QEvent | None) -> bool:
+        if isinstance(obj, QWidget) and isinstance(event, QWheelEvent):
+            owner = self._resolve(obj)
+            if owner is not None and self._should_scroll(owner):
+                # 自带的时间戳一并刷新：滚动条已到底/到顶不再移动时，
+                # 持续滚轮仍应算作「正在滚动」，不能漏成改值
+                self._on_scrolled(0)
+                QApplication.sendEvent(self._viewport, event)
+                return True
+        return super().eventFilter(obj, event)
 
 
 class EditorSettingsDialog(QDialog):
@@ -199,6 +280,26 @@ class EditorSettingsDialog(QDialog):
         secretary_layout.addRow("尺寸占比:", size_widget)
 
         scroll_layout.addWidget(secretary_group)
+
+        # 滚轮守卫：滚动本对话框时不得误改设置
+        self._wheel_guard = _WheelGuard(scroll, self)
+        # 数值类：滚动中只滚不改，界面静止后滚轮可调值
+        for value_widget in (
+            self.indent_size_spin,
+            self.font_size_spin,
+            self.autosave_spin,
+            self.completion_min_chars_spin,
+            self.secretary_size_slider,
+        ):
+            self._wheel_guard.guard_value(value_widget)
+        # 选择类：滚轮永不改选项（只滚动对话框）
+        for selection_widget in (
+            self.font_family_combo,
+            self.code_font_combo,
+            self.wrap_mode_combo,
+            self.motion_level_combo,
+        ):
+            self._wheel_guard.guard_selection(selection_widget)
 
         # 收尾滚动区域
         scroll_layout.addStretch()

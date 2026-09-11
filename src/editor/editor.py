@@ -32,6 +32,7 @@ from PyQt6.QtGui import (
 
 from ..core.config import Config
 from ..core.shared_document import SharedDocument
+from ..core.settings_store import DEFAULT_CODE_FONT_FAMILY
 from .syntax_highlighter import get_highlighter_for_file
 from .editor_actions import EditorActionsMixin
 from .auto_pair_handler import AutoPairHandlerMixin
@@ -695,8 +696,27 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             shared._highlighter = self._highlighter
             shared._highlighter_file_type = self._file_type
 
+        self.set_code_font(
+            str(
+                self.config.get_editor_setting(
+                    "code_font_family", DEFAULT_CODE_FONT_FAMILY
+                )
+                or DEFAULT_CODE_FONT_FAMILY
+            )
+        )
         self._lazy_highlight.set_highlighter(self._highlighter)
         self.apply_auto_minimap()
+
+    def set_code_font(self, family: str) -> None:
+        """设置代码块字体（设置项「代码字体」）。
+
+        仅对支持该能力的高亮器生效——目前是 Markdown 高亮器（行内代码 /
+        fence / 代码块三类 format）；Pygments 等其他高亮器不做代码/正文区分，
+        沿用编辑器正文字体。
+        """
+        setter = getattr(self._highlighter, "set_code_font_family", None)
+        if callable(setter):
+            setter(family)
 
     # ═══════════════════ 行宽模式 ═══════════════════
 

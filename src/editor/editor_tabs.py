@@ -1062,6 +1062,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 _on_pdf_ready,
                 v2_export_colors(self._theme_engine),
                 theme_engine=self._theme_engine,
+                code_font=self._code_font_family(),
             )
             return True, 0
         except RuntimeError as e:
@@ -1076,7 +1077,10 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         不直接复用 ExportService.export_html（其内部直接 open 写入）。
         """
         from .export_service import ExportService
-        from .secure_markdown_renderer import build_export_html_document
+        from .secure_markdown_renderer import (
+            DEFAULT_CODE_FONT_FAMILY,
+            build_export_html_document,
+        )
         from ..security.file_access_context import FileAccessContext
 
         editor = self._get_editor_from_widget(widget)
@@ -1091,6 +1095,12 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             full_html = build_export_html_document(
                 body_html,
                 v2_export_colors(self._theme_engine),
+                code_font=str(
+                    self.config.get_editor_setting(
+                        "code_font_family", DEFAULT_CODE_FONT_FAMILY
+                    )
+                    or DEFAULT_CODE_FONT_FAMILY
+                ),
             )
             self.config.get_file_guard().safe_write_bytes(
                 filepath,
@@ -2428,6 +2438,28 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     def set_font_all(self, family: str, size: int):
         for editor in self._iter_editors():
             editor.set_editor_font(family, size)
+
+    def _code_font_family(self) -> str:
+        """设置项「代码字体」族名（未初始化时回退默认值）"""
+        from .secure_markdown_renderer import DEFAULT_CODE_FONT_FAMILY
+
+        value = self.config.get_editor_setting(
+            "code_font_family", DEFAULT_CODE_FONT_FAMILY
+        )
+        return str(value or DEFAULT_CODE_FONT_FAMILY)
+
+    def set_code_font_all(self, family: str):
+        """对所有已打开编辑器与预览应用「代码字体」设置。
+
+        编辑器侧改 Markdown 高亮器的代码 format；预览侧走整页重建
+        （字体只存在于 CSS，无法靠局部 JS 更新）。
+        """
+        for editor in self._iter_editors():
+            editor.set_code_font(family)
+        for i in range(self.count()):
+            widget = self.widget(i)
+            if isinstance(widget, MarkdownPreviewWidget):
+                widget.refresh_code_font_setting()
 
     def update_indent_settings_all(self):
         """缩进配置变更后，更新所有已打开编辑器的 Tab 显示宽度"""

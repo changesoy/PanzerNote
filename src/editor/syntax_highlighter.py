@@ -11,6 +11,7 @@ from PyQt6.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor, QFont, QTex
 
 from ..utils.logger import get_logger
 from ..themes.theme_v2.consumer import v2_color
+from ..core.settings_store import DEFAULT_CODE_FONT_FAMILY
 
 try:
     from pygments.lexers import get_lexer_for_filename, get_lexer_by_name
@@ -135,8 +136,22 @@ class MarkdownHighlighter(QSyntaxHighlighter):
             raise RuntimeError("MarkdownHighlighter 必须传入 theme_engine，不允许为 None")
         self._is_dark = is_dark
         self._theme_engine = theme_engine
+        # 代码块字体族名（设置项「代码字体」；由 Editor.set_code_font 覆盖）。
+        # 必须在 _init_formats 之前赋值——重建 formats 时（如切主题）要沿用当前值。
+        self._code_font_family = DEFAULT_CODE_FONT_FAMILY
         self._init_formats(is_dark)
         self._fence_re = re.compile(r'^```')
+
+    def set_code_font_family(self, family: str) -> None:
+        """设置代码块字体族名并重新高亮（family 为空时回退默认值）"""
+        family = (family or "").strip() or DEFAULT_CODE_FONT_FAMILY
+        if family == self._code_font_family:
+            return
+        self._code_font_family = family
+        self._init_formats(self._is_dark)
+        doc = self.document()
+        if doc:
+            self.rehighlight()
 
     def _init_formats(self, is_dark: bool):
         """初始化所有格式"""
@@ -189,7 +204,7 @@ class MarkdownHighlighter(QSyntaxHighlighter):
 
         code_fmt = QTextCharFormat()
         code_fmt.setForeground(QColor(get_color("code_fg")))
-        code_fmt.setFontFamily("Consolas")
+        code_fmt.setFontFamily(self._code_font_family)
         code_fmt.setBackground(QColor(get_color("code_bg")))
         self.inline_rules.append((re.compile(r'`[^`\n]+`'), code_fmt))
 
@@ -219,11 +234,11 @@ class MarkdownHighlighter(QSyntaxHighlighter):
 
         self.fence_format = QTextCharFormat()
         self.fence_format.setForeground(QColor(get_color("fence_fg")))
-        self.fence_format.setFontFamily("Consolas")
+        self.fence_format.setFontFamily(self._code_font_family)
 
         self.code_block_format = QTextCharFormat()
         self.code_block_format.setForeground(QColor(get_color("code_block_fg")))
-        self.code_block_format.setFontFamily("Consolas")
+        self.code_block_format.setFontFamily(self._code_font_family)
         self.code_block_format.setBackground(QColor(get_color("code_block_bg")))
 
     def set_dark_mode(self, is_dark: bool):

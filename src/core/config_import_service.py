@@ -65,6 +65,7 @@ class ConfigImportService:
         "editor": {
             "font_family": ((str,), None),
             "font_size": ((int,), (1, 200)),
+            "code_font_family": ((str,), None),
             "line_spacing": ((int, float), (0.5, 5.0)),
             "show_line_numbers": ((bool,), None),
             "auto_wrap": ((bool,), None),

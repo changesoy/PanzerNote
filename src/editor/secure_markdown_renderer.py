@@ -18,6 +18,7 @@ import re
 import html as html_module
 from typing import Callable, List
 
+from ..core.settings_store import DEFAULT_CODE_FONT_FAMILY
 from ..utils.logger import get_logger
 
 try:
@@ -199,6 +200,16 @@ def render_plain_text_to_safe_html(text: str) -> str:
     return f"<pre>{html_module.escape(text)}</pre>"
 
 
+def code_font_css_stack(family: str | None = None) -> str:
+    """由「代码字体」族名生成 CSS font-family 值（含通用回退）
+
+    预览模板与导出文档共用；族名缺失时空回退到默认值，保证 --code-font 恒有效。
+    """
+    name = (family or "").strip() or DEFAULT_CODE_FONT_FAMILY
+    quoted = f'"{name}"' if " " in name else name
+    return f"{quoted}, Consolas, monospace"
+
+
 # ════════════════════════════════════════════════════════
 #  Markdown 内容排版 CSS（单一来源，Wave 1.5）
 # ════════════════════════════════════════════════════════
@@ -235,9 +246,14 @@ p { margin: 8px 0; }
 strong { font-weight: 700; }
 em { font-style: italic; }
 
+/* ========== 代码字体（--code-font 由预览/导出各自注入） ========== */
+pre, pre code {
+    font-family: var(--code-font);
+}
+
 /* ========== 行内代码 ========== */
 :not(pre) > code {
-    font-family: "JetBrains Mono", Consolas, "Courier New", "Microsoft YaHei", monospace;
+    font-family: var(--code-font);
     background: var(--surface);
     padding: 1px 5px;
     border-radius: 3px;
@@ -295,13 +311,19 @@ li input[type="checkbox"] {
 """
 
 
-def build_export_html_document(body_html: str, theme_colors: dict[str, str], title: str = "") -> str:
+def build_export_html_document(
+    body_html: str,
+    theme_colors: dict[str, str],
+    title: str = "",
+    code_font: str = DEFAULT_CODE_FONT_FAMILY,
+) -> str:
     """构建完整的导出 HTML 文档
 
     参数：
       body_html：已渲染的安全 HTML 片段
       theme_colors：v2 色值集合（v2_export_colors 产物），提供主题色值
       title：文档标题（可选）
+      code_font：代码块字体族名（设置项「代码字体」，默认 Courier New）
 
     返回：完整的 HTML 文档字符串
 
@@ -325,6 +347,7 @@ def build_export_html_document(body_html: str, theme_colors: dict[str, str], tit
     --primary-hover: {theme_colors["primary_dark"]};
     --bg-codeblock: {theme_colors["bg_codeblock"]};
     --scrollbar-thumb-hover: {theme_colors["text_disabled"]};
+    --code-font: {code_font_css_stack(code_font)};
 }}"""
     export_shell_css = """/* ========== 导出文档外壳 ========== */
 body {

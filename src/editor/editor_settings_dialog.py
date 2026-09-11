@@ -19,6 +19,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
 from ..core.config import Config
+from ..core.settings_store import DEFAULT_CODE_FONT_FAMILY
 from ..utils.feature_flags import is_enabled as _feature_is_enabled
 
 
@@ -104,6 +105,15 @@ class EditorSettingsDialog(QDialog):
         self.font_family_combo = QFontComboBox()
         self.font_family_combo.setMinimumWidth(200)
         editor_layout.addRow("字体:", self.font_family_combo)
+
+        # 代码字体：作用于编辑器内代码块 / Markdown 预览 / 导出（HTML、PDF）
+        self.code_font_combo = QFontComboBox()
+        self.code_font_combo.setMinimumWidth(200)
+        self.code_font_combo.setToolTip(
+            "代码块字体：作用于编辑器内的代码块、Markdown 预览与导出文档。\n"
+            "与上方「字体」（正文）相互独立。"
+        )
+        editor_layout.addRow("代码字体:", self.code_font_combo)
 
         self.font_size_spin = QSpinBox()
         self.font_size_spin.setRange(8, 48)
@@ -238,6 +248,11 @@ class EditorSettingsDialog(QDialog):
         target_font = QFont(font_family)
         self.font_family_combo.setCurrentFont(target_font)
 
+        code_font_family = self.config.get_editor_setting(
+            "code_font_family", DEFAULT_CODE_FONT_FAMILY
+        )
+        self.code_font_combo.setCurrentFont(QFont(code_font_family))
+
         self.font_size_spin.setValue(
             self.config.get_editor_setting("font_size", 12)
         )
@@ -291,6 +306,7 @@ class EditorSettingsDialog(QDialog):
                 "auto_minimap": self.auto_minimap_cb.isChecked(),
                 "font_family": self.font_family_combo.currentFont().family(),
                 "font_size": self.font_size_spin.value(),
+                "code_font_family": self.code_font_combo.currentFont().family(),
                 "wrap_mode": self.wrap_mode_combo.currentData(),
                 "auto_save_interval": self.autosave_spin.value(),
                 "auto_pair_brackets": self.auto_pair_brackets_cb.isChecked(),

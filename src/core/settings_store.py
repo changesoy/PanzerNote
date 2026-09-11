@@ -17,6 +17,10 @@ from ..security.file_guard import FileGuard
 from .path_resolver import PathResolver, load_json, save_json, merge_dicts
 
 
+# 代码块字体默认值：编辑器代码块 / Markdown 预览 / 导出文档共用同一真相源
+DEFAULT_CODE_FONT_FAMILY = "Courier New"
+
+
 class SettingsStore:
     """设置存储：settings dict + 命名空间访问"""
 
@@ -26,6 +30,7 @@ class SettingsStore:
         "editor": {
             "font_family": "Microsoft YaHei",
             "font_size": 12,
+            "code_font_family": DEFAULT_CODE_FONT_FAMILY,
             "line_spacing": 1.5,
             "show_line_numbers": True,
             "auto_wrap": False,

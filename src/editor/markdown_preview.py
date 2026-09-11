@@ -30,7 +30,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer, QUrl, QPoint
 from PyQt6.QtGui import QDesktopServices, QTextCursor
-from PyQt6.QtWebEngineWidgets import QWebEngineView
+
+from .web_preview_webengine import WebEnginePreviewAdapter
 
 try:
     from markdown_it import MarkdownIt as _MarkdownIt
@@ -594,10 +595,10 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self.editor = Editor(self.config, theme_engine=self._theme_engine)
         self.splitter.addWidget(self.editor)
 
-        # 右侧预览（WebEngine 唯一路径）
-        self.preview = QWebEngineView()
+        # 右侧预览（经 Web Preview Adapter，具体后端可替换）
+        self.preview = WebEnginePreviewAdapter()
 
-        self.splitter.addWidget(self.preview)
+        self.splitter.addWidget(self.preview.widget())
         # 恢复编辑区/预览分栏占比（与侧栏分栏的 view_setting 模式一致）
         editor_w = self.config.get_view_setting("preview_editor_width", 500)
         preview_w = self.config.get_view_setting("preview_width", 500)
@@ -615,11 +616,9 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
 
         self._preview_visible = True
 
-        self.preview.loadFinished.connect(self._on_load_finished)
-        page = self.preview.page()
-        if page is not None:
-            # 预览 -> 编辑器：JS 经 document.title 回传顶部源码行
-            page.titleChanged.connect(self._on_preview_title)
+        self.preview.load_finished.connect(self._on_load_finished)
+        # 预览 -> 编辑器：JS 经消息通道回传顶部源码行
+        self.preview.message_received.connect(self._on_preview_title)
 
         # 拖动分隔条改变预览宽度后，锚点像素位置整体变化，需重新同步；
         # 同时保存编辑区/预览分栏占比
@@ -754,9 +753,7 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
                 "  }"
                 "});"
             )
-            page = self.preview.page()
-            if page is not None:
-                page.runJavaScript(js)
+            self.preview.run_javascript(js)
         else:
             css_vars = _build_preview_css_vars(self._theme_engine)
             # 滚动条尺寸与圆角：与 Qt 侧同一 scrollbar recipe（width/radius=w//2/margin）
@@ -824,11 +821,8 @@ a {{
 {html_content}
 </body>
 </html>"""
-            if self._base_path:
-                base_url = QUrl.fromLocalFile(self._base_path + '/')
-                self.preview.setHtml(full_html, base_url)
-            else:
-                self.preview.setHtml(full_html)
+            self.preview.set_resource_root(self._base_path or None)
+            self.preview.set_html(full_html)
 
         # 同步当前折叠状态到预览
         self._sync_folds_to_preview()
@@ -1045,9 +1039,7 @@ a {{
 
         collapsed = folding.get_collapsed_lines()
         js = f"window.updateFoldVisibility('{json.dumps(collapsed)}');"
-        page = self.preview.page()
-        if page is not None:
-            page.runJavaScript(js)
+        self.preview.run_javascript(js)
 
     # ──────────── 代码块后处理 ────────────
 
@@ -1334,9 +1326,6 @@ a {{
         self._last_at_top = at_top
         self._last_at_bottom = at_bottom
 
-        page = self.preview.page()
-        if page is None:
-            return
         at = "true" if at_top else "false"
         ab = "true" if at_bottom else "false"
         js = (
@@ -1347,7 +1336,7 @@ a {{
             f"if(window.scrollToSourceLine){{"
             f"window.scrollToSourceLine({frac_line:.4f},{total_lines},{at},{ab});}}"
         )
-        page.runJavaScript(js)
+        self.preview.run_javascript(js)
 
     # ──────────── 预览 -> 编辑器 反向同步 ────────────
 
@@ -1420,7 +1409,7 @@ a {{
 
     def toggle_preview(self):
         self._preview_visible = not self._preview_visible
-        self.preview.setVisible(self._preview_visible)
+        self.preview.set_visible(self._preview_visible)
         if self._preview_visible:
             self._update_preview()
 

@@ -7,9 +7,9 @@
 持有者：MainWindow（短期持有，导出完成后释放）
 完成通知：
   HTML：同步完成
-  PDF：QWebEngineView.loadFinished → printToPdf 回调
+  PDF：Web Preview Adapter.loadFinished → printToPdf 回调
 失败通知：异常抛出 / 回调参数为空
-关闭时行为：QWebEngineView 通过 printToPdf 回调完成后 deleteLater 自动清理
+关闭时行为：离屏适配器在 printToPdf 回调完成后自动释放（deleteLater）
 """
 
 from ..security.file_access_context import FileAccessContext
@@ -22,7 +22,7 @@ from .secure_markdown_renderer import (
     render_plain_text_to_safe_html,
     build_export_html_document,
 )
-from PyQt6.QtWebEngineWidgets import QWebEngineView
+from .web_preview_webengine import WebEnginePreviewAdapter
 
 
 class ExportService:
@@ -32,10 +32,10 @@ class ExportService:
     1. 判断内容是否为 Markdown
     2. 统一调用 secure_markdown_renderer 渲染
     3. HTML 导出：渲染 + 写文件
-    4. PDF 导出：渲染 + QWebEngineView + printToPdf
+    4. PDF 导出：渲染 + Web Preview Adapter（离屏）+ printToPdf
 
     不在后台线程创建或操作 Qt UI 对象。
-    QWebEngineView 在主线程创建和使用。
+    离屏适配器在主线程创建和使用。
     """
 
     @staticmethod
@@ -121,37 +121,18 @@ class ExportService:
         参数：
           content：原始文本
           is_markdown：是否按 Markdown 渲染
-          parent_widget：父 widget（用于 QWebEngineView 的 parent）
+          parent_widget：父 widget（用于离屏预览控件的 parent）
           on_pdf_generated：回调函数 (pdf_data: bytes, filepath: str) -> None
           colors：v2_export_colors 产物（dict），提供主题色值
           theme_engine：主题引擎，用于代码块语法高亮（必填）
           title：文档标题
 
-        返回：QWebEngineView 实例（调用方不应持有，由内部自动清理）
+        返回：离屏预览控件（调用方不应持有，由内部自动清理）
         """
         body_html = ExportService.render_content(content, is_markdown, theme_engine)
         full_html = build_export_html_document(body_html, colors, title)
 
-        web_view = QWebEngineView(parent_widget)
-
-        def _on_load_finished(ok):
-            if not ok:
-                on_pdf_generated(b"")
-                web_view.deleteLater()
-                return
-            page = web_view.page()
-            if page is None:
-                on_pdf_generated(b"")
-                web_view.deleteLater()
-                return
-            page.printToPdf(
-                lambda pdf_data: _on_pdf_ready(pdf_data)
-            )
-
-        def _on_pdf_ready(pdf_data):
-            on_pdf_generated(pdf_data)
-            web_view.deleteLater()
-
-        web_view.loadFinished.connect(_on_load_finished)
-        web_view.setHtml(full_html)
-        return web_view
+        # PDF 导出经 Web 预览适配器（离屏实例），不再直接依赖具体 Web 控件
+        adapter = WebEnginePreviewAdapter(parent_widget)
+        adapter.export_pdf(full_html, on_pdf_generated)
+        return adapter.widget()

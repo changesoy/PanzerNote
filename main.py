@@ -102,6 +102,7 @@ def _activate_crash_log_dir(new_dir):
     _crash_log_dir = new_dir
 
 from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import QCoreApplication, QEvent
 from PyQt6.QtGui import QFont, QIcon
 
 from src import __version__
@@ -231,6 +232,16 @@ def main():
     exit_code = app.exec()
     # 正常退出：清空 crash 日志，确保下次启动只对真正的异常退出提示
     _clear_crash_logs(log_dir)
+
+    # ── 显式销毁顶层窗口（必须在解释器终结前完成）────────────────────────────
+    # 主窗口及其控件图存在循环引用（控件 ↔ 控制器 ↔ 绑定方法 ↔ 闭包），引用计数无法
+    # 释放，只能等循环 GC 或解释器终结时清理。若拖到解释器终结阶段才析构，
+    # 其析构过程会经 sip 回调 Python（控件虚函数、信号槽），而此时 Python
+    # 运行时已不可用，触发 ACCESS_VIOLATION（退出码 0xC0000005）。
+    # 故在此强制投递并处理 DeferredDelete，趁运行时健康时完成析构。
+    window.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
     sys.exit(exit_code)
 
 

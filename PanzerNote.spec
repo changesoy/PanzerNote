@@ -1,13 +1,27 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-import os
+from PyInstaller.utils.hooks import collect_dynamic_libs, collect_submodules
+
+# ── C3-D: WebView2（PyWinRT）运行时收集 ─────────────────────────────
+# webview2 / winrt 都是命名空间包（顶层无 __init__.py），且它们的原生文件是
+# **包内数据**：webview2/_webview2_*.pyd、webview2/.../Microsoft.Web.WebView2.Core.dll、
+# winrt/_winrt*.pyd、winrt/msvcp140.dll。PyInstaller 不会自动收集包内数据，
+# 漏收集在真机上表现为「预览不可用」——必须显式收集，并保留包内相对目录
+# （winrt-runtime 按包内路径查找并加载 Core DLL）。
+_hidden_imports = (
+    collect_submodules('webview2', on_error='ignore')
+    + collect_submodules('winrt', on_error='ignore')
+)
+_extra_binaries = (
+    collect_dynamic_libs('webview2') + collect_dynamic_libs('winrt')
+)
 
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=[],
+    binaries=_extra_binaries,
     datas=[('data', 'data'), ('themes', 'themes'), ('plugins', 'plugins')],
-    hiddenimports=[],
+    hiddenimports=_hidden_imports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -15,7 +29,7 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
-# ── B2-1: Qt translations 裁剪 ──────────────────────────────
+# ── Qt translations 裁剪 ────────────────────────────────────
 # 只保留中文(zh_CN)与英文(en)，其余语言全部删除。
 # datas 项为 (dest, src, typecode) 三元组，dest 用反斜杠分隔。
 def _keep_translation(dest: str) -> bool:
@@ -28,50 +42,26 @@ def _keep_translation(dest: str) -> bool:
 
 a.datas = [d for d in a.datas if _keep_translation(d[0])]
 
-# ── B2-2: 删除 WebEngine debug 资源 ──────────────────────────
-# *.debug.pak / *.debug.bin（devtools 及 v8 调试快照），release 运行不需要。
-a.datas = [d for d in a.datas if '.debug.pak' not in d[0] and '.debug.bin' not in d[0]]
+# 注：B 分支遗留的 QML / Quick3D / Multimedia DLL 裁剪与 WebEngine debug 资源
+# （*.debug.pak / *.debug.bin）过滤已随 C3-D 删除：那些条目是 PyQt6-WebEngine
+# 的导入链把 QML 插件带进包才需要裁剪的。摘除该依赖后本应用不导入任何 QML，
+# 实测冻结产物中 PyQt6/Qt6/qml 目录与那批 DLL 均不再被收集，保留过滤只会成为
+# 永不命中的死代码。若将来重新引入 QML 依赖，需按当时产物重新评估裁剪清单。
 
-# ── B2-3: qml 目录裁剪 + 联动 bin DLL 裁剪 ───────────────────
-# 只保留 WebEngine 运行必需的 QML 模块：QtQml / QtQuick / QtWebEngine，
-# 其余 QML 模块（Multimedia/Quick3D/Sensors/Test 等）随其插件 DLL 一并删除。
-_QML_KEEP_TOP = frozenset({"QtQml", "QtQuick", "QtWebEngine"})
-
-# bin 中仅被"已删 qml 插件"引用的 DLL（探针实测零保留根引用，可安全删除）
-_DROP_BIN_DLL = frozenset({
-    "qt6multimedia.dll", "qt6multimediaquick.dll", "qt6positioningquick.dll",
-    "qt6quick3d.dll", "qt6quick3dassetimport.dll", "qt6quick3dassetutils.dll",
-    "qt6quick3deffects.dll", "qt6quick3dhelpers.dll", "qt6quick3dhelpersimpl.dll",
-    "qt6quick3dparticles.dll", "qt6quick3dphysics.dll", "qt6quick3dphysicshelpers.dll",
-    "qt6quick3druntimerender.dll", "qt6quick3dspatialaudio.dll", "qt6quick3dutils.dll",
-    "qt6quick3dxr.dll", "qt6quicktest.dll", "qt6remoteobjects.dll",
-    "qt6remoteobjectsqml.dll", "qt6sensors.dll", "qt6sensorsquick.dll",
-    "qt6serialport.dll", "qt6shadertools.dll", "qt6spatialaudio.dll",
-    "qt6test.dll", "qt6texttospeech.dll", "qt6websockets.dll",
-    # B2-4: 软件 OpenGL 渲染器（WebEngine 无 GPU 时的兜底软渲染）。
-    # 目标机有正常 GPU 驱动时不需要；删除后需真机验证预览渲染。
-    "opengl32sw.dll",
-})
-
-
-def _keep_qml(dest: str) -> bool:
-    normalized = dest.replace('\\', '/')
-    marker = '/Qt6/qml/'
-    if marker not in normalized:
-        return True
-    top = normalized.split(marker, 1)[1].split('/')[0]
-    return top in _QML_KEEP_TOP
+# ── Qt6/bin 单文件裁剪：软件 OpenGL 兜底渲染器 ───────────────
+# opengl32sw.dll（19.7 MB）是 Qt 的软件 OpenGL 兜底渲染器。本应用只有 QtWidgets
+# （光栅绘制，不建 GL 上下文），C3-D 后预览也不再由 Qt 渲染，故不需要它。
+# PyQt6 的 hook 默认会收集这个 DLL —— 实测剔除规则后产物体积立刻多出 19.7 MB。
+_DROP_BIN_DLL = frozenset({"opengl32sw.dll"})
 
 
 def _keep_bin_dll(dest: str) -> bool:
     normalized = dest.replace('\\', '/')
     if not (normalized.endswith('.dll') and '/Qt6/bin/' in normalized):
         return True
-    return os.path.basename(normalized).lower() not in _DROP_BIN_DLL
+    return normalized.rsplit('/', 1)[-1].lower() not in _DROP_BIN_DLL
 
 
-a.datas = [d for d in a.datas if _keep_qml(d[0])]
-a.binaries = [b for b in a.binaries if _keep_qml(b[0])]
 a.binaries = [b for b in a.binaries if _keep_bin_dll(b[0])]
 
 pyz = PYZ(a.pure)

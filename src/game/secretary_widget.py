@@ -29,6 +29,7 @@ import json
 import random
 from typing import Optional
 
+from PyQt6 import sip
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QFrame
 )
@@ -114,6 +115,14 @@ class SecretaryWidget(ThemeAwareMixin, QWidget):
       2. 使用防抖定时器（16ms ≈ 1帧@60fps）避免高频更新
       3. 动态计算右下角位置，确保不超出父容器边界
       4. 支持窗口最大化/最小化/多显示器拖动
+
+    为什么是**独立顶层窗**而不是父容器的子控件：
+      Markdown 预览的 WebView2 后端是原生子窗口（HWND），而 Windows 下
+      原生子窗口永远绘制在非原生 Qt 控件之上 —— 作为子控件的小秘书会被
+      预览整片盖住（QWebEngineView 不是原生窗口，所以此前未暴露）。
+      因此本控件以 Qt.Tool 顶层窗形式存在，父窗口作为其 owner：
+      悬浮在主窗口之上、不进任务栏、随主窗口最小化。
+      代价是它不再随父控件自动显隐/移动，需自行对齐（见 sync_visibility）。
     """
 
     DEFAULT_LINES = {
@@ -174,10 +183,23 @@ class SecretaryWidget(ThemeAwareMixin, QWidget):
 
     def __init__(self, config: Config, theme_engine, parent=None):
         super().__init__(parent)
+
+        # 独立置顶工具窗（原因见类文档）：父窗口为 owner，不进任务栏。
+        # WindowDoesNotAcceptFocus + WA_ShowWithoutActivating：
+        # 点击小秘书不应把焦点从编辑器抢走（子控件时代不会发生）。
+        self.setWindowFlags(
+            Qt.WindowType.Tool
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowDoesNotAcceptFocus
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+
         self.config = config
         self._theme_engine = theme_engine
         self._lines = self.DEFAULT_LINES.copy()
         self._parent_widget = parent
+        # owner 窗口在构造时固定（事件过滤器需在父控件之外单独监听它）
+        self._owner_window: Optional[QWidget] = parent.window() if parent else None
         self._position_dirty = False
         self._last_position = QPoint()
         self._size_percent: int = self.config.get_secretary_setting(
@@ -203,6 +225,9 @@ class SecretaryWidget(ThemeAwareMixin, QWidget):
 
         if parent:
             parent.installEventFilter(self)
+            # 顶层窗移动时父容器自身不移动 → 必须同时监听主窗口
+            if self._owner_window is not None and self._owner_window is not parent:
+                self._owner_window.installEventFilter(self)
 
         QTimer.singleShot(500, self._initial_setup)
 
@@ -216,7 +241,7 @@ class SecretaryWidget(ThemeAwareMixin, QWidget):
 
     def _initial_setup(self):
         """初始设置"""
-        self._update_position()
+        self.sync_visibility()
         self.show_event_message("启动")
         self._idle_timer.start()
 
@@ -268,7 +293,7 @@ class SecretaryWidget(ThemeAwareMixin, QWidget):
 
     def _apply_size(self):
         """根据 size_percent 和父容器尺寸计算并应用小秘书尺寸"""
-        if not self._parent_widget:
+        if not self._parent_alive():
             self.setFixedSize(210, 380)
             self.bubble.update_size_constraints(210)
             self.portrait_label.setFixedHeight(300)
@@ -396,28 +421,28 @@ class SecretaryWidget(ThemeAwareMixin, QWidget):
         return line.format(nickname=nickname, self=self_name)
 
     def _calculate_target_position(self) -> QPoint:
-        """动态计算目标位置
+        """动态计算目标位置（**全局坐标**，本控件是独立顶层窗）
 
         基于父容器尺寸和自身尺寸，计算右下角位置。
         确保不超出父容器边界，处理极端尺寸情况。
 
         Returns:
-            目标位置 QPoint
+            目标位置 QPoint。顶层窗的 move() 收全局坐标，
+            故此处先把父容器内的相对坐标映射到全局。
         """
-        if not self._parent_widget:
+        if not self._parent_alive():
             return QPoint(0, 0)
 
         parent_rect = self._parent_widget.rect()
-        margin_right = _MARGIN_RIGHT
-        margin_bottom = _MARGIN_BOTTOM
 
-        x = parent_rect.width() - self.width() - margin_right
-        y = parent_rect.height() - self.height() - margin_bottom
+        x = parent_rect.width() - self.width() - _MARGIN_RIGHT
+        y = parent_rect.height() - self.height() - _MARGIN_BOTTOM
 
         x = max(0, min(x, parent_rect.width() - self.width()))
         y = max(0, min(y, parent_rect.height() - self.height()))
 
-        return QPoint(x, y)
+        global_pos: QPoint = self._parent_widget.mapToGlobal(QPoint(x, y))
+        return global_pos
 
     def _request_position_update(self):
         """请求位置更新（防抖）
@@ -452,14 +477,48 @@ class SecretaryWidget(ThemeAwareMixin, QWidget):
         self._last_position = target
         self._position_dirty = False
 
+    def _parent_alive(self) -> bool:
+        """父容器是否仍可用。
+
+        控件销毁后其 Python 包装对象会变成悬空引用，
+        事件过滤器在窗口销毁期仍可能被调用，需先探活再访问。
+        """
+        return self._parent_widget is not None and not sip.isdeleted(self._parent_widget)
+
+    def sync_visibility(self) -> None:
+        """对齐可见性 —— 独立顶层窗不会随父控件自动显示/隐藏。
+
+        隐藏条件：用户关闭显示（show_secretary=false）、
+        父容器已销毁，或父容器当前不可见（切到游戏视图、主窗口尚未显示等）。
+        """
+        wants = bool(self.config.get_secretary_setting("show_secretary", True))
+        if self._parent_widget is None:
+            parent_visible = True
+        else:
+            parent_visible = self._parent_alive() and self._parent_widget.isVisible()
+        if wants and parent_visible:
+            self._update_position()
+            if not self.isVisible():
+                self.show()
+                self.raise_()
+        elif self.isVisible():
+            self.hide()
+
     def eventFilter(self, obj, event):
-        """事件过滤器 - 监听父容器 resize 和 move 事件"""
-        if obj == self._parent_widget:
-            if event.type() == QEvent.Type.Resize:
-                self._apply_size()
+        """事件过滤器 - 监听父容器与主窗口的 resize / move / 显隐"""
+        if obj is self._parent_widget or (
+            self._owner_window is not None and obj is self._owner_window
+        ):
+            et = event.type()
+            if et == QEvent.Type.Resize:
+                if obj is self._parent_widget:
+                    self._apply_size()
                 self._request_position_update()
-            elif event.type() == QEvent.Type.Move:
+                self.sync_visibility()
+            elif et == QEvent.Type.Move:
                 self._request_position_update()
+            elif et in (QEvent.Type.Show, QEvent.Type.Hide):
+                self.sync_visibility()
         return super().eventFilter(obj, event)
 
     def show_message(self, text: str, duration: int = 3000):

@@ -330,11 +330,14 @@ class ViewCoordinator:
                 self._side_panel_host.show_panel("outline")
 
     def toggle_secretary(self) -> None:
-        """切换小秘书显示/隐藏并持久化。"""
-        self._secretary.setVisible(not self._secretary.isVisible())
-        self._config.set_secretary_setting(
-            "show_secretary", self._secretary.isVisible()
-        )
+        """切换小秘书显示/隐藏并持久化。
+
+        以设置为准反算新状态（不能用 isVisible()：父容器不可见时它也是 False，
+        会把「显示」错判成「隐藏」）。可见性由秘书自身按「设置 + 父容器可见性」对齐。
+        """
+        new_state = not self._config.get_secretary_setting("show_secretary", True)
+        self._config.set_secretary_setting("show_secretary", new_state)
+        self._secretary.sync_visibility()
 
     def toggle_shortcut_panel(self) -> None:
         """切换快捷键提示面板。"""

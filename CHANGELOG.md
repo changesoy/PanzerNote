@@ -4,17 +4,23 @@
 
 ## Unreleased
 
-**Markdown 预览单路径化（行为变化）**
+**Markdown 预览与 PDF 导出改用 WebView2（行为变化）**
 
-- **删除 QTextBrowser 预览回退**：QWebEngineView 成为 Markdown 预览与 PDF 导出的唯一渲染路径，`PreviewBrowser` 及 `HAS_WEBENGINE` 双分支全部移除。行为含义：WebEngine 加载失败时预览不再降级为 QTextBrowser 可用，而是预览不可用（分发形态 WebEngine 必然在包内，原回退分支实际不可达）
+- **摘除 Qt WebEngine，预览/导出换用系统共享的 WebView2 Runtime**：预览与 PDF 导出经 Web Preview Adapter 统一走 WebView2 后端（`src/editor/web_preview_webview2.py`，PyWinRT 绑定），`create_preview_adapter()` 恒返回 WebView2 适配器（单路径，无 feature flag 分支）。删除 `web_preview_webengine.py`、`webengine_runtime.py`（启动锚点）与 `webview2_preview` flag，`src/` 内不再有 WebEngine 引用，`main.py` 移除 WebEngine 前置的 `AA_ShareOpenGLContexts`。行为含义：预览不再降级为 QTextBrowser，也不再随包分发 Chromium——预览与导出的可用性取决于系统 WebView2 Runtime
+- **运行前提：系统 WebView2 Runtime**：Windows 11 与多数 Windows 10 已预装（开发机探测到 152.0.4191.66），运行时**不随包分发**。启动时 `webview2_runtime.log_availability()` 只读注册表检测，缺失时记录 error 日志、并在窗口显示后弹一次可见提示（含安装指引）；预览初始化失败时预览区显示可读占位提示，不再留空白
+- **事件循环合并（qasync）**：`main.py` 以 `qasync.QEventLoop` 取代 `app.exec()`，把 asyncio 与 Qt 事件循环合并到同一线程，并在主窗口创建前 `set_event_loop`——PyWinRT 禁止在 STA 上阻塞等待、`await` 又需要事件循环，二者必须在同一线程合并
+- **预览主题切换就地更新**：切换主题改为就地更新预览 CSS 变量（不再整页重载，避免闪烁）；预览/导出/编辑器代码块字体统一走新增「代码字体」设置项（默认 Courier New）
 
-**打包瘦身（538 MB → 约 362 MB，无功能损失）**
+**打包体积与依赖变化（约 362 MB → 92.8 MB）**
 
-- 排除未使用的 PyQt6 模块对应 DLL（Quick3D/Multimedia/Sensors/SerialPort/SpatialAudio/TextToSpeech/RemoteObjects/WebSockets 等，经依赖闭包探针确认非 WebEngine 传递依赖；QtQml/StateMachine 因其 QML 插件随 QtQml 一并保留，未剔除）
-- 翻译裁剪为中文与英文两种（实测包内 12 个 `.qm`，全部为 `_zh_CN.qm` / `_en.qm`）；删除 WebEngine debug 资源（devtools/v8 快照，实测剔除 `qtwebengine_devtools_resources.debug.pak` 等约 77 MB）
-- qml 目录只保留 WebEngine 运行必需的 QtQml/QtQuick/QtWebEngine，联动裁剪 27 个 bin DLL
-- 删除 `opengl32sw.dll` 软件 OpenGL 兜底渲染器（正常 GPU 驱动环境不需要）
-- `PanzerNote.spec` 纳入版本控制：方案 A（去 WebEngine）与方案 B（WebEngine 单路径）需要不同的打包裁剪配置，而 spec 是跨分支共用的同一物理文件，纳入版本管理后由 git 随分支切换
+- **产物体积 92.8 MB**：摘除 PyQt6-WebEngine 后不再随包分发 Chromium。对照此前 WebEngine 形态约 362 MB；实测 WebEngine 相关占用 343.3 MB（`Qt6WebEngineCore.dll` 195.3 MB、devtools debug pak 72.3 MB、`icudtl.dat` 10 MB 等）随依赖一并消失
+- **依赖清单**：移除 `PyQt6-WebEngine`；新增 `qasync`、`webview2-Microsoft.Web.WebView2.Core`、`winrt-Windows.Foundation`（未显式声明传递依赖 `winrt-runtime`），三者均为 Windows 专用
+- **打包收集**：`webview2` / `winrt` 是命名空间包，原生文件属包内数据，PyInstaller 不会自动收集，`PanzerNote.spec` 以 `collect_submodules` / `collect_dynamic_libs` 显式收集并保留包内相对目录；B 分支为 WebEngine 引入的 QML/Quick3D 等 DLL 裁剪与 WebEngine debug 资源过滤随依赖摘除一并删除（本应用不再导入任何 QML），翻译只留中英与剔除 `opengl32sw.dll` 的裁剪保留（后者经实测仍在生效）
+
+**兼容性说明**
+
+- 无用户数据格式变更：笔记文件、设置与存档 schema 均不变
+- 预览渲染后端更换：程序不再携带 Chromium，未安装 WebView2 Runtime 的机器需先安装系统运行时（缺失时的引导文案见 `src/editor/webview2_runtime.py` 的 `INSTALL_HINT`）
 
 **导出修复**
 

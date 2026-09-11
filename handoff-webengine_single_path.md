@@ -87,3 +87,16 @@ A 负责持续验证轻量化边界。
 C 负责允许 PanzerNote 在真正需要的地方使用成熟技术，不因为包体目标而重复实现整个 Web 生态。
 
 两条路线共同约束最终架构。
+
+## 完成状态（迁移已落地：WebView2 单路径）
+
+C 路线的迁移目标已完成：Qt WebEngine 已从应用与打包中摘除，**WebView2 成为唯一的预览 / PDF 导出后端**。
+
+- **后端**：`src/editor/web_preview.py`（抽象接口，8 项能力）之下只保留 `WebView2PreviewAdapter`（`src/editor/web_preview_webview2.py`，PyWinRT 绑定）；`create_preview_adapter()` 恒返回该后端，无 feature flag 分支。WebEngine 后端 `web_preview_webengine.py` 与启动锚点 `webengine_runtime.py` 已删除，`main.py` 移除为 WebEngine 加的 `AA_ShareOpenGLContexts`。
+- **事件循环**：`main.py` 以 `qasync.QEventLoop` 取代 `app.exec()`，把 asyncio 与 Qt 事件循环合并到同一线程（PyWinRT 的硬性前提），并在主窗口创建前 `set_event_loop`。
+- **运行前提**：需系统安装 Microsoft Edge WebView2 Runtime（**不随包分发**）。`src/editor/webview2_runtime.py` 只读注册表检测；缺失时启动记录 error 日志并在窗口显示后弹一次可见提示，预览区显示同一份安装指引。
+- **依赖变化**：移除 `PyQt6-WebEngine`；新增 `qasync`、`webview2-Microsoft.Web.WebView2.Core`、`winrt-Windows.Foundation`（传递依赖 `winrt-runtime`）。
+- **打包体积**：冻结产物 **92.8 MB**（对照此前 WebEngine 形态约 362 MB）；WebEngine 相关占用 343.3 MB（`Qt6WebEngineCore.dll` 195.3 MB、devtools debug pak 72.3 MB、`icudtl.dat` 10 MB 等）随依赖一并消失。
+- **验证结论**：全量 pytest 1454 passed / 32 skipped / 0 failed；mypy 126 文件 0 错；真机启动日志显示 WebView2 后端就绪、导航成功。
+
+后续功能对齐与发行收尾见 `111.md` 的 C4 / C5 / C6。

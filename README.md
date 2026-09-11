@@ -26,6 +26,7 @@ TODO
 
 - Python 3.11+
 - Windows 10/11
+- Microsoft Edge WebView2 Runtime（Markdown 预览与 PDF 导出依赖；Windows 11 与多数 Windows 10 已预装，缺失时启动会给出安装指引）
 
 ### 安装依赖
 

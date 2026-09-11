@@ -45,28 +45,32 @@ _PENDING_KEYS: frozenset[str] = frozenset(
     {"arrow_hover", "indicator_checked_fg"}
 )
 
-# 下拉箭头 SVG 模板：颜色由 combo_box recipe 的 arrow token 解析值填充。
+# 箭头 SVG 模板（方向 → polygon 顶点）：颜色由 recipe 的 arrow token 解析值填充。
 _ARROW_SVG_TEMPLATE = (
     '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10">'
-    '<polygon points="5,7 1.5,3 8.5,3" fill="{color}"/></svg>'
+    '<polygon points="{points}" fill="{color}"/></svg>'
 )
+_ARROW_POINTS = {"down": "5,7 1.5,3 8.5,3", "up": "5,3 1.5,7 8.5,7"}
 
 
-def _arrow_image_url(color: str) -> str:
-    """按 arrow token 颜色生成（并缓存）下拉箭头 SVG，返回 QSS image url。
+def _arrow_image_url(color: str, direction: str = "down") -> str:
+    """按 arrow token 颜色生成（并缓存）箭头 SVG，返回 QSS image url。
 
-    Qt QSS 的 ``::down-arrow`` 无法给 image 重新上色，故按 token 颜色落成独立
-    SVG 文件；颜色变则文件名变，天然跟随主题变体切换。
+    Qt QSS 的 ``::down-arrow``/``::up-arrow`` 无法给 image 重新上色，故按 token
+    颜色落成独立 SVG 文件；颜色变则文件名变，天然跟随主题变体切换。
     生成失败时返回空串（该控件退化为无箭头），并记录警告，不静默吞掉。
     """
     cache_dir = Path(tempfile.gettempdir()) / "PanzerNote" / "theme_icons"
-    path = cache_dir / f"down_arrow_{color.lstrip('#').lower()}.svg"
+    path = cache_dir / f"{direction}_arrow_{color.lstrip('#').lower()}.svg"
     try:
         if not path.exists():
             cache_dir.mkdir(parents=True, exist_ok=True)
-            path.write_text(_ARROW_SVG_TEMPLATE.format(color=color), encoding="utf-8")
+            path.write_text(
+                _ARROW_SVG_TEMPLATE.format(points=_ARROW_POINTS[direction], color=color),
+                encoding="utf-8",
+            )
     except OSError as e:
-        get_logger(__name__).warning("生成下拉箭头图标失败: %s", e)
+        get_logger(__name__).warning("生成箭头图标失败: %s", e)
         return ""
     return str(path).replace("\\", "/")
 
@@ -162,6 +166,21 @@ QPushButton:focus {{ border: 1px solid {s['focus_border']}; }}
 
 def _b_input(s: Mapping[str, Any]) -> str:
     pad_v, pad_h = s["padding"], s["padding"] * 2
+    # QSpinBox 上下按钮必须显式声明几何：只给 QSS 基础盒（padding/border）时
+    # QStyleSheetStyle 会把 SC_SpinBoxUp/Down 的命中矩形算成「左右并排」，
+    # 导致点加号无效（点到的其实是减号）。箭头同样只能靠 token 上色的 SVG。
+    # 按钮带几何与 combo_box 的 drop-down 完全一致（宽 24 / origin padding /
+    # 右 padding 26），保证同一表单列里两类控件的箭头落在同一竖线上。
+    spin_w = 24
+    spin_pad_r = 26
+    up_url = _arrow_image_url(s["arrow"], "up")
+    down_url = _arrow_image_url(s["arrow"], "down")
+    arrow_rules = ""
+    if up_url and down_url:
+        arrow_rules = f"""
+QSpinBox::up-arrow {{ image: url("{up_url}"); width: 10px; height: 10px; }}
+QSpinBox::down-arrow {{ image: url("{down_url}"); width: 10px; height: 10px; }}
+"""
     # 补漏 C：placeholder 接线（QSS placeholder-text-color，QSpinBox 无该概念故拆分）
     return f"""
 QLineEdit, QSpinBox {{
@@ -172,7 +191,22 @@ QLineEdit, QSpinBox {{
     color: {s['text']};
     selection-background-color: {s['selection_bg']};
 }}
-QLineEdit {{ placeholder-text-color: {s['placeholder']}; }}
+QSpinBox {{ padding-right: {spin_pad_r}px; }}
+QSpinBox::up-button {{
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: {spin_w}px;
+    border: none;
+    background: transparent;
+}}
+QSpinBox::down-button {{
+    subcontrol-origin: padding;
+    subcontrol-position: bottom right;
+    width: {spin_w}px;
+    border: none;
+    background: transparent;
+}}
+{arrow_rules}QLineEdit {{ placeholder-text-color: {s['placeholder']}; }}
 QLineEdit:focus, QSpinBox:focus {{ border-color: {s['focus_border']}; }}
 QLineEdit:disabled, QSpinBox:disabled {{
     background-color: {s['disabled_background']};

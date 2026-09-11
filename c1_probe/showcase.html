@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>渲染展示 —— PanzerNote C 路线</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 28px 34px;
+    font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+    color: #212121; background: #ffffff; line-height: 1.7;
+  }
+  h1 { font-size: 26px; margin: 0 0 6px; color: #1a6fb0; }
+  h2 { font-size: 19px; margin: 26px 0 8px; padding-bottom: 4px;
+       border-bottom: 1px solid #d8e0ea; color: #1a3f5c; }
+  .sub { color: #6b7785; font-size: 13px; margin-bottom: 18px; }
+  table { border-collapse: collapse; margin: 8px 0 4px; font-size: 14px; }
+  td, th { border: 1px solid #b9c6d4; padding: 5px 12px; text-align: left; }
+  th { background: #eef3fa; font-weight: 600; }
+  pre { background: #eef2f7; border: 1px solid #d3dde8; border-radius: 4px;
+        padding: 10px 12px; overflow: auto; font-size: 13px; }
+  code { font-family: Consolas, "Courier New", monospace; }
+  .kw { color: #0b62a4; } .str { color: #a31515; } .cmt { color: #6a9955; }
+  .grid { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-start; }
+  .card { border: 1px solid #cdd8e3; border-radius: 6px; padding: 12px 14px;
+          min-width: 210px; }
+  .card.dark { background: #2d2d30; color: #e0e0e0; border-color: #1f1f22; }
+  .swatches { display: flex; gap: 6px; margin-top: 8px; }
+  .sw { width: 30px; height: 22px; border-radius: 3px; border: 1px solid #9aa7b4; }
+  #pic { width: 120px; height: 80px; border: 1px solid #9aa7b4; border-radius: 4px; }
+  blockquote { margin: 10px 0; padding: 6px 14px; border-left: 3px solid #7aa7d0;
+               background: #f4f8fc; color: #46586b; }
+  .math { font-family: "Cambria Math", Georgia, serif; font-size: 17px; }
+</style>
+</head>
+<body>
+
+  <h1>WebView2 渲染展示</h1>
+  <div class="sub">PyWinRT + qasync · 用于目视检查字体 / DPI / 颜色 / 图片 / 布局</div>
+
+  <h2>1. 中文排版与字重</h2>
+  <p>PanzerNote C 路线验证：<b>粗体</b>、<i>斜体</i>、<code>行内代码</code>、
+     中文标点（，。！？；：""''）、数字 0-9 与英文混排 Mixed Text。</p>
+  <p>长文本换行测试：这是一段刻意写长的中文段落，用于观察在固定宽度下的换行、
+     行距与两端对齐表现，确认没有字符重叠、截断或溢出容器边界的情况发生。</p>
+
+  <h2>2. 表格</h2>
+  <table>
+    <tr><th>阶段</th><th>状态</th><th>绑定</th></tr>
+    <tr><td>C1</td><td>通过</td><td>wryview（临时）</td></tr>
+    <tr><td>C1.6</td><td>通过</td><td>PyWinRT + qasync</td></tr>
+    <tr><td>C3</td><td>待开始</td><td>PyWinRT</td></tr>
+  </table>
+
+  <h2>3. 代码块</h2>
+  <pre><code><span class="cmt"># 绑定初始化（qasync 版）</span>
+<span class="kw">async def</span> bootstrap(hwnd):
+    env = <span class="kw">await</span> CoreWebView2Environment.create_async()
+    ref = CoreWebView2ControllerWindowReference.create_from_window_handle(hwnd)
+    ctrl = <span class="kw">await</span> env.create_core_webview2_controller_async(ref)
+    <span class="kw">return</span> <span class="str">"ok"</span></code></pre>
+
+  <h2>4. 本地图片（虚拟主机映射）</h2>
+  <p>以相对路径 <code>asset.svg</code> 引用：</p>
+  <img id="pic" src="asset.svg" alt="asset.svg">
+
+  <h2>5. 颜色与对比度</h2>
+  <div class="grid">
+    <div class="card">
+      <b>浅色卡片</b>
+      <div class="swatches">
+        <div class="sw" style="background:#1a6fb0"></div>
+        <div class="sw" style="background:#2e9e5b"></div>
+        <div class="sw" style="background:#d44a3f"></div>
+        <div class="sw" style="background:#e0a020"></div>
+      </div>
+    </div>
+    <div class="card dark">
+      <b>深色卡片</b>
+      <div>用于检查暗色下的可读性。</div>
+      <div class="swatches">
+        <div class="sw" style="background:#3a3a3d"></div>
+        <div class="sw" style="background:#4a4a50"></div>
+      </div>
+    </div>
+    <div class="card">
+      <b>内联 SVG</b>
+      <svg width="120" height="52" viewBox="0 0 120 52">
+        <rect x="1" y="1" width="118" height="50" fill="#f4f8fc" stroke="#7aa7d0"></rect>
+        <circle cx="28" cy="26" r="14" fill="#1a6fb0" opacity="0.85"></circle>
+        <circle cx="60" cy="26" r="14" fill="#2e9e5b" opacity="0.75"></circle>
+        <path d="M88 40 L102 14 L116 40 Z" fill="#d44a3f" opacity="0.8"></path>
+      </svg>
+    </div>
+  </div>
+
+  <h2>6. 引用与公式排版</h2>
+  <blockquote>引用块测试：用于检查左边框、背景色与文字颜色的配合。</blockquote>
+  <p class="math">E = mc² ・ ∫₀^∞ e<sup>−x</sup> dx = 1 ・ α + β → γ</p>
+
+</body>
+</html>

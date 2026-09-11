@@ -6,6 +6,7 @@
 
 import os
 import shutil
+import tempfile
 from typing import Optional
 
 from PyQt6.QtWidgets import (
@@ -135,6 +136,15 @@ class FirstRunDialog(QDialog):
             for subdir in subdirs:
                 os.makedirs(os.path.join(path, subdir), exist_ok=True)
 
+            # makedirs 只能证明目录可创建，不能证明能写入文件（权限/安全软件
+            # 可以只拦截文件创建）。用与 FileGuard 原子写同源的 mkstemp 在
+            # 配置目录真实写盘一次，避免放行后在 config.save() 处才失败。
+            fd, probe = tempfile.mkstemp(
+                dir=os.path.join(path, "data", "config"), prefix=".pn_probe_"
+            )
+            os.close(fd)
+            os.remove(probe)
+
             # 如果选择的路径不是程序目录，复制必要的资源文件
             if path != self._app_dir:
                 self._copy_assets(path)
@@ -147,7 +157,7 @@ class FirstRunDialog(QDialog):
             QMessageBox.critical(
                 self,
                 "错误",
-                f"无法创建目录：\n{str(e)}\n\n请选择其他位置或检查权限。"
+                f"无法使用该位置：\n{str(e)}\n\n请选择其他位置或检查权限。"
             )
 
     def _copy_assets(self, dest_path: str):

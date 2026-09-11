@@ -102,7 +102,7 @@ def _activate_crash_log_dir(new_dir):
     _cleanup_crash_logs(new_dir)
     _crash_log_dir = new_dir
 
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtCore import QCoreApplication, QEvent
 from PyQt6.QtGui import QFont, QIcon
 from qasync import QEventLoop
@@ -163,13 +163,26 @@ def main():
     config = Config(APP_DIR)
 
     if not config.is_initialized():
-        dialog = FirstRunDialog(APP_DIR)
-        if dialog.exec() != dialog.DialogCode.Accepted:
-            sys.exit(0)
-        selected_path = dialog.get_selected_path()
-        config.set_base_path(selected_path)
-        config.set_initialized(True)
-        config.save()
+        # 首跑：数据目录必须能真实落盘配置，否则本阶段之后的所有写入都会失败。
+        # 保存失败时提示重选，而不是让异常冒泡（曾有用户选定不可写目录 → 启动即崩溃）。
+        while True:
+            dialog = FirstRunDialog(APP_DIR)
+            if dialog.exec() != dialog.DialogCode.Accepted:
+                sys.exit(0)
+            selected_path = dialog.get_selected_path()
+            config.set_base_path(selected_path)
+            config.set_initialized(True)
+            try:
+                config.save()
+            except OSError as e:
+                QMessageBox.critical(
+                    None,
+                    "无法保存设置",
+                    f"无法在以下位置保存配置：\n{selected_path}\n\n"
+                    f"原因：{e}\n\n请重新选择一个可写的位置。",
+                )
+                continue
+            break
 
     config.ensure_directories()
     init_flags(os.path.join(config.get_base_path(), "data", "config"))

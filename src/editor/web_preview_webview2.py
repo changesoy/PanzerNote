@@ -615,8 +615,9 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
         可能尚未生成，直接打印会把图表位置印成源码文本。页面渲染结束后经官方
         postMessage 回传 READY_MESSAGE，此处轮询该标志（页面声明了 pn-async 时才等）。
 
-        用轮询而非 asyncio.Event.wait：消息回调不保证在事件循环线程上触发，
-        跨线程 set asyncio.Event 并不安全，而布尔标志的赋值是原子的。
+        用轮询而非 asyncio.Event.wait：就绪标志只是一个原子布尔量，读它不必
+        在本适配器上再持有跨协程共享的 Event；标志一旦置位持续有效，回调先到
+        后到都能读到（回调的线程归属见上方「事件回调」节）。
 
         返回是否就绪：超时后照常打印 —— 宁可少一张图，也不让整个导出失败；
         但「少图」须经 export_notice 对用户可见（M4），不允许静默降级。

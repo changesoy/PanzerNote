@@ -36,6 +36,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from PyQt6.QtCore import QTimer
+from PyQt6.QtGui import QColor, QImage
 from PyQt6.QtWidgets import QApplication, QWidget
 from qasync import QEventLoop
 
@@ -286,6 +287,87 @@ async def navigation_ownership_phase(parent: QWidget) -> None:
     adapter.close()
 
 
+async def resource_root_phase(parent: QWidget) -> None:
+    """资源根（虚拟主机映射 + <base href>）路径的真机证据。
+
+    本相位覆盖冒烟其余相位都没走的分支：set_resource_root 非空时适配器注入
+    ``<base href="https://pnassets/">``，文档内的相对路径经虚拟主机映射解析。
+    这是 L3（映射权限 ALLOW → DENY_CORS）唯一的作用面，必须真机确认收窄没有
+    连带打掉「相对图片」这类常规子资源；同时断言 fetch() 确实被 CORS 拒绝
+    （收窄的意图本身），以及 WinRT 回调的线程归属（_await_page_render 的
+    轮询说明以「回调在创建 controller 的线程触发」为准）。
+    """
+    import threading
+
+    from src.editor.web_preview import create_preview_adapter
+
+    tmp = Path(tempfile.mkdtemp(prefix="pn_vhost_"))
+    image = QImage(4, 4, QImage.Format.Format_RGB32)
+    image.fill(QColor("#336699"))
+    png = tmp / "pic.png"
+    image.save(str(png))
+    html = (
+        '<html><head><meta charset="utf-8"></head><body>'
+        '<img id="pic" src="pic.png">'
+        "<script>window.pnState={img:'pending',fetch:'pending'};"
+        "var im=document.getElementById('pic');"
+        "im.onload=function(){window.pnState.img='ok:'+im.naturalWidth;};"
+        "im.onerror=function(){window.pnState.img='error';};"
+        "fetch('https://pnassets/pic.png').then("
+        "function(){window.pnState.fetch='ok';},"
+        "function(){window.pnState.fetch='cors-denied';});"
+        "</script></body></html>"
+    )
+
+    adapter = create_preview_adapter(parent)
+    adapter.set_resource_root(str(tmp))
+    for _ in range(300):
+        if getattr(adapter, "_ready", False):
+            break
+        await asyncio.sleep(0.05)
+
+    adapter.set_html(html)
+    state: dict[str, str] = {}
+    for _ in range(300):
+        raw = await _eval(adapter, "window.pnState || null")
+        if isinstance(raw, dict):
+            state = raw
+            if state.get("img", "pending") != "pending" and state.get("fetch") != "pending":
+                break
+        await asyncio.sleep(0.05)
+    report(
+        "资源根：相对路径 <img> 经虚拟主机加载成功（DENY_CORS 不打掉非 CORS 子资源）",
+        str(state.get("img", "")).startswith("ok:"),
+        str(state.get("img")),
+    )
+    report(
+        "资源根：fetch() 被 CORS 拒绝（权限收窄生效）",
+        state.get("fetch") == "cors-denied",
+        str(state.get("fetch")),
+    )
+
+    main_ident = threading.get_ident()
+    seen: list[int] = []
+    nav_fn = adapter._on_navigation_completed
+
+    def spy(sender, args):  # noqa: ANN001
+        seen.append(threading.get_ident())
+        return nav_fn(sender, args)
+
+    adapter._webview.add_navigation_completed(spy)
+    adapter.set_html("<html><body>thread-check</body></html>")
+    for _ in range(200):
+        if seen:
+            break
+        await asyncio.sleep(0.05)
+    report(
+        "NavigationCompleted 回调在创建 controller 的线程触发",
+        bool(seen) and all(i == main_ident for i in seen),
+        f"main={main_ident} callbacks={seen}",
+    )
+    adapter.close()
+
+
 def mermaid_pdf_phase(loop, host: QWidget, colors, engine) -> None:
     """图表 PDF 导出：真机证据是图表渲染成 SVG 且源码未泄漏。
 
@@ -418,6 +500,7 @@ def main() -> int:
 
     loop.run_until_complete(math_phase(parent, colors))
     loop.run_until_complete(navigation_ownership_phase(parent))
+    loop.run_until_complete(resource_root_phase(parent))
     loop.run_until_complete(preview_mermaid_phase(parent, engine))
     mermaid_pdf_phase(loop, parent, colors, engine)
     gantt_pdf_phase(loop, parent, colors, engine)

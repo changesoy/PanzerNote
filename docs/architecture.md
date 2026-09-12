@@ -401,6 +401,23 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 - 引号智能：通过 `_pick_single_cjk_quote()` 用未闭合引号栈判断应插入左/右引号
 - Backspace 成对删除；选中文本时自动包裹
 
+**排版设置（代码字体 / 正文行距 / 代码块行距）**：
+
+三个设置项各有唯一读取入口（`Config.get_code_font_family()` / `get_line_spacing()` /
+`get_code_line_spacing()`，转发到 `SettingsStore`），调用方不得直接读 `get_editor_setting()`：
+
+| 设置项                     | 默认        | 作用范围                               |
+| -------------------------- | ----------- | -------------------------------------- |
+| `editor.code_font_family`  | Courier New | 编辑器代码块 / 预览代码块 / 导出代码块 |
+| `editor.line_spacing`      | 1.5         | 编辑器正文 + 预览 + 导出               |
+| `editor.code_line_spacing` | 0.75        | 预览 + 导出（编辑器内不区分，见下）    |
+
+- 读取处兜底：非法值回退默认，越界夹取到 `LINE_SPACING_MIN`~`LINE_SPACING_MAX`（0.5~5.0）。该区间同时是 `config_import_service` 的校验区间与设置对话框 `QDoubleSpinBox` 的区间——三者同源，避免「导入合法值被界面静默夹掉」
+- **编辑器侧**（`Editor.set_line_spacing()`）：Qt 以 `QTextBlockFormat` 的线高**百分比**（`ProportionalHeight`，即倍数 ×100）表达行距，与预览 CSS 的 `line-height` 语义相近但不完全等价（编辑器字号可调、预览代码块字号固定 14px，同一数字视觉松紧会有细微差异）。逐项接线：设置变更走 `EditorTabs.set_line_spacing_all()`；行距是**按块**存储的格式，整篇替换文本（`setPlainText` 覆写 / `load_content`）与共享文档 attach/detach 后都必须重新应用
+- 编辑器**内**正文与代码块不区分：同一文本流按块切分代码块代价过高，故 `code_line_spacing` 只作用于预览与导出
+- **`mergeBlockFormat` 会被 Qt 记为一次编辑**（进撤销栈并置 `isModified`），而行距是显示属性而非内容改动——应用后必须还原两项：脏标记不还原会出现「打开文件即变脏」与「关标签页误弹保存确认」；撤销栈不还原会出现「刚打开的文件就可撤销」，用户第一次 Ctrl+Z 只会把行距悄悄改回默认。仅当文档本来就没有任何历史（撤销与重做都为空）时才清掉这一条，已有历史时保留（清栈会连带丢掉用户自己的重做记录）
+- **预览 / 导出**：`_preview_css_vars()` 与 `build_export_html_document()` 分别把两个倍数注入 `--line-spacing` / `--code-line-spacing`（无单位数字，带单位会污染 `line-height` 与 `calc()`），由 `MARKDOWN_LAYOUT_CSS` 的代码块规则与导出外壳的 `body` 规则分别取用——预览与导出共用同一份排版 CSS，不会漂移
+
 ### 4.4 标签页管理 (`editor/editor_tabs.py`)
 
 | 组件              | 说明                                                                                                                                                                                                           |
@@ -473,7 +490,7 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 **主题切换就地更新**：
 
 - `_preview_css_vars()` 是预览 CSS 变量的单一真相源（首屏模板注入与运行时更新同源），首屏经 `_build_preview_css_vars()` 写入 `--css-*` 变量
-- 模板已加载时，主题/代码字体变更经适配器 `run_javascript(_css_vars_update_js(...))` 就地改写 `:root` CSS 变量，不再整页 `set_html` 重载（避免切换闪烁）；模板未加载则随首屏整页加载一并灌入
+- 模板已加载时，主题/排版（代码字体、正文行距、代码块行距）变更经适配器 `run_javascript(_css_vars_update_js(...))` 就地改写 `:root` CSS 变量，不再整页 `set_html` 重载（避免切换闪烁）；模板未加载则随首屏整页加载一并灌入
 
 **首次渲染稳定化**：
 

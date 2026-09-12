@@ -227,6 +227,15 @@ class EditorSettingsDialog(QDialog):
         self.wrap_mode_combo = QComboBox()
         self.wrap_mode_combo.addItem("不换行", "no_wrap")
         self.wrap_mode_combo.addItem("限制行宽", "limit_width")
+        # 对齐修正：不可编辑的 QComboBox 文本直接绘制在编辑区左边缘，而同表单的
+        # QSpinBox / QLineEdit（含可编辑的 QFontComboBox）内部还有文本内缩，
+        # 导致本行文字比其它行偏左，且偏移量随字体/DPI/样式变化（实测 2~6.5 逻辑
+        # 像素），无法用固定 padding 补偿。改为「可编辑 + 只读行编辑框」，
+        # 与 QFontComboBox 走完全相同的渲染路径，自适应对齐；只读保证不可输入。
+        self.wrap_mode_combo.setEditable(True)
+        wrap_line_edit = self.wrap_mode_combo.lineEdit()
+        if wrap_line_edit is not None:
+            wrap_line_edit.setReadOnly(True)
         editor_layout.addRow("行宽模式:", self.wrap_mode_combo)
 
         self.autosave_spin = QSpinBox()

@@ -26,7 +26,6 @@ from ..core.config import Config
 from ..core.document_registry import DocumentRegistry
 from ..editor.editor_tabs import EditorTabWidget
 from ..editor.find_replace import FindReplaceBar
-from ..editor.webengine_runtime import WebEngineRuntime
 from ..game.game_sidebar import GameSidebar
 from ..game.secretary_widget import SecretaryWidget
 from ..themes.theme_engine import ThemeEngine
@@ -42,7 +41,6 @@ class ViewCoordinator:
         self,
         config: Config,
         theme_engine: ThemeEngine,
-        webengine_runtime: WebEngineRuntime,
         editor_splitter: QSplitter,
         editor_tabs: EditorTabWidget,
         find_replace_bar: FindReplaceBar,
@@ -58,7 +56,6 @@ class ViewCoordinator:
     ) -> None:
         self._config = config
         self._theme_engine = theme_engine
-        self._webengine_runtime = webengine_runtime
         self._document_registry = document_registry
         self._editor_splitter = editor_splitter
         self._editor_tabs = editor_tabs
@@ -117,7 +114,6 @@ class ViewCoordinator:
         split_tabs = EditorTabWidget(
             self._config,
             theme_engine=self._theme_engine,
-            webengine_runtime=self._webengine_runtime,
             document_registry=self._document_registry,
             session_manager=self._editor_tabs.session_manager,
             panel_name=f"split_{len(self._split_tabs)}",
@@ -273,7 +269,6 @@ class ViewCoordinator:
         split_tabs = EditorTabWidget(
             self._config,
             theme_engine=self._theme_engine,
-            webengine_runtime=self._webengine_runtime,
             document_registry=self._document_registry,
             session_manager=self._editor_tabs.session_manager,
             panel_name=f"split_{len(self._split_tabs)}",
@@ -330,11 +325,14 @@ class ViewCoordinator:
                 self._side_panel_host.show_panel("outline")
 
     def toggle_secretary(self) -> None:
-        """切换小秘书显示/隐藏并持久化。"""
-        self._secretary.setVisible(not self._secretary.isVisible())
-        self._config.set_secretary_setting(
-            "show_secretary", self._secretary.isVisible()
-        )
+        """切换小秘书显示/隐藏并持久化。
+
+        以设置为准反算新状态（不能用 isVisible()：父容器不可见时它也是 False，
+        会把「显示」错判成「隐藏」）。可见性由秘书自身按「设置 + 父容器可见性」对齐。
+        """
+        new_state = not self._config.get_secretary_setting("show_secretary", True)
+        self._config.set_secretary_setting("show_secretary", new_state)
+        self._secretary.sync_visibility()
 
     def toggle_shortcut_panel(self) -> None:
         """切换快捷键提示面板。"""

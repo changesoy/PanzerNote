@@ -101,12 +101,18 @@ def v2_color_qcolor(
     return color
 
 
-def v2_syntax_colors(theme_engine: ThemeEngine) -> Mapping[str, str]:
-    """合并 palette + override 后的 syntax 配色（v2 不可用时空 dict）。"""
+def v2_syntax_colors(
+    theme_engine: ThemeEngine, variant_id: str | None = None
+) -> Mapping[str, str]:
+    """合并 palette + override 后的 syntax 配色（v2 不可用时空 dict）。
+
+    variant_id 指定主题变体；None 时取当前激活变体。导出/打印等需要固定明暗
+    的场景可显式传入（如 light），避免深色高亮配色落到白底文档上。
+    """
     svc = _service(theme_engine)
     if svc is None:
         return {}
-    return svc.syntax_colors()
+    return svc.syntax_colors(variant_id)
 
 
 def v2_active_variant(theme_engine: ThemeEngine) -> str | None:
@@ -117,17 +123,53 @@ def v2_active_variant(theme_engine: ThemeEngine) -> str | None:
     return svc.active_variant()
 
 
+def v2_export_variant_id(theme_engine: ThemeEngine) -> str | None:
+    """导出/打印固定的亮色变体 id（v2 不可用为 None）。
+
+    导出文档打印在白底上，配色（文本、代码块、语法高亮）一律取亮色变体，
+    与当前激活主题的明暗无关。variant_for_dark(False) → "light" 变体；
+    包内无 light 时回退首个变体。
+    """
+    svc = _service(theme_engine)
+    if svc is None or svc.snapshot() is None:
+        return None
+    return svc.variant_for_dark(False)
+
+
 def v2_export_colors(theme_engine: ThemeEngine) -> dict[str, str]:
-    """导出 HTML/PDF 所需的 v2 色值集合（B8：替代 v1 配色对象传参）。"""
+    """导出 HTML/PDF 所需的 v2 色值集合（B8：替代 v1 配色对象传参）。
+
+    导出文档打印在白底上，始终采用**亮色变体**配色（白纸黑字），不随当前
+    深色主题变化——否则深色模式下导出的文字为浅灰、代码块/引用块为黑底，
+    在白底 PDF 上不可读。亮色变体缺失时回退下方浅色常量。
+    """
+    svc = _service(theme_engine)
+    light_vid = v2_export_variant_id(theme_engine)
+
+    def _token(token_name: str, fallback: str) -> str:
+        if svc is None:
+            return fallback
+        variant = svc.variant_snapshot(light_vid)
+        if variant is None:
+            return fallback
+        value = variant.tokens.get(token_name)
+        return value if value is not None else fallback
+
+    def _style(recipe_key: str, style_key: str, fallback: str) -> str:
+        if svc is None:
+            return fallback
+        value = svc.resolve_style_color(recipe_key, style_key, variant_id=light_vid)
+        return value if value is not None else fallback
+
     return {
-        "text_primary": v2_token(theme_engine, "text_primary", "#212121"),
-        "text_secondary": v2_token(theme_engine, "text_secondary", "#757575"),
-        "text_disabled": v2_token(theme_engine, "text_muted", "#BDBDBD"),
-        "border": v2_token(theme_engine, "border_muted", "#E0E0E0"),
-        "divider": v2_token(theme_engine, "border_muted", "#EEEEEE"),
-        "surface": v2_token(theme_engine, "surface_secondary", "#F5F5F5"),
-        "sidebar_bg": v2_token(theme_engine, "surface_secondary", "#FAFAFA"),
-        "primary": v2_token(theme_engine, "accent", "#2196F3"),
-        "primary_dark": v2_color(theme_engine, "button", "pressed_background", "#1976D2"),
-        "bg_codeblock": v2_token(theme_engine, "md_preview_code_block_bg", "#EDF3FA"),
+        "text_primary": _token("text_primary", "#212121"),
+        "text_secondary": _token("text_secondary", "#757575"),
+        "text_disabled": _token("text_muted", "#BDBDBD"),
+        "border": _token("border_muted", "#E0E0E0"),
+        "divider": _token("border_muted", "#EEEEEE"),
+        "surface": _token("surface_secondary", "#F5F5F5"),
+        "sidebar_bg": _token("surface_secondary", "#FAFAFA"),
+        "primary": _token("accent", "#2196F3"),
+        "primary_dark": _style("button", "pressed_background", "#1976D2"),
+        "bg_codeblock": _token("md_preview_code_block_bg", "#EDF3FA"),
     }

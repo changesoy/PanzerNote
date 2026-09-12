@@ -64,6 +64,9 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
         editor.document().contentsChange.connect(self._on_contents_change)
         editor.verticalScrollBar().valueChanged.connect(self.update)
         editor.blockCountChanged.connect(self._on_content_changed)
+        # 折叠只改 block 可见性：既不触发 contentsChange，也不改 blockCount，
+        # 不接这条信号缩略图会一直停留在折叠前的画面。
+        editor.fold_state_changed.connect(self._on_fold_state_changed)
 
         self._init_theme(theme_engine)
 
@@ -95,6 +98,16 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
             self._block_dirty.clear()
             self._block_cache.clear()
         self._update_timer.start()
+
+    def _on_fold_state_changed(self):
+        """折叠可见性变化：整图随可见块数重排，缓存必须整体作废。
+
+        折叠是离散操作且不产生 contentsChange，不走内容变更的 150ms 防抖，
+        否则展开/折叠后缩略图会短暂停留在旧画面。
+        """
+        self._block_dirty.clear()
+        self._block_cache.clear()
+        self._invalidate_and_repaint()
 
     def _on_contents_change(self, from_pos: int, chars_removed: int, chars_added: int):
         if not self._use_block_cache:
@@ -162,12 +175,49 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
             block = block.next()
         return max(1, count)
 
+    def _visible_index_of(self, block_number: int) -> int:
+        """block_number 在缩略图中的纵向序号（它之前的可见块数）。
+
+        折叠隐藏的块不占缩略图纵向空间，所以定位必须按「可见块序号」而非
+        blockNumber，否则折叠后整图会整体错位。
+        """
+        doc = self._editor.document()
+        if doc is None:
+            return 0
+        index = 0
+        block = doc.begin()
+        while block.isValid() and block.blockNumber() < block_number:
+            if block.isVisible():
+                index += 1
+            block = block.next()
+        return index
+
+    def _block_at_visible_index(self, index: int):
+        """_visible_index_of 的逆映射：纵向序号 → 可见 block。
+
+        越界时钳制到首个 / 末个可见块（与点击、拖拽的边界语义一致）。
+        """
+        doc = self._editor.document()
+        if doc is None:
+            return None
+        index = max(0, index)
+        seen = 0
+        last = None
+        block = doc.begin()
+        while block.isValid():
+            if block.isVisible():
+                if seen == index:
+                    return block
+                last = block
+                seen += 1
+            block = block.next()
+        return last
+
     def _get_viewport_rect(self) -> QRectF:
         editor = self._editor
         line_h = self._get_line_height()
 
         first_block = editor.firstVisibleBlock()
-        first_line = first_block.blockNumber()
 
         viewport_h = editor.viewport().height()
         block_h = editor.blockBoundingRect(first_block).height()
@@ -175,7 +225,7 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
             block_h = 20
         visible_lines = viewport_h / block_h
 
-        y = first_line * line_h + self.TOP_MARGIN
+        y = self._visible_index_of(first_block.blockNumber()) * line_h + self.TOP_MARGIN
         h = max(8, visible_lines * line_h)
         return QRectF(0, y, self.width(), h)
 
@@ -227,14 +277,24 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
         total_blocks = doc.blockCount()
         num_cache_blocks = (total_blocks + BLOCK_SIZE - 1) // BLOCK_SIZE
 
+        # 折叠隐藏的块不占纵向空间，缓存块落点必须按「其之前的可见块数」累计。
+        # 旧实现直接用 start_line 绝对行号定址：折叠后既会在被隐藏的行处留下空洞，
+        # 又会在块内首个隐藏行处 break 掉后续仍可见的行（整块消失）。
+        visible_counts = [0] * num_cache_blocks
+        for line_num in range(total_blocks):
+            block = doc.findBlockByNumber(line_num)
+            if block.isValid() and block.isVisible():
+                visible_counts[line_num // BLOCK_SIZE] += 1
+
+        # 落点只累计「之前的可见块数 * 行高」；TOP_MARGIN 已含在缓存块图片内部
+        # 的起始 y 里，这里再加一次会让整图比全量渲染（_render_content）低 TOP_MARGIN。
+        y_offset = 0.0
         for cache_idx in range(num_cache_blocks):
             start_line = cache_idx * BLOCK_SIZE
             end_line = min(start_line + BLOCK_SIZE, total_blocks)
 
             if cache_idx in self._block_cache and cache_idx not in self._block_dirty:
                 picture = self._block_cache[cache_idx]
-                y_offset = start_line * line_h + self.TOP_MARGIN
-                painter.drawPicture(0, int(y_offset), picture)
             else:
                 picture = QPicture()
                 pic_painter = QPainter(picture)
@@ -244,7 +304,7 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
                 for line_num in range(start_line, end_line):
                     block = doc.findBlockByNumber(line_num)
                     if not block.isValid() or not block.isVisible():
-                        break
+                        continue
                     self._render_line(pic_painter, block, y, line_h)
                     y += line_h
 
@@ -252,8 +312,8 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
                 self._block_cache[cache_idx] = picture
                 self._block_dirty.discard(cache_idx)
 
-                y_offset = start_line * line_h + self.TOP_MARGIN
-                painter.drawPicture(0, int(y_offset), picture)
+            painter.drawPicture(0, int(y_offset), picture)
+            y_offset += visible_counts[cache_idx] * line_h
 
     def _render_content(self, painter: QPainter):
         doc = self._editor.document()
@@ -395,12 +455,8 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
         if line_h <= 0:
             return
 
-        target_line = int((y - self.TOP_MARGIN) / line_h)
-        doc = self._editor.document()
-        target_line = max(0, min(target_line, doc.blockCount() - 1))
-
-        block = doc.findBlockByNumber(target_line)
-        if block.isValid():
+        block = self._block_at_visible_index(int((y - self.TOP_MARGIN) / line_h))
+        if block is not None:
             cursor = self._editor.textCursor()
             cursor.setPosition(block.position())
             self._editor.setTextCursor(cursor)
@@ -411,19 +467,15 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
         if line_h <= 0:
             return
 
-        target_line = int((y - self.TOP_MARGIN) / line_h)
-        doc = self._editor.document()
-        target_line = max(0, min(target_line, doc.blockCount() - 1))
-
-        block = doc.findBlockByNumber(target_line)
-        if block.isValid():
+        block = self._block_at_visible_index(int((y - self.TOP_MARGIN) / line_h))
+        if block is not None:
             cursor = self._editor.textCursor()
             cursor.setPosition(block.position())
             self._editor.setTextCursor(cursor)
             # 自动展开包含目标行的折叠区域
             folding = getattr(self._editor, '_folding', None)
             if folding is not None:
-                folding.ensure_visible(target_line + 1)
+                folding.ensure_visible(block.blockNumber() + 1)
             self._editor.ensureCursorVisible()
             self._editor.setFocus()
 
@@ -432,12 +484,8 @@ class MinimapWidget(ThemeAwareMixin, QWidget):
         if line_h <= 0:
             return
 
-        target_line = int((y - self.TOP_MARGIN) / line_h)
-        doc = self._editor.document()
-        target_line = max(0, min(target_line, doc.blockCount() - 1))
-
-        block = doc.findBlockByNumber(target_line)
-        if block.isValid():
+        block = self._block_at_visible_index(int((y - self.TOP_MARGIN) / line_h))
+        if block is not None:
             vsb = self._editor.verticalScrollBar()
             block_rect = self._editor.blockBoundingRect(block)
             vsb.setValue(int(block_rect.top()))

@@ -16,9 +16,16 @@
 
 import re
 import html as html_module
-from typing import List
+from typing import Callable, List
 
+from ..core.settings_store import (
+    DEFAULT_CODE_FONT_FAMILY,
+    DEFAULT_CODE_LINE_SPACING,
+    DEFAULT_LINE_SPACING,
+)
 from ..utils.logger import get_logger
+from . import math_render
+from . import mermaid_render
 
 try:
     from markdown_it import MarkdownIt as _MarkdownIt
@@ -61,6 +68,19 @@ _JAVASCRIPT_URL_UNQUOTED_RE = re.compile(
     re.IGNORECASE,
 )
 
+# fenced code 输出（与预览同构：<pre><code class="language-x">…</code></pre>）
+# 预览（markdown_preview）与导出共用此正则，避免两处各留一份。
+CODEBLOCK_RE = re.compile(
+    r'<pre(?P<pre_attrs>[^>]*)>\s*'
+    r'<code(?P<code_attrs>[^>]*)>'
+    r'(?P<body>.*?)'
+    r'</code>\s*</pre>',
+    re.DOTALL | re.IGNORECASE,
+)
+
+# 代码高亮回调：(源码, 语言名) → 含内联样式的 HTML 片段
+CodeHighlighter = Callable[[str, str], str]
+
 
 def strip_dangerous_html(html_text: str) -> str:
     """清洗 HTML 中的危险标签和属性
@@ -93,25 +113,115 @@ def strip_dangerous_html(html_text: str) -> str:
     return html_text
 
 
-def render_markdown_to_safe_html(markdown_text: str) -> str:
+def extract_language_from_code_attrs(attrs: str) -> str:
+    """从 code 标签的属性串中提取语言名称（预览与导出共用）。
+
+    支持 ``class="language-x"`` 与 ``class="lang-x"``；无语言时返回空串。
+    """
+    m = re.search(r'class="([^"]*)"', attrs or "")
+    if not m:
+        return ""
+    for cls in m.group(1).split():
+        if cls.startswith("language-"):
+            return cls.removeprefix("language-")
+        if cls.startswith("lang-"):
+            return cls.removeprefix("lang-")
+    return ""
+
+
+def _apply_code_highlight(html_text: str, highlight: CodeHighlighter) -> str:
+    """把 fenced code 块替换为高亮后的 <pre><code> 块。
+
+    导出侧传入 highlight 回调（复用预览的 highlight_code_html），
+    使导出的代码块与预览保持同一套语法高亮。
+    """
+    def _replace(match: re.Match[str]) -> str:
+        language = extract_language_from_code_attrs(match.group("code_attrs") or "")
+        raw = html_module.unescape(match.group("body"))
+        if raw.endswith("\n"):
+            raw = raw[:-1]
+        return f"<pre><code>{highlight(raw, language)}</code></pre>"
+
+    return CODEBLOCK_RE.sub(_replace, html_text)
+
+
+def extract_mermaid_blocks(html_text: str) -> str:
+    """把 ```mermaid 围栏从代码块形态转成图表容器 div（class 见 CONTAINER_CLASS）。
+
+    必须在代码高亮之前执行：图表源码不是代码，不该进高亮器，也不该出现在
+    预览的「复制代码」按钮序列里。转换后容器内容保持 HTML 转义形态 —— 浏览器
+    读回时（innerHTML / textContent）会还原实体，Mermaid 拿到的是原始源码；
+    若在此处 unescape，图表源码里的 <b> 之类会被浏览器当标签解析而丢失。
+
+    非 mermaid 围栏原样返回，故本函数可无差别地作用在所有渲染产物上。
+    """
+    def _replace(match: re.Match[str]) -> str:
+        attrs = match.group("code_attrs") or ""
+        if extract_language_from_code_attrs(attrs).lower() != mermaid_render.LANG:
+            return match.group(0)
+        body = match.group("body")
+        if body.endswith("\n"):
+            body = body[:-1]
+        # L9：保留 fence 上由 markdown_preview 注入的源码行锚点 —— 图表容器
+        # 丢掉它会让滚动同步在图表处只能靠相邻锚点插值
+        m = re.search(r'data-source-line="(\d+)"', attrs)
+        if m:
+            return (
+                f'<div class="{mermaid_render.CONTAINER_CLASS} src-line" '
+                f'data-source-line="{m.group(1)}">{body}</div>'
+            )
+        return f'<div class="{mermaid_render.CONTAINER_CLASS}">{body}</div>'
+
+    return CODEBLOCK_RE.sub(_replace, html_text)
+
+
+def render_markdown_to_safe_html(
+    markdown_text: str,
+    highlight: CodeHighlighter | None = None,
+    *,
+    enable_math: bool = True,
+    enable_mermaid: bool = True,
+) -> str:
     """将 Markdown 文本渲染为安全的 HTML
 
     渲染优先级：
-      1. markdown-it-py（html=False）
+      1. markdown-it-py（html=False，启用 GFM 表格/删除线扩展）
       2. python-markdown（渲染后走 strip_dangerous_html 清洗）
       3. 纯文本 fallback（html.escape）
 
+    参数：
+      markdown_text：Markdown 源文本
+      highlight：可选的代码高亮回调 (源码, 语言名) → HTML；提供时 fenced code
+        块会被替换为高亮 HTML（导出与预览保持一致的语法高亮）
+      enable_math：是否注册公式语法（L10）——QTextBrowser 无 JS 环境，
+        公式只会显示原始 TeX，帮助中心等纯 Qt 消费方应传 False
+      enable_mermaid：是否把 mermaid 围栏转成图表容器（L10）——容器在
+        QTextBrowser 里是无 JS 的裸 div（连代码块样式都没有），传 False 时
+        围栏按普通代码块渲染
+
     返回：安全的 HTML 片段（不含 <html>/<body> 等外层标签）
     """
+    def _finish(rendered: str) -> str:
+        safe = strip_dangerous_html(rendered)
+        # 图表围栏先于高亮转换：它不是代码，且转换产物不含 <pre><code>
+        if enable_mermaid:
+            safe = extract_mermaid_blocks(safe)
+        return _apply_code_highlight(safe, highlight) if highlight else safe
+
     if HAS_MARKDOWN_IT:
         try:
             md = _MarkdownIt("commonmark", {"html": False})
+            # commonmark preset 不含表格/删除线（GFM 扩展），与预览渲染保持一致
+            md.enable(["table", "strikethrough"])
             try:
                 from mdit_py_plugins.tasklists import tasklists_plugin
                 tasklists_plugin(md)
             except ImportError:
                 get_logger(__name__).debug("mdit_py_plugins 未安装，任务列表语法不可用")
-            return strip_dangerous_html(md.render(markdown_text))
+            # 公式语法与预览用同一套规则（math_render.register 是唯一注册点）
+            if enable_math:
+                math_render.register(md)
+            return _finish(md.render(markdown_text))
         except Exception:
             get_logger(__name__).debug("markdown-it 渲染失败，回退到 python-markdown")
 
@@ -128,7 +238,7 @@ def render_markdown_to_safe_html(markdown_text: str) -> str:
             except Exception:
                 get_logger(__name__).warning("python-markdown 渲染失败")
                 return html_module.escape(markdown_text)
-        return strip_dangerous_html(result)
+        return _finish(result)
 
     return html_module.escape(markdown_text)
 
@@ -139,6 +249,27 @@ def render_plain_text_to_safe_html(text: str) -> str:
     用于非 Markdown 文件的导出。
     """
     return f"<pre>{html_module.escape(text)}</pre>"
+
+
+# 可击穿 <style> / 破坏 font-family 属性值的危险字符（含控制字符）。
+# 族名做白名单化时剔除；中文等安全字符保留，避免误伤合法字体名。
+_CODE_FONT_UNSAFE_RE = re.compile(r"""[<>"'`;{}()/\\\x00-\x1f\x7f]""")
+
+
+def code_font_css_stack(family: str | None = None) -> str:
+    """由「代码字体」族名生成 CSS font-family 值（含通用回退）
+
+    预览模板与导出文档共用；族名缺失时空回退到默认值，保证 --code-font 恒有效。
+    族名先做白名单化：剔除可击穿 <style> 的属性值危险字符（< > " ' ; { } ( ) / \\ 等），
+    防止经构造的设置 JSON 注入 HTML/脚本（预览与导出两份文档均经过本函数）。
+    过滤后为空再回退默认族名。
+    """
+    name = (family or "").strip() or DEFAULT_CODE_FONT_FAMILY
+    name = _CODE_FONT_UNSAFE_RE.sub("", name)
+    if not name:
+        name = DEFAULT_CODE_FONT_FAMILY
+    quoted = f'"{name}"' if " " in name else name
+    return f"{quoted}, Consolas, monospace"
 
 
 # ════════════════════════════════════════════════════════
@@ -177,9 +308,15 @@ p { margin: 8px 0; }
 strong { font-weight: 700; }
 em { font-style: italic; }
 
+/* ========== 代码字体与行距（--code-font / --code-line-spacing 由预览/导出各自注入） ========== */
+pre, pre code {
+    font-family: var(--code-font);
+    line-height: var(--code-line-spacing);
+}
+
 /* ========== 行内代码 ========== */
 :not(pre) > code {
-    font-family: "JetBrains Mono", Consolas, "Courier New", "Microsoft YaHei", monospace;
+    font-family: var(--code-font);
     background: var(--surface);
     padding: 1px 5px;
     border-radius: 3px;
@@ -237,22 +374,61 @@ li input[type="checkbox"] {
 """
 
 
-def build_export_html_document(body_html: str, theme_colors: dict[str, str], title: str = "") -> str:
+def build_export_html_document(
+    body_html: str,
+    theme_colors: dict[str, str],
+    title: str = "",
+    code_font: str = DEFAULT_CODE_FONT_FAMILY,
+    line_spacing: float = DEFAULT_LINE_SPACING,
+    code_line_spacing: float = DEFAULT_CODE_LINE_SPACING,
+    inline_mermaid: bool = True,
+) -> str:
     """构建完整的导出 HTML 文档
 
     参数：
       body_html：已渲染的安全 HTML 片段
       theme_colors：v2 色值集合（v2_export_colors 产物），提供主题色值
       title：文档标题（可选）
+      code_font：代码块字体族名（设置项「代码字体」，默认 Courier New）
+      line_spacing：正文行距倍数（设置项「正文行距」）
+      code_line_spacing：代码块行距倍数（设置项「代码块行距」）
+      inline_mermaid：是否把约 5.6 MB 的图表库内联进文档。HTML 导出（写盘、由
+        用户浏览器打开）用 True 保持单文件自包含；PDF 导出必须用 False ——
+        WebView2 的 NavigateToString 有 2 MB 上限，内联后会直接失败，
+        此时文档改声明 EXTERNAL_VENDOR_META_TAG，由适配器注入 vendor。
 
     返回：完整的 HTML 文档字符串
 
     样式来源（Wave 1.5）：
-      - :root 内联主题色值定义 CSS 变量（变量名与预览模板一致）
+      - :root 内联主题色值与排版变量（变量名与预览模板一致）
       - 内容排版复用 MARKDOWN_LAYOUT_CSS（与预览单一来源）
       - body / pre 为导出特有（静态文档外壳，居中限定宽度）
+
+    公式资源按需内联：由 body_html 自动判定，HTML 导出与 PDF 导出共用同一
+    判定，调用方无从遗漏。导出文件自包含（字体为 data URI），断网/换机器
+    打开仍可显示；无公式的文档不背约 645 KB 的 vendor 体积。
+
+    图表（Mermaid）按需加入，并额外声明 <meta name="pn-async">：
+    图表是异步渲染，PDF 打印必须等页面回传就绪信号（适配器据此加第二道门）。
+    资源缺失时既不内联脚本、也不声明异步 —— 否则打印会白等到超时才降级。
+
+    inline_mermaid=False 时文档不内联 vendor，改声明 EXTERNAL_VENDOR_META_TAG，
+    由适配器经文档级脚本注入提供（仍声明 pn-async：注入完成后才渲染并回传就绪）。
     """
     title_tag = f"<title>{html_module.escape(title)}</title>" if title else ""
+    has_math = math_render.has_math(body_html)
+    math_head = math_render.style_fragment() if has_math else ""
+    math_tail = math_render.script_fragment() if has_math else ""
+    # 导出文档恒用亮色变体（打印在白底上），图表主题同样取 default(light)。
+    # vendor 缺失且需自包含时 fragment 为空 → 此时也不该声明异步（等不到就绪信号）
+    has_mermaid = mermaid_render.has_mermaid(body_html)
+    mermaid_tail = (
+        mermaid_render.script_fragment(False, include_vendor=inline_mermaid)
+        if has_mermaid
+        else ""
+    )
+    vendor_meta = mermaid_render.EXTERNAL_VENDOR_META_TAG if mermaid_tail and not inline_mermaid else ""
+    async_meta = mermaid_render.ASYNC_META_TAG if mermaid_tail else ""
     root_vars = f""":root {{
     --text-primary: {theme_colors["text_primary"]};
     --text-secondary: {theme_colors["text_secondary"]};
@@ -267,14 +443,21 @@ def build_export_html_document(body_html: str, theme_colors: dict[str, str], tit
     --primary-hover: {theme_colors["primary_dark"]};
     --bg-codeblock: {theme_colors["bg_codeblock"]};
     --scrollbar-thumb-hover: {theme_colors["text_disabled"]};
+    --code-font: {code_font_css_stack(code_font)};
+    --line-spacing: {line_spacing:g};
+    --code-line-spacing: {code_line_spacing:g};
 }}"""
+    # 字号基准必须与预览一致：预览模板 body 是 14px，导出若沿用浏览器默认值
+    # 16px，行距倍数（line-height 无单位）会按各自字号换算 —— 代码块实测
+    # 0.75 × 14 = 10.5px（预览）vs 0.75 × 16 = 12px（导出），用户能看出差别。
     export_shell_css = """/* ========== 导出文档外壳 ========== */
 body {
     font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;
+    font-size: 14px;
     padding: 20px;
     max-width: 800px;
     margin: 0 auto;
-    line-height: 1.7;
+    line-height: var(--line-spacing);
     color: var(--text-primary);
 }
 pre {
@@ -294,13 +477,18 @@ pre code {
 <head>
 <meta charset="utf-8">
 {title_tag}
+{async_meta}
+{vendor_meta}
 <style>
 {root_vars}
 {MARKDOWN_LAYOUT_CSS}
 {export_shell_css}
 </style>
+{math_head}
 </head>
 <body>
 {body_html}
+{math_tail}
+{mermaid_tail}
 </body>
 </html>"""

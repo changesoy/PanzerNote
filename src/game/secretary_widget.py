@@ -29,10 +29,11 @@ import json
 import random
 from typing import Optional
 
+from PyQt6 import sip
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QFrame
 )
-from PyQt6.QtCore import Qt, QTimer, QEvent, QPoint
+from PyQt6.QtCore import Qt, QTimer, QEvent, QPoint, pyqtSignal
 from PyQt6.QtGui import QPixmap, QFont, QPainter, QColor
 
 from ..core.config import Config
@@ -49,20 +50,41 @@ _BASE_ASPECT_RATIO = 210 / 380
 _MARGIN_RIGHT = 10
 _MARGIN_BOTTOM = 5
 
+# 气泡内边距（SpeechBubble 布局的 contentsMargins）与 QSS 边框宽度
+# （见 apply_theme_colors 的 `border: 2px solid`）—— 两者共同决定文字的可用宽度
+_PAD_H = 14
+_PAD_V = 12
+_PAD_X = 2 * _PAD_H  # 左右内边距之和
+_PAD_Y = 2 * _PAD_V  # 上下内边距之和
+_BORDER_W = 2
+_MIN_BUBBLE_HEIGHT = 40
+_DEFAULT_BUBBLE_MIN_W = 60
+_DEFAULT_BUBBLE_MAX_W = 200
+
 
 class SpeechBubble(QFrame):
-    """台词气泡"""
+    """台词气泡
+
+    高度由**文本换行后的行数**决定（见 _fit_to_text），不设上限：气泡挤不下时
+    由 SecretaryWidget 把窗口向上撑高，而不是把文字裁掉。
+    """
+
+    # 自身被隐藏时发出（定时到期或显式 hide），供小秘书收回窗口高度
+    hidden = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setContentsMargins(_PAD_H, _PAD_V, _PAD_H, _PAD_V)
 
         self.label = QLabel()
         self.label.setWordWrap(True)
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.label)
+
+        self._min_w = _DEFAULT_BUBBLE_MIN_W
+        self._max_w = _DEFAULT_BUBBLE_MAX_W
 
         self.hide_timer = QTimer(self)
         self.hide_timer.setSingleShot(True)
@@ -74,7 +96,7 @@ class SpeechBubble(QFrame):
         self.setStyleSheet(f"""
             QFrame {{
                 background-color: {bubble_bg};
-                border: 2px solid {bubble_border};
+                border: {_BORDER_W}px solid {bubble_border};
                 border-radius: 12px;
             }}
         """)
@@ -89,21 +111,45 @@ class SpeechBubble(QFrame):
         """)
 
     def update_size_constraints(self, widget_width: int):
-        """根据小秘书宽度更新气泡尺寸约束"""
-        bubble_max_w = max(80, int(widget_width * 0.9))
-        bubble_min_w = max(60, int(widget_width * 0.55))
-        self.setMaximumWidth(bubble_max_w)
-        self.setMinimumWidth(bubble_min_w)
-        self.setMinimumHeight(40)
+        """根据小秘书宽度更新气泡可用的宽度区间。
+
+        只约束宽度：高度必须由文本行数决定，否则多行台词会被压扁裁切。
+        """
+        self._max_w = max(80, int(widget_width * 0.9))
+        self._min_w = max(60, int(widget_width * 0.55))
+        # 宽度区间变了 → 同一段文本的换行行数也变，可见时立即重算
+        if not self.isHidden():
+            self._fit_to_text()
+
+    def _fit_to_text(self) -> None:
+        """按「可用宽度 → 换行行数」显式算出气泡的宽与高。
+
+        QLabel 开 wordWrap 后高度依赖宽度（heightForWidth），而 adjustSize()
+        走的是 sizeHint —— 换行文本下两者并不一致：父布局空间不足时气泡会被
+        压到最小高度，表现就是第三行起被裁掉。故这里显式定宽 + 按该宽度求高。
+        宽度取文本单行宽度并夹在 [_min_w, _max_w]：短语保持紧凑，长句用足宽度。
+        """
+        chrome_x = _PAD_X + 2 * _BORDER_W
+        natural = self.label.fontMetrics().horizontalAdvance(self.label.text())
+        label_w = max(1, max(self._min_w, min(self._max_w, natural + chrome_x)) - chrome_x)
+        # 显式固定标签宽度：保证实际换行宽度与下面求高所用宽度一致
+        self.label.setFixedWidth(label_w)
+        self.setFixedWidth(label_w + chrome_x)
+        text_h = self.label.heightForWidth(label_w)
+        self.setFixedHeight(max(_MIN_BUBBLE_HEIGHT, text_h + _PAD_Y + 2 * _BORDER_W))
 
     def show_message(self, text: str, duration: int = 3000):
         """显示消息"""
         self.label.setText(text)
-        self.adjustSize()
+        self._fit_to_text()
         self.show()
 
         if duration > 0:
             self.hide_timer.start(duration)
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        self.hidden.emit()
 
 
 class SecretaryWidget(ThemeAwareMixin, QWidget):
@@ -114,6 +160,14 @@ class SecretaryWidget(ThemeAwareMixin, QWidget):
       2. 使用防抖定时器（16ms ≈ 1帧@60fps）避免高频更新
       3. 动态计算右下角位置，确保不超出父容器边界
       4. 支持窗口最大化/最小化/多显示器拖动
+
+    为什么是**独立顶层窗**而不是父容器的子控件：
+      Markdown 预览的 WebView2 后端是原生子窗口（HWND），而 Windows 下
+      原生子窗口永远绘制在非原生 Qt 控件之上 —— 作为子控件的小秘书会被
+      预览整片盖住（QWebEngineView 不是原生窗口，所以此前未暴露）。
+      因此本控件以 Qt.Tool 顶层窗形式存在，父窗口作为其 owner：
+      悬浮在主窗口之上、不进任务栏、随主窗口最小化。
+      代价是它不再随父控件自动显隐/移动，需自行对齐（见 sync_visibility）。
     """
 
     DEFAULT_LINES = {
@@ -174,12 +228,27 @@ class SecretaryWidget(ThemeAwareMixin, QWidget):
 
     def __init__(self, config: Config, theme_engine, parent=None):
         super().__init__(parent)
+
+        # 独立置顶工具窗（原因见类文档）：父窗口为 owner，不进任务栏。
+        # WindowDoesNotAcceptFocus + WA_ShowWithoutActivating：
+        # 点击小秘书不应把焦点从编辑器抢走（子控件时代不会发生）。
+        self.setWindowFlags(
+            Qt.WindowType.Tool
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowDoesNotAcceptFocus
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+
         self.config = config
         self._theme_engine = theme_engine
         self._lines = self.DEFAULT_LINES.copy()
         self._parent_widget = parent
+        # owner 窗口在构造时固定（事件过滤器需在父控件之外单独监听它）
+        self._owner_window: Optional[QWidget] = parent.window() if parent else None
         self._position_dirty = False
         self._last_position = QPoint()
+        # size_percent 算出的基准高度；多行台词期间窗口会临时高于它
+        self._base_height = 0
         self._size_percent: int = self.config.get_secretary_setting(
             "size_percent", _DEFAULT_SIZE_PERCENT
         )
@@ -196,6 +265,8 @@ class SecretaryWidget(ThemeAwareMixin, QWidget):
         self._idle_timer.timeout.connect(self._on_idle)
 
         self._init_ui()
+        # 气泡隐藏后收回窗口高度（多行台词期间被 _ensure_bubble_room 撑高）
+        self.bubble.hidden.connect(self._on_bubble_hidden)
 
         if theme_engine is None:
             raise RuntimeError("SecretaryWidget 必须传入 theme_engine，不允许为 None")
@@ -203,6 +274,9 @@ class SecretaryWidget(ThemeAwareMixin, QWidget):
 
         if parent:
             parent.installEventFilter(self)
+            # 顶层窗移动时父容器自身不移动 → 必须同时监听主窗口
+            if self._owner_window is not None and self._owner_window is not parent:
+                self._owner_window.installEventFilter(self)
 
         QTimer.singleShot(500, self._initial_setup)
 
@@ -216,7 +290,7 @@ class SecretaryWidget(ThemeAwareMixin, QWidget):
 
     def _initial_setup(self):
         """初始设置"""
-        self._update_position()
+        self.sync_visibility()
         self.show_event_message("启动")
         self._idle_timer.start()
 
@@ -268,8 +342,9 @@ class SecretaryWidget(ThemeAwareMixin, QWidget):
 
     def _apply_size(self):
         """根据 size_percent 和父容器尺寸计算并应用小秘书尺寸"""
-        if not self._parent_widget:
+        if not self._parent_alive():
             self.setFixedSize(210, 380)
+            self._base_height = 380
             self.bubble.update_size_constraints(210)
             self.portrait_label.setFixedHeight(300)
             return
@@ -284,12 +359,15 @@ class SecretaryWidget(ThemeAwareMixin, QWidget):
         height = max(120, height)
 
         self.setFixedSize(width, height)
+        self._base_height = height
         self.bubble.update_size_constraints(width)
 
         portrait_h = int(height * 0.75)
         self.portrait_label.setFixedHeight(portrait_h)
 
         self._load_portrait()
+        # 台词可能正在显示：窗口尺寸变了要按新的可用宽度重新留位
+        self._ensure_bubble_room()
         self._request_position_update()
 
     def set_size_percent(self, percent: int):
@@ -396,28 +474,28 @@ class SecretaryWidget(ThemeAwareMixin, QWidget):
         return line.format(nickname=nickname, self=self_name)
 
     def _calculate_target_position(self) -> QPoint:
-        """动态计算目标位置
+        """动态计算目标位置（**全局坐标**，本控件是独立顶层窗）
 
         基于父容器尺寸和自身尺寸，计算右下角位置。
         确保不超出父容器边界，处理极端尺寸情况。
 
         Returns:
-            目标位置 QPoint
+            目标位置 QPoint。顶层窗的 move() 收全局坐标，
+            故此处先把父容器内的相对坐标映射到全局。
         """
-        if not self._parent_widget:
+        if not self._parent_alive():
             return QPoint(0, 0)
 
         parent_rect = self._parent_widget.rect()
-        margin_right = _MARGIN_RIGHT
-        margin_bottom = _MARGIN_BOTTOM
 
-        x = parent_rect.width() - self.width() - margin_right
-        y = parent_rect.height() - self.height() - margin_bottom
+        x = parent_rect.width() - self.width() - _MARGIN_RIGHT
+        y = parent_rect.height() - self.height() - _MARGIN_BOTTOM
 
         x = max(0, min(x, parent_rect.width() - self.width()))
         y = max(0, min(y, parent_rect.height() - self.height()))
 
-        return QPoint(x, y)
+        global_pos: QPoint = self._parent_widget.mapToGlobal(QPoint(x, y))
+        return global_pos
 
     def _request_position_update(self):
         """请求位置更新（防抖）
@@ -452,19 +530,83 @@ class SecretaryWidget(ThemeAwareMixin, QWidget):
         self._last_position = target
         self._position_dirty = False
 
+    def _parent_alive(self) -> bool:
+        """父容器是否仍可用。
+
+        控件销毁后其 Python 包装对象会变成悬空引用，
+        事件过滤器在窗口销毁期仍可能被调用，需先探活再访问。
+        """
+        return self._parent_widget is not None and not sip.isdeleted(self._parent_widget)
+
+    def sync_visibility(self) -> None:
+        """对齐可见性 —— 独立顶层窗不会随父控件自动显示/隐藏。
+
+        隐藏条件：用户关闭显示（show_secretary=false）、
+        父容器已销毁，或父容器当前不可见（切到游戏视图、主窗口尚未显示等）。
+        """
+        wants = bool(self.config.get_secretary_setting("show_secretary", True))
+        if self._parent_widget is None:
+            parent_visible = True
+        else:
+            parent_visible = self._parent_alive() and self._parent_widget.isVisible()
+        if wants and parent_visible:
+            self._update_position()
+            if not self.isVisible():
+                self.show()
+                self.raise_()
+        elif self.isVisible():
+            self.hide()
+
     def eventFilter(self, obj, event):
-        """事件过滤器 - 监听父容器 resize 和 move 事件"""
-        if obj == self._parent_widget:
-            if event.type() == QEvent.Type.Resize:
-                self._apply_size()
+        """事件过滤器 - 监听父容器与主窗口的 resize / move / 显隐"""
+        if obj is self._parent_widget or (
+            self._owner_window is not None and obj is self._owner_window
+        ):
+            et = event.type()
+            if et == QEvent.Type.Resize:
+                if obj is self._parent_widget:
+                    self._apply_size()
                 self._request_position_update()
-            elif event.type() == QEvent.Type.Move:
+                self.sync_visibility()
+            elif et == QEvent.Type.Move:
                 self._request_position_update()
+            elif et in (QEvent.Type.Show, QEvent.Type.Hide):
+                self.sync_visibility()
         return super().eventFilter(obj, event)
+
+    def _ensure_bubble_room(self) -> None:
+        """台词撑不下时把窗口向上长高，避免气泡被挤压裁切。
+
+        立绘固定占窗口高度的 75%，窗口尺寸又由 size_percent 定死，留给气泡的
+        只有约 25% —— 台词超过两行时气泡只剩几十像素，第三行起会被裁掉。
+        这里按布局自身的最小需求补足高度（而不是手算边距与间距：间距是否计入
+        由 Qt 对空项的处理决定，手算容易差几像素）。窗口底边不动、高度只增不减，
+        气泡隐藏后由 _on_bubble_hidden 收回。
+        """
+        layout = self.layout()
+        if layout is None or self.bubble.isHidden() or not self._parent_alive():
+            return
+        needed = layout.minimumSize().height()
+        if needed <= self.height():
+            return
+        self.setFixedSize(self.width(), needed)
+        self._update_position()
+
+    def _on_bubble_hidden(self) -> None:
+        """气泡消失后收回为基准高度（立绘尺寸不变，仍是底边对齐）"""
+        # 控件解体时子控件仍会发 hideEvent，此时不能再碰自己的 C++ 对象
+        if sip.isdeleted(self):
+            return
+        if self._base_height <= 0 or self.height() == self._base_height:
+            return
+        self.setFixedSize(self.width(), self._base_height)
+        if self._parent_alive():
+            self._update_position()
 
     def show_message(self, text: str, duration: int = 3000):
         """显示消息"""
         self.bubble.show_message(text, duration)
+        self._ensure_bubble_room()
 
     def show_event_message(self, event: str):
         """显示事件相关的台词"""

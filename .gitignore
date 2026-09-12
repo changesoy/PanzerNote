@@ -34,6 +34,11 @@ scripts/check_dark_theme_gaps.py
 # 主题设计暂时产物（提示词）
 docs/theme-design/*提示词.txt
 
+# --- 运行期状态（不入库，也不进发行包）---
+# 游戏存档：SavegameManager.load() 在文件缺失时会自动重建，属本机运行期状态。
+# 同目录的 characters.json / secretary_lines.json 是随包数据，不受本规则影响。
+data/gamedata/savegame.json
+
 # --- Python ---
 __pycache__/
 *.py[cod]
@@ -50,7 +55,6 @@ sdist/
 develop-eggs/
 *.whl
 *.manifest
-*.spec
 
 # --- 虚拟环境 ---
 venv/

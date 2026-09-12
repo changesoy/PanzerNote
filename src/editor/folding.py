@@ -219,6 +219,21 @@ class FoldingManager(QObject):
 
     # ========== 折叠/展开 ==========
 
+    def _commit_visibility_change(self) -> None:
+        """可见性变化后强制文档重新布局，再广播折叠信号。
+
+        QTextBlock.setVisible() 不会让 QPlainTextDocumentLayout 重算文档高度，
+        而 QPlainTextEdit 的竖直滚动条范围正是由文档高度推导的。布局与当前可见性
+        不一致时会出现两种症状：
+        - 布局在折叠态下计算过（如会话恢复的折叠）→ 展开后范围偏小，末尾内容滚不到；
+        - 布局在展开态下计算过（交互折叠）→ 折叠后范围偏大，可拖到空白区域。
+        标记全文脏可让布局重算并发出 documentSizeChanged，滚动条随即校正。
+        """
+        doc = self._document
+        if doc is not None:
+            doc.markContentsDirty(0, max(1, doc.characterCount()))
+        self.fold_state_changed.emit()
+
     def toggle_fold(self, block_number: int) -> None:
         """切换指定标题行的折叠状态。"""
         heading_line = block_number + 1
@@ -247,7 +262,7 @@ class FoldingManager(QObject):
                 if block.isValid():
                     block.setVisible(False)
 
-        self.fold_state_changed.emit()
+        self._commit_visibility_change()
 
     def toggle_fold_all(self) -> None:
         """全部折叠或全部展开（toggle）。"""
@@ -271,7 +286,7 @@ class FoldingManager(QObject):
                 if block.isValid():
                     block.setVisible(False)
 
-        self.fold_state_changed.emit()
+        self._commit_visibility_change()
 
     def _expand_all(self) -> None:
         """展开所有折叠区域。"""
@@ -289,7 +304,7 @@ class FoldingManager(QObject):
                 if block.isValid():
                     block.setVisible(True)
 
-        self.fold_state_changed.emit()
+        self._commit_visibility_change()
 
     def _restore_nested_folds(self, parent_heading_line: int) -> None:
         """展开父标题后，恢复其子标题的折叠状态。
@@ -348,7 +363,7 @@ class FoldingManager(QObject):
             self._restore_nested_folds(heading_line)
 
         if to_expand:
-            self.fold_state_changed.emit()
+            self._commit_visibility_change()
 
     def is_line_visible(self, line: int) -> bool:
         """第 line 行（1-based）是否可见。"""
@@ -385,7 +400,7 @@ class FoldingManager(QObject):
                     block.setVisible(False)
 
         if self._collapsed_blocks:
-            self.fold_state_changed.emit()
+            self._commit_visibility_change()
 
     @property
     def visible_block_count(self) -> int:

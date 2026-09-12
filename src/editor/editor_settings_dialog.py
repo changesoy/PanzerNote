@@ -10,16 +10,216 @@ v1.5.5 改动：
   - 显示行号 / 高亮当前行开关现在可以正确应用
 """
 
+import time
+
 from PyQt6.QtWidgets import (
     QWidget, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox,
-    QPushButton, QSpinBox, QComboBox, QGroupBox, QFormLayout,
-    QFontComboBox, QSlider
+    QPushButton, QSpinBox, QDoubleSpinBox, QComboBox, QGroupBox, QFormLayout,
+    QFontComboBox, QSlider, QScrollArea, QApplication
 )
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
+from PyQt6.QtCore import QObject, QEvent, QTimer, Qt
+from PyQt6.QtGui import QFont, QWheelEvent
 
 from ..core.config import Config
+from ..core.settings_store import LINE_SPACING_MAX, LINE_SPACING_MIN
 from ..utils.feature_flags import is_enabled as _feature_is_enabled
+
+
+class _WheelGuard(QObject):
+    """按控件类别管理滚轮行为，避免滚动设置对话框时误改取值。
+
+    焦点判据在这里不可用：对话框弹出时焦点默认落在第一个可聚焦控件（数字框）上，
+    且 QLineEdit 是 spinbox 的 focus proxy，实测 hasFocus() 恒为真。故改用
+    **滚动条是否刚移动过**判定「是否正在滚动」，并按控件类别分流：
+
+    - 数值类（QSpinBox / QSlider）：正在滚动时把滚轮转交滚动区（只滚不改）；
+      界面静止时放行，滚轮正常作用于控件（悬停即可调值，无需点击）。
+    - 选择类（QComboBox / QFontComboBox）：一律转交滚动区，滚轮永不改选项。
+
+    过滤器还必须覆盖**鼠标实际落点**：QSpinBox / QFontComboBox 的中心是其内部
+    QLineEdit（childAt 实测），只装在控件自身不会触发，故登记时一并覆盖内部
+    编辑框，并按 parentWidget 链回溯识别受保护控件。
+    """
+
+    #: 判定「仍在滚动」的时间窗（秒）
+    _SCROLL_QUIET_SECONDS = 0.3
+
+    def __init__(self, scroll_area: QScrollArea, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._viewport = scroll_area.viewport()
+        self._value_widgets: set[QWidget] = set()
+        self._selection_widgets: set[QWidget] = set()
+        self._last_scroll_at = 0.0
+        for scrollbar in (
+            scroll_area.verticalScrollBar(),
+            scroll_area.horizontalScrollBar(),
+        ):
+            if scrollbar is not None:  # 横向滚动条可能未创建
+                scrollbar.valueChanged.connect(self._on_scrolled)
+
+    def guard_value(self, widget: QWidget) -> None:
+        """登记数值类控件：界面静止时滚轮可调值"""
+        self._value_widgets.add(widget)
+        self._install(widget)
+
+    def guard_selection(self, widget: QWidget) -> None:
+        """登记选择类控件：滚轮永不改选项"""
+        self._selection_widgets.add(widget)
+        self._install(widget)
+
+    def _install(self, widget: QWidget) -> None:
+        """对控件及其内部编辑框安装过滤器（内部编辑框才是鼠标实际落点）"""
+        widget.installEventFilter(self)
+        get_line_edit = getattr(widget, "lineEdit", None)
+        editor = get_line_edit() if callable(get_line_edit) else None
+        if isinstance(editor, QWidget):
+            editor.installEventFilter(self)
+
+    def _on_scrolled(self, _value: int) -> None:
+        self._last_scroll_at = time.monotonic()
+
+    def _resolve(self, widget: QWidget) -> QWidget | None:
+        """沿 parentWidget 链回溯到最近的受保护控件"""
+        current: QWidget | None = widget
+        while current is not None:
+            if current in self._value_widgets or current in self._selection_widgets:
+                return current
+            current = current.parentWidget()
+        return None
+
+    def _should_scroll(self, owner: QWidget) -> bool:
+        if owner in self._selection_widgets:
+            return True
+        return (time.monotonic() - self._last_scroll_at) < self._SCROLL_QUIET_SECONDS
+
+    def eventFilter(self, obj: QObject | None, event: QEvent | None) -> bool:
+        if isinstance(obj, QWidget) and isinstance(event, QWheelEvent):
+            owner = self._resolve(obj)
+            if owner is not None and self._should_scroll(owner):
+                # 自带的时间戳一并刷新：滚动条已到底/到顶不再移动时，
+                # 持续滚轮仍应算作「正在滚动」，不能漏成改值
+                self._on_scrolled(0)
+                QApplication.sendEvent(self._viewport, event)
+                return True
+        return super().eventFilter(obj, event)
+
+
+def _number_bounds(spin: QSpinBox | QDoubleSpinBox) -> tuple[int, int]:
+    """数字区在编辑框文本里的 [起, 止) 区间（prefix + 数字，不含后缀）。
+
+    数值框把 prefix + 数字 + suffix 塞进同一个内部 QLineEdit，「操作数字」与
+    「操作单位」的区分全靠这个区间。按 prefix / cleanText 长度计算，与字体、DPI 无关。
+    """
+    start = len(spin.prefix())
+    return start, start + len(spin.cleanText())
+
+
+class _NumericRangeGuard(QObject):
+    """数值框只允许数字区域可编辑：单位（前缀/后缀，如 " 空格"/" pt"）不可点击、不可选中。
+
+    QSpinBox / QDoubleSpinBox 把 prefix + 数字 + suffix 放在同一个内部 QLineEdit 里，
+    因此点击单位文字也会把光标放进单位内。这里在光标/选区索引越出数字区间时把它收回，
+    于是点单位、拖选到单位、按 End 都不会把光标停在单位里，也无法改写单位。
+
+    收回动作必须**延迟到当前回调之后**：QLineEdit 处理鼠标按下时先发
+    cursorPositionChanged、再继续完成自身的定位逻辑，若在信号处理里同步改回，
+    会被随后的定位覆盖（实测无效）。数字区间按 prefix/cleanText 长度计算，
+    与字体、DPI 无关。
+    """
+
+    def __init__(self, spin: QSpinBox | QDoubleSpinBox) -> None:
+        super().__init__(spin)
+        self._spin = spin
+        # L8：QTimer 以 spin 为 parent —— 控件先销毁时定时器随之销毁，
+        # 回调不会打到已删除对象上（PyQt6 事件回调里逃逸是致命的）。
+        # （singleShot(0, ctx, callable) 重载在 PyQt6 不可用，故用成员定时器。）
+        self._timer = QTimer(spin)
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self._clamp)
+        line_edit = spin.lineEdit()
+        if line_edit is not None:
+            line_edit.cursorPositionChanged.connect(self._schedule_clamp)
+
+    def _schedule_clamp(self, _position: int) -> None:
+        self._timer.start(0)
+
+    def _clamp(self) -> None:
+        line_edit = self._spin.lineEdit()
+        if line_edit is None:
+            return
+        start, end = _number_bounds(self._spin)
+        position = line_edit.cursorPosition()
+        if position < start:
+            target = start
+        elif position > end:
+            target = end
+        else:
+            return
+        # 仅在实际越界时移动，避免 setSelection 反复触发信号形成定时器回环
+        line_edit.setSelection(target, 0)
+
+
+class _NumericSelectionGuard(QObject):
+    """数值框改值后不留选区：点上/下箭头、滚轮、键盘 ↑↓ 调完值，数字不再整段高亮。
+
+    QAbstractSpinBox 在聚焦与 step 路径上都会 `selectAll()`（实测：点上箭头后
+    `selectedText()` 就是整个数字），于是刚调完值就出现高亮选区 —— 看着像「被选中」，
+    下一次键入又会把它整体替换掉。用户要的是：改完值不选中，但点击输入照旧。
+
+    挂在 valueChanged 上把清除动作排到当前事件处理之后：同一轮里同步撤销会被 Qt
+    随后的定位覆盖（与 _NumericRangeGuard 同因，实测无效）。清选区后光标收到数字区
+    末尾 —— 与 _NumericRangeGuard 的落点约定一致，键入即追加在数字之后。
+
+    点击数字区定位光标是 QLineEdit 自身行为，不经过 valueChanged，故「点击输入」不受
+    影响；Tab 聚焦时的全选（键入即可整体替换，属于便捷而非「改值」）也不在改值路径上。
+    """
+
+    def __init__(self, spin: QSpinBox | QDoubleSpinBox) -> None:
+        super().__init__(spin)
+        self._spin = spin
+        # L8：同 _NumericRangeGuard —— 成员定时器以 spin 为 parent，随其销毁
+        self._timer = QTimer(spin)
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self._clear)
+        spin.valueChanged.connect(self._schedule_clear)
+
+    def _schedule_clear(self) -> None:
+        self._timer.start(0)
+
+    def _clear(self) -> None:
+        line_edit = self._spin.lineEdit()
+        if line_edit is None or not line_edit.hasSelectedText():
+            return
+        line_edit.setSelection(_number_bounds(self._spin)[1], 0)
+
+
+class _ComboTextGuard(QObject):
+    """组合框文字只作展示：不可编辑、不可选中、不可复制。
+
+    文字要与同列控件对齐，就必须保留内部编辑框：不可编辑的 QComboBox 由样式直接
+    把文字画在编辑区左边缘，而同列的 QSpinBox / QLineEdit 内部还有文本内缩，
+    偏移量随字体/DPI/样式变化（实测 2~6.5 逻辑像素），无法用固定 padding 补偿。
+    故把组合框设为可编辑并保留内部编辑框，沿用与 QSpinBox 相同的渲染路径。
+
+    但只读编辑框仍能被双击/三击/全选选中并复制。这里在任何选区生成时立即撤销
+    （选区创建与撤销同在当轮事件处理内，不会闪现），选区无法存在，复制自然无从
+    进行；只读已保证文字无法被改写。
+    """
+
+    def __init__(self, combo: QComboBox) -> None:
+        super().__init__(combo)
+        combo.setEditable(True)
+        line_edit = combo.lineEdit()
+        self._line_edit = line_edit
+        if line_edit is None:
+            return
+        line_edit.setReadOnly(True)
+        line_edit.selectionChanged.connect(self._clear_selection)
+
+    def _clear_selection(self) -> None:
+        line_edit = self._line_edit
+        if line_edit is not None and line_edit.hasSelectedText():
+            line_edit.deselect()
 
 
 class EditorSettingsDialog(QDialog):
@@ -30,12 +230,25 @@ class EditorSettingsDialog(QDialog):
         self.config = config
         self.setWindowTitle("记事本设置")
         self.setMinimumWidth(450)
+        # 限制最大高度为屏幕可用高度的 85%，超出时滚动区域接管
+        screen = QApplication.primaryScreen()
+        if screen is not None:
+            max_h = int(screen.availableGeometry().height() * 0.85)
+            self.setMaximumHeight(max_h)
 
         self._init_ui()
         self._load_settings()
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
+
+        # ── 滚动区域（内容超出屏幕时可滚动） ──
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
 
         # ── 显示选项 ──
         display_group = QGroupBox("显示")
@@ -47,7 +260,7 @@ class EditorSettingsDialog(QDialog):
         self.highlight_current_line_cb = QCheckBox()
         display_layout.addRow("高亮当前行:", self.highlight_current_line_cb)
 
-        layout.addWidget(display_group)
+        scroll_layout.addWidget(display_group)
 
         # ── 缩略图选项 ──
         minimap_group = QGroupBox("代码缩略图")
@@ -62,7 +275,7 @@ class EditorSettingsDialog(QDialog):
         )
         minimap_layout.addRow("自动开关缩略图:", self.auto_minimap_cb)
 
-        layout.addWidget(minimap_group)
+        scroll_layout.addWidget(minimap_group)
 
         # ── 编辑器选项 ──
         editor_group = QGroupBox("编辑器")
@@ -92,10 +305,42 @@ class EditorSettingsDialog(QDialog):
         self.font_family_combo.setMinimumWidth(200)
         editor_layout.addRow("字体:", self.font_family_combo)
 
+        # 代码字体：作用于编辑器内代码块 / Markdown 预览 / 导出（HTML、PDF）
+        self.code_font_combo = QFontComboBox()
+        self.code_font_combo.setMinimumWidth(200)
+        self.code_font_combo.setToolTip(
+            "代码块字体：作用于编辑器内的代码块、Markdown 预览与导出文档。\n"
+            "与上方「字体」（正文）相互独立。"
+        )
+        editor_layout.addRow("代码字体:", self.code_font_combo)
+
         self.font_size_spin = QSpinBox()
         self.font_size_spin.setRange(8, 48)
         self.font_size_spin.setSuffix(" pt")
         editor_layout.addRow("字体大小:", self.font_size_spin)
+
+        # 行距：正文全篇；代码块只作用于预览与导出（编辑器内两者不区分）
+        # 区间直接取设置项的校验区间，避免界面与导入校验两套范围互相打架
+        self.line_spacing_spin = QDoubleSpinBox()
+        self.line_spacing_spin.setRange(LINE_SPACING_MIN, LINE_SPACING_MAX)
+        self.line_spacing_spin.setSingleStep(0.05)
+        self.line_spacing_spin.setDecimals(2)
+        self.line_spacing_spin.setSuffix(" 倍")
+        self.line_spacing_spin.setToolTip(
+            "正文行距（倍数）：作用于编辑器正文、Markdown 预览与导出文档。"
+        )
+        editor_layout.addRow("行间距:", self.line_spacing_spin)
+
+        self.code_line_spacing_spin = QDoubleSpinBox()
+        self.code_line_spacing_spin.setRange(LINE_SPACING_MIN, LINE_SPACING_MAX)
+        self.code_line_spacing_spin.setSingleStep(0.05)
+        self.code_line_spacing_spin.setDecimals(2)
+        self.code_line_spacing_spin.setSuffix(" 倍")
+        self.code_line_spacing_spin.setToolTip(
+            "代码块行距（倍数）：作用于 Markdown 预览与导出文档的代码块。\n"
+            "编辑器内的代码块与正文共用上方「行间距」。"
+        )
+        editor_layout.addRow("代码块行间距:", self.code_line_spacing_spin)
 
         self.wrap_mode_combo = QComboBox()
         self.wrap_mode_combo.addItem("不换行", "no_wrap")
@@ -117,7 +362,7 @@ class EditorSettingsDialog(QDialog):
         self.completion_min_chars_spin.setToolTip("输入多少字符后触发补全提示")
         editor_layout.addRow("补全最少字符数:", self.completion_min_chars_spin)
 
-        layout.addWidget(editor_group)
+        scroll_layout.addWidget(editor_group)
 
         # ── 大文件选项（Wave 4 E3）──
         large_file_group = QGroupBox("大文件")
@@ -131,7 +376,7 @@ class EditorSettingsDialog(QDialog):
         )
         large_file_layout.addRow("大文件模式:", self.large_file_mode_cb)
 
-        layout.addWidget(large_file_group)
+        scroll_layout.addWidget(large_file_group)
 
         # ── 界面选项（Wave 8 B7：view.motion_level 三档）──
         interface_group = QGroupBox("界面")
@@ -146,7 +391,7 @@ class EditorSettingsDialog(QDialog):
         )
         interface_layout.addRow("界面动效:", self.motion_level_combo)
 
-        layout.addWidget(interface_group)
+        scroll_layout.addWidget(interface_group)
 
         # ── 小秘书选项 ──
         secretary_group = QGroupBox("小秘书")
@@ -175,7 +420,52 @@ class EditorSettingsDialog(QDialog):
 
         secretary_layout.addRow("尺寸占比:", size_widget)
 
-        layout.addWidget(secretary_group)
+        scroll_layout.addWidget(secretary_group)
+
+        # ── 输入控件分组 ──
+        # 下面三处登记（守卫、滚轮数值类、滚轮选择类）共用这两个清单，
+        # 新增控件只需在此加一次，不会出现「某处漏登记」的静默失效。
+        # 数值框带单位，只有数字区域可编辑（单位不可点击、不可选中），且改值后不留选区。
+        numeric_spins = (
+            self.indent_size_spin,
+            self.font_size_spin,
+            self.line_spacing_spin,
+            self.code_line_spacing_spin,
+            self.autosave_spin,
+            self.completion_min_chars_spin,
+        )
+        # 组合框文字只作展示：不可编辑（否则可键入不存在的字体名等非法值并写进
+        # 配置）、不可选中、不可复制。原理见 _ComboTextGuard / _NumericRangeGuard。
+        text_combos = (
+            self.font_family_combo,
+            self.code_font_combo,
+            self.wrap_mode_combo,
+            self.motion_level_combo,
+        )
+
+        # 守卫显式持有：守卫靠父子关系与信号连接存活，收进列表让生命周期一目了然，
+        # 也避免「构造了却丢掉引用」被误读成无副作用的空语句。
+        # 数值框装两道：区间守卫（单位不可点/不可选）+ 选区守卫（改值后不留选区）。
+        self._input_guards: list[QObject] = []
+        for numeric_spin in numeric_spins:
+            self._input_guards.append(_NumericRangeGuard(numeric_spin))
+            self._input_guards.append(_NumericSelectionGuard(numeric_spin))
+        for text_combo in text_combos:
+            self._input_guards.append(_ComboTextGuard(text_combo))
+
+        # 滚轮守卫：滚动本对话框时不得误改设置
+        self._wheel_guard = _WheelGuard(scroll, self)
+        # 数值类（数值框 + 尺寸滑块）：滚动中只滚不改，界面静止后滚轮可调值
+        for value_widget in (*numeric_spins, self.secretary_size_slider):
+            self._wheel_guard.guard_value(value_widget)
+        # 选择类：滚轮永不改选项（只滚动对话框）
+        for selection_widget in text_combos:
+            self._wheel_guard.guard_selection(selection_widget)
+
+        # 收尾滚动区域
+        scroll_layout.addStretch()
+        scroll.setWidget(scroll_content)
+        layout.addWidget(scroll)
 
         # ── 按钮 ──
         button_layout = QHBoxLayout()
@@ -220,9 +510,14 @@ class EditorSettingsDialog(QDialog):
         target_font = QFont(font_family)
         self.font_family_combo.setCurrentFont(target_font)
 
+        self.code_font_combo.setCurrentFont(QFont(self.config.get_code_font_family()))
+
         self.font_size_spin.setValue(
             self.config.get_editor_setting("font_size", 12)
         )
+
+        self.line_spacing_spin.setValue(self.config.get_line_spacing())
+        self.code_line_spacing_spin.setValue(self.config.get_code_line_spacing())
 
         wrap_mode = self.config.get_editor_setting("wrap_mode", "no_wrap")
         index = self.wrap_mode_combo.findData(wrap_mode)
@@ -273,6 +568,9 @@ class EditorSettingsDialog(QDialog):
                 "auto_minimap": self.auto_minimap_cb.isChecked(),
                 "font_family": self.font_family_combo.currentFont().family(),
                 "font_size": self.font_size_spin.value(),
+                "line_spacing": round(self.line_spacing_spin.value(), 2),
+                "code_line_spacing": round(self.code_line_spacing_spin.value(), 2),
+                "code_font_family": self.code_font_combo.currentFont().family(),
                 "wrap_mode": self.wrap_mode_combo.currentData(),
                 "auto_save_interval": self.autosave_spin.value(),
                 "auto_pair_brackets": self.auto_pair_brackets_cb.isChecked(),

@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QLineEdit, QTreeWidget, QTreeWidgetItem,
     QPushButton, QHeaderView,
-    QDialog, QKeySequenceEdit
+    QDialog, QKeySequenceEdit, QApplication
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QKeySequence
@@ -28,12 +28,14 @@ class ShortcutEditDialog(ThemeAwareMixin, QDialog):
     shortcut_changed = pyqtSignal(str, str)
 
     def __init__(self, action_id: str, action_name: str,
-                 current_shortcut: str, theme_engine, parent=None):
+                 current_shortcut: str, theme_engine, parent=None,
+                 shortcut_manager=None):
         super().__init__(parent)
         if theme_engine is None:
             raise RuntimeError("ShortcutEditDialog 必须传入 theme_engine，不允许为 None")
         self._action_id = action_id
         self._action_name = action_name
+        self._manager = shortcut_manager
 
         self.setWindowTitle(f"修改快捷键 - {action_name}")
         self.setMinimumWidth(scale(350))
@@ -126,10 +128,18 @@ class ShortcutEditDialog(ThemeAwareMixin, QDialog):
 
     def _on_confirm(self):
         seq = self._key_edit.keySequence()
-        if seq.isEmpty():
-            self._new_shortcut = ""
-        else:
-            self._new_shortcut = seq.toString()
+        new_shortcut = "" if seq.isEmpty() else seq.toString()
+        # P2：冲突校验前移到对话框内 —— 原实现在 exec() 返回后才 set_conflict_message，
+        # 提示无人看到、快捷键没变且界面零反馈（静默失败）。
+        if self._manager is not None and new_shortcut and new_shortcut != "__reset__":
+            conflicts = self._manager.check_conflicts(
+                new_shortcut, exclude=self._action_id
+            )
+            if conflicts:
+                conflict_names = ", ".join(c["name"] for c in conflicts)
+                self._conflict_label.setText(f"快捷键冲突：{conflict_names}")
+                return  # 不 accept()，对话框保持打开，用户可改键或取消
+        self._new_shortcut = new_shortcut
         self.accept()
 
     def get_new_shortcut(self) -> str:
@@ -160,6 +170,11 @@ class ShortcutPanel(ThemeAwareMixin, QWidget):
         self.setObjectName("ShortcutPanel")
         self.setWindowTitle("快捷键提示")
         self.setMinimumSize(scale(500), scale(400))
+        # 限制最大高度为屏幕可用高度的 80%，避免超出屏幕
+        screen = QApplication.primaryScreen()
+        if screen is not None:
+            max_h = int(screen.availableGeometry().height() * 0.8)
+            self.setMaximumHeight(max_h)
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowStaysOnTopHint)
 
         layout = QVBoxLayout(self)
@@ -307,7 +322,10 @@ class ShortcutPanel(ThemeAwareMixin, QWidget):
         name = item.text(0)
         current_shortcut = self._manager.get_shortcut(action_id) or ""
 
-        dialog = ShortcutEditDialog(action_id, name, current_shortcut, self._theme_engine, self)
+        dialog = ShortcutEditDialog(
+            action_id, name, current_shortcut, self._theme_engine, self,
+            shortcut_manager=self._manager,
+        )
         if dialog.exec() == QDialog.DialogCode.Accepted:
             new_shortcut = dialog.get_new_shortcut()
             if new_shortcut == "__reset__":

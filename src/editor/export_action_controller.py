@@ -5,7 +5,7 @@
 
 创建者：MainWindow（_init_ui 之后构造注入）
 持有者：MainWindow
-完成通知：见 ExportService（HTML 同步完成；PDF 经 QWebEngineView.printToPdf 回调）
+完成通知：见 ExportService（HTML 同步完成；PDF 经 WebView2 print_to_pdf_async 回调）
 """
 
 import os
@@ -13,6 +13,7 @@ import os
 from PyQt6.QtWidgets import QFileDialog, QMessageBox, QWidget
 
 from ..game.secretary_widget import SecretaryWidget
+from ..security.file_access_context import FileAccessContext
 from ..themes.theme_engine import ThemeEngine
 from ..themes.theme_v2.consumer import v2_export_colors
 from ..utils.error_handler import ErrorHandler, ErrorCategory
@@ -38,8 +39,21 @@ class ExportActionController:
         self._secretary = secretary
         self._parent_widget = parent_widget
 
+    def _typography(self) -> dict:
+        """导出所需的排版设置（设置项「代码字体 / 正文行距 / 代码块行距」）。
+
+        三者必须整体取自设置——曾漏传两个行距，导出只能吃到 `build_export_html_document`
+        的默认倍数，表现为「预览改了行距、导出纹丝不动」。
+        """
+        config = self._editor_tabs.config
+        return {
+            "code_font": config.get_code_font_family(),
+            "line_spacing": config.get_line_spacing(),
+            "code_line_spacing": config.get_code_line_spacing(),
+        }
+
     def export_pdf(self) -> None:
-        """导出当前文档为 PDF（经 QWebEngineView.printToPdf 异步生成）。"""
+        """导出当前文档为 PDF（经 WebView2 print_to_pdf_async 异步生成）。"""
         from .export_service import ExportService
         try:
             editor = self._editor_tabs.current_editor()
@@ -59,12 +73,19 @@ class ExportActionController:
             def on_pdf_ready(pdf_data):
                 self._on_pdf_generated(pdf_data, filepath)
 
+            # M4：就绪门超时等非致命降级须经小秘书可见（导出仍成功，但少图）
+            def on_export_notice(message):
+                self._secretary.show_message(message)
+
             ExportService.export_pdf(
                 content,
                 is_md,
                 self._parent_widget,
                 on_pdf_ready,
                 v2_export_colors(self._theme_engine),
+                theme_engine=self._theme_engine,
+                on_notice=on_export_notice,
+                **self._typography(),
             )
         except RuntimeError as e:
             QMessageBox.warning(self._parent_widget, "导出失败", str(e))
@@ -73,9 +94,12 @@ class ExportActionController:
         """PDF 生成完成的回调：写文件 / 提示 / 失败弹窗。"""
         if pdf_data:
             try:
-                # 经 FileGuard 安全写入，遵守路径白名单与文件大小限制
+                # 目标路径由用户在导出“另存为”对话框中显式授权（EXPORT_TARGET），
+                # 无需再走 PathValidator 白名单；仍受文件大小限制与原子写入保护。
                 file_guard = self._editor_tabs.config.get_file_guard()
-                file_guard.safe_write_bytes(filepath, pdf_data)
+                file_guard.safe_write_bytes(
+                    filepath, pdf_data, context=FileAccessContext.EXPORT_TARGET
+                )
                 self._secretary.show_message(
                     f"已导出PDF: {os.path.basename(filepath)}"
                 )
@@ -112,6 +136,8 @@ class ExportActionController:
                 filepath,
                 v2_export_colors(self._theme_engine),
                 file_guard=self._editor_tabs.config.get_file_guard(),
+                theme_engine=self._theme_engine,
+                **self._typography(),
             )
             self._secretary.show_message(
                 f"已导出HTML: {os.path.basename(filepath)}"

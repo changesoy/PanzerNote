@@ -13,7 +13,7 @@ PanzerNote 是一款以已停服二次元游戏《战车少女》（PanzerMaiden
 - **游戏系统为灵魂**：通过日常书写行为积累资源 → 资源投入建造 → 抽取战车娘角色 → 点亮图鉴
 - **小巧、离线、本地存档**：所有数据存储在本地 JSON 文件中，不依赖网络
 
-**技术栈**：Python 3.11+ / PyQt6 / Pygments / markdown 库 / markdown-it-py / QWebEngine
+**技术栈**：Python 3.11+ / PyQt6 / Pygments / markdown 库 / markdown-it-py / WebView2（PyWinRT 绑定 + qasync 事件循环合并）
 
 ---
 
@@ -71,7 +71,7 @@ PanzerNote/
 ├── tests/                          # 单元测试 + 性能基准测试（tests/benchmarks/）
 │
 ├── src/                            # ══════ 源代码 ══════
-│   ├── __init__.py                 # 版本号唯一真相源（__version__/get_version/get_version_tuple）
+│   ├── __init__.py                 # 版本号唯一真相源（__version__/get_version_tuple）
 │   ├── main_window.py              # 主窗口协调者（两阶段关闭/会话恢复协调/信号回调/窗口事件/命令面板/插件主题集成；动作经控制器一行委托）
 │   │
 │   ├── core/                       # ── 核心模块 ──
@@ -117,13 +117,17 @@ PanzerNote/
 │   │   ├── document_render_cache.py # Markdown HTML render cache（Wave 4 C：Document 改动渲染一次、多 View 共用）
 │   │   ├── syntax_highlighter.py   # 语法高亮（Pygments 适配器 + Markdown 专用高亮器）
 │   │   ├── highlight_themes.py     # 代码高亮主题
-│   │   ├── webengine_runtime.py     # WebEngine 启动锚点管理（预初始化 + 锚点释放）
+│   │   ├── web_preview.py          # Web 预览适配器接口（8 项能力；后端可替换）
+│   │   ├── web_preview_webview2.py # WebView2 后端实现（PyWinRT + WebView2 Runtime）
+│   │   ├── webview2_runtime.py     # WebView2 Runtime 可用性检测（只读注册表 + 安装指引）
 │   │   ├── markdown_preview.py     # Markdown 分屏预览（源码行号同步 + 代码块高亮 + 本地图片）
 │   │   ├── minimap.py              # 代码缩略图（块级缓存增量失效）
 │   │   ├── find_replace.py         # 查找替换栏
 │   │   ├── search_service.py       # 搜索服务（QTextDocument.find 权威光标 + 从后向前替换）
 │   │   ├── extra_selection_manager.py # 高亮层管理（统一 ExtraSelection 避免互相覆盖）
 │   │   ├── secure_markdown_renderer.py # 安全 Markdown 渲染（清洗 script/iframe/onerror/javascript:）
+│   │   ├── math_render.py          # 数学公式资源（KaTeX vendor 读取 + 字体 data URI + 注入片段 + has_math）
+│   │   ├── mermaid_render.py       # 图表资源（Mermaid vendor 读取 + 懒注入/外置注入片段 + 就绪信号）
 │   │   ├── export_service.py       # 导出服务（HTML/PDF 统一安全管线）
 │   │   ├── file_open_service.py    # 文件打开安全入口（来源校验/路径白名单/二进制检测）
 │   │   ├── file_action_controller.py # 文件动作编排（打开对话框/外部文件注册/最近文件过滤）
@@ -311,7 +315,9 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 | `editor/edit_action_controller.py`     | `EditActionController`：22 个编辑动作（撤销/剪贴板/查找/行操作/大小写/书签/折叠）                                                                                                                                                                                |
 | `editor/export_action_controller.py`   | `ExportActionController`：PDF/HTML 导出（均经 FileGuard 安全写入，含 PDF 回调 `_on_pdf_generated`）                                                                                                                                                              |     |
 | `editor/settings_action_controller.py` | `SettingsActionController`：设置动作编排（对话框应用/导出/导入/保存/重置，show 与 apply 共享 `_apply_editor_dict`）                                                                                                                                              |
-| `editor/webengine_runtime.py`          | WebEngine 启动锚点管理：首个预览挂载前预初始化 Qt WebEngine，挂载后释放锚点                                                                                                                                                                                      |
+| `editor/web_preview.py`                | Web 预览适配器接口（8 项能力：加载完成 / JS 执行 / 双向消息 / 资源根目录 / PDF 导出 / 显示控制）；`create_preview_adapter()` 恒返回 WebView2 后端                                                                                                                |
+| `editor/web_preview_webview2.py`       | WebView2 后端实现（PyWinRT + qasync）：`navigate_to_string` / `execute_script_async` / `print_to_pdf_async` / 虚拟主机资源映射；初始化失败或 Runtime 缺失时在预览区显示可读提示                                                                                  |
+| `editor/webview2_runtime.py`           | WebView2 Runtime 可用性检测：只读注册表（HKCU/HKLM EdgeUpdate 客户端键）读取版本，缺失时给出安装指引文案（不导入 PyWinRT、不访问网络）                                                                                                                           |
 | `core/timer_manager.py`                | 定时器生命周期管理（自动保存/统计/挂机奖励）                                                                                                                                                                                                                     |
 | `core/event_bus.py`                    | 信号连接集中管理，解耦模块间通信                                                                                                                                                                                                                                 |
 | `core/menu_builder.py`                 | 菜单栏构建逻辑，已接入 ShortcutManager                                                                                                                                                                                                                           |
@@ -346,7 +352,7 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
   - `_restore_cursor` — 光标/滚动位置恢复，支持 `Editor` 与 `MarkdownPreviewWidget`；滚动仅在 `scroll_pos > 0` 时延迟设置，避免 0 值定时器在控件销毁后触发
 - `FileActionController`（`editor/file_action_controller.py`，hotfix 阶段 4）— 文件打开编排：`open_file()`（安全校验 → 外部文件注册 → 最近文件）、`show_open_dialog()`、`refresh_recent_files()`（过滤已不存在的路径并持久化）。UI 副作用（错误弹窗/文件树刷新/菜单构建）保留在 MainWindow
 - 关闭标签页位置记忆（`closed_tabs_memory`，workspace.json）：关闭标签时持久化光标/滚动位置（`WorkspaceStore`），重新打开时恢复并清除；Ctrl+Shift+T 内存栈限 50 条
-- `WebEngineRuntime` — 在 `__init__` 中创建，布局 setup 期间调用 `prepare_startup_anchor()` 在编辑器容器中挂载一个 1×1 的最小 QWebEngineView，强制 Qt WebEngine 提前初始化，避免首个 Markdown 预览打开时的白屏延迟。首个真实预览挂载后调用 `notify_real_view_attached()` 释放锚点
+- `webview2_runtime.log_availability()` — `main.py` 在主窗口创建前调用，只读注册表检测系统 WebView2 Runtime 并返回是否可用；缺失时记录 error 日志，窗口显示后弹一次可见提示（`INSTALL_HINT`）。WebView2 后端不再需要 WebEngine 时代的启动锚点与预热：`WebView2PreviewAdapter` 在构造期即把 controller 创建协程投递到事件循环，循环由 `main.py` 的 `qasync.QEventLoop` 提供（见 4.5）
 
 ### 4.3 编辑器 (`editor/editor.py`)
 
@@ -395,6 +401,25 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 - 引号智能：通过 `_pick_single_cjk_quote()` 用未闭合引号栈判断应插入左/右引号
 - Backspace 成对删除；选中文本时自动包裹
 
+**排版设置（代码字体 / 正文行距 / 代码块行距）**：
+
+三个设置项各有唯一读取入口（`Config.get_code_font_family()` / `get_line_spacing()` /
+`get_code_line_spacing()`，转发到 `SettingsStore`），调用方不得直接读 `get_editor_setting()`：
+
+| 设置项                     | 默认        | 作用范围                               |
+| -------------------------- | ----------- | -------------------------------------- |
+| `editor.code_font_family`  | Courier New | 编辑器代码块 / 预览代码块 / 导出代码块 |
+| `editor.line_spacing`      | 1.5         | 编辑器正文 + 预览 + 导出               |
+| `editor.code_line_spacing` | 1.35        | 预览 + 导出（编辑器内不区分，见下）    |
+
+- 读取处兜底：非法值回退默认，越界夹取到 `LINE_SPACING_MIN`~`LINE_SPACING_MAX`（0.5~5.0）。该区间同时是 `config_import_service` 的校验区间与设置对话框 `QDoubleSpinBox` 的区间——三者同源，避免「导入合法值被界面静默夹掉」
+- **编辑器侧**（`Editor.set_line_spacing()`）：Qt 以 `QTextBlockFormat` 的线高**百分比**（`ProportionalHeight`，即倍数 ×100）表达行距，与预览 CSS 的 `line-height` 语义相近但不完全等价（编辑器字号可调、预览代码块字号固定 14px，同一数字视觉松紧会有细微差异）。逐项接线：设置变更走 `EditorTabs.set_line_spacing_all()`；行距是**按块**存储的格式，整篇替换文本（`setPlainText` 覆写 / `load_content`）与共享文档 attach/detach 后都必须重新应用
+- 编辑器**内**正文与代码块不区分：同一文本流按块切分代码块代价过高，故 `code_line_spacing` 只作用于预览与导出
+- **`mergeBlockFormat` 会被 Qt 记为一次编辑**（进撤销栈并置 `isModified`），而行距是显示属性而非内容改动——应用后必须还原两项：脏标记不还原会出现「打开文件即变脏」与「关标签页误弹保存确认」；撤销栈不还原会出现「刚打开的文件就可撤销」，用户第一次 Ctrl+Z 只会把行距悄悄改回默认。仅当文档本来就没有任何历史（撤销与重做都为空）时才清掉这一条，已有历史时保留（清栈会连带丢掉用户自己的重做记录）
+- **预览 / 导出**：`_preview_css_vars()` 与 `build_export_html_document()` 分别把两个倍数注入 `--line-spacing` / `--code-line-spacing`（无单位数字，带单位会污染 `line-height` 与 `calc()`），由 `MARKDOWN_LAYOUT_CSS` 的代码块规则与导出外壳的 `body` 规则分别取用——预览与导出共用同一份排版 CSS，不会漂移
+- 导出侧接线必须**整体**传参：`ExportActionController._typography()` 一次读出「代码字体 / 正文行距 / 代码块行距」三项并展开给 `ExportService`。`build_export_html_document()` 的默认参数只是兜底，漏传不会报错、只会静默回落默认倍数（曾因此出现「预览改了行距、导出纹丝不动」）；「另存为 PDF / HTML」路径（`EditorTabs._save_as_pdf()` / `_save_as_html()`）逐项传同样三项，两条链路语义一致
+- 两侧行距可比的前提是**字号基准一致**：行距是无单位倍数，像素行距 = 倍数 × 自身 font-size。预览模板 `body` 为 14px，导出外壳 `body` 同样显式声明 `font-size: 14px`（此前缺省落到浏览器默认 16px，同一倍数在两侧换算出的像素行距不同）。预览代码块字号固定 14px，导出代码块继承同一基准
+
 ### 4.4 标签页管理 (`editor/editor_tabs.py`)
 
 | 组件              | 说明                                                                                                                                                                                                           |
@@ -416,15 +441,17 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 
 **渲染路径与样式单一来源（Wave 1.5）**：
 
-- 主渲染路径为 `markdown_preview.py`（markdown-it-py，含源码行号注入 / 异步高亮 / 本地图片解析）；`secure_markdown_renderer.py` 为统一安全渲染与 HTML/PDF 导出入口（`render_markdown_to_safe_html` / `build_export_html_document`），兼作预览回退与 `strip_dangerous_html` 清洗来源，非遗留渲染器。
+- 主渲染路径为 `markdown_preview.py`（markdown-it-py，含源码行号注入 / 异步高亮 / 本地图片解析），渲染显示唯一路径为 WebView2（后端经 `web_preview.create_preview_adapter()` 取得；Qt WebEngine 后端与 QTextBrowser 回退均已删除）；`secure_markdown_renderer.py` 为统一安全渲染与 HTML/PDF 导出入口（`render_markdown_to_safe_html` / `build_export_html_document`），兼作 `strip_dangerous_html` 清洗来源，非遗留渲染器。
 - 预览模板 `PREVIEW_HTML_TEMPLATE` 与导出文档共用 `secure_markdown_renderer.MARKDOWN_LAYOUT_CSS` 内容排版（单一来源），颜色经 CSS 变量由各端从主题 token 注入；文档外壳（body）与预览交互样式（TOC / 代码块容器 / 复制按钮 / 折叠 / 滚动条）保留各端局部。
+- fenced code 的识别与语言提取同样是单一来源：`secure_markdown_renderer.CODEBLOCK_RE` 与 `extract_language_from_code_attrs`（认 `language-` 与 `lang-` 两种 class 前缀），预览侧 `markdown_preview` 以 `_CODEBLOCK_RE` / `_extract_language_from_code_attrs` 导入复用，避免两处各留一份正则。
+- 导出渲染的代码高亮经 `render_markdown_to_safe_html(content, highlight)` 注入回调（`ExportService._code_highlighter` → `highlight_code_html`），与预览同源；导出配色固定解析亮色变体（`v2_export_variant_id`），`render_content` / `export_html` / `export_pdf` 的 `theme_engine` 为**必填**，不提供「无主题引擎则退化为纯文本代码块」的降级路径。
 
 **渲染管线**：
 
 ```
 编辑器文本 → markdown 库渲染 HTML → _process_code_blocks()（Pygments 内联样式高亮 + 浅蓝容器 + Unicode 标记）
            → _resolve_local_images()（相对路径 → file:// 绝对路径）
-           → PREVIEW_HTML_TEMPLATE 包裹 → QTextBrowser/QWebEngineView 显示
+           → PREVIEW_HTML_TEMPLATE 包裹 → Web Preview Adapter（WebView2）显示
 ```
 
 **异步渲染管线**（Feature Flag `async_highlight` 控制）：
@@ -440,29 +467,32 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 - `IncrementalRenderer` 基于文本 MD5 哈希缓存渲染结果，相同文本直接返回缓存（全文级缓存，非行级增量）
 - **HTML render cache**（Wave 4 C）：`document_render_cache.py` 以 Document 为键缓存最终 HTML，Document 改动渲染一次、多 View 共用（revision 单调递增作为缓存键）；分屏多 View 场景避免每次编辑各自全量重渲染
 
-**浮动复制按钮** (`PreviewBrowser`)：
+**浮动复制按钮**（WebView2 单路径后）：
 
-- 在每个代码块 HTML 首尾嵌入不可见 Unicode 标记（⌜N⌝ / ⌞N⌟）
-- `setHtml` 后用 `QTextDocument.find()` 缓存标记的 QTextCursor
-- `mouseMoveEvent` 判断鼠标是否在某代码块垂直范围内，是则显示浮动复制按钮
-- 防抖 30ms + 按钮 enter/leave 处理防止闪烁
+- 代码块容器 `.code-container` 内嵌 `<button class="code-copy-btn" data-code-index="N">`，由 CSS `.code-container:hover .code-copy-btn` 控制悬停显示；单路径化后不再需要 `QTextDocument` 命中测试与 `mouseMoveEvent` 判定
+- 点击由预览页内 JS 捕获（`e.target.closest('.code-copy-btn')`），经 `window.pnPostMessage('__pncopy__:N')` 回传索引；页面与宿主之间走 WebView2 官方消息通道（`chrome.webview.postMessage` → `add_web_message_received`），Python 侧经适配器 `message_received` 信号（`markdown_preview._on_preview_message`）接收并按索引取源码执行复制，并临时把按钮文案换成 ✔ 作为反馈
+- 复制源码由 Python 侧 `self._code_blocks[index]` 提供，不依赖渲染后的 DOM；QTextBrowser 时代用于 `QTextDocument.find()` 定位的一对不可见占位标记（`⌜N⌝ / ⌞N⌟`）及 `.code-marker` 样式已随单路径化删除（A 分支仍在用，其测试以 `@a_only` 门控在 B 上跳过）
 
 **源码行号同步**：
 
 - `_render_markdown_with_source_map()`：使用 `markdown-it-py` 的 `token.map` 给块级节点注入 `data-source-line` 属性（1-based 行号），覆盖 heading_open/paragraph_open/blockquote_open/bullet_list_open/ordered_list_open/list_item_open/table_open/thead_open/tbody_open/tr_open/hr/fence/code_block 共 13 种 token
 - `_build_container()` 支持 `source_line` 参数：代码块外层容器携带 `data-source-line` 属性
 - `_current_editor_top_line()`：通过 `cursorForPosition(QPoint(0, 0))` 获取编辑器视口顶部行号
-- `_sync_scroll()` 改为源码行号同步：QWebEngineView 通过 `runJavaScript` 调用 `scrollToSourceLine(line)`，QTextBrowser 保留旧百分比同步
+- `_sync_scroll()` 改为源码行号同步：经适配器 `run_javascript`（WebView2 侧为 `execute_script_async`）调用 `scrollToSourceLine(line)`（唯一同步路径）
 - HTML 模板注入 `scrollToSourceLine()` JS 函数：查找 `data-source-line` 节点，在相邻锚点间线性插值计算滚动位置
-- HTML 模板注入 `resyncAfterImagesLoaded()` JS 函数：图片 load/error 事件触发后重新同步预览位置
+- HTML 模板注入 `resyncAfterImagesLoaded()` JS 函数：图片 load/error 事件触发后重新同步预览位置（内部复用 `resyncAfterLayout()`；数学公式与图表渲染完成后同样调用它——两者都会改变节点高度，不重算锚点缓存与滚动位置就会停在错位置）
 
 **预览增量更新**：
 
 - `PREVIEW_HTML_TEMPLATE` 包含 `<div id="content">` 包裹内容区
-- 首次渲染走 `setHtml` 加载完整模板，`loadFinished` 信号触发后标记 `_html_template_loaded = True`
-- 后续渲染通过 `QWebEngineView.page().runJavaScript()` 仅更新 `document.getElementById('content').innerHTML`
+- 首次渲染经适配器 `set_html` 整页加载模板，`load_finished` 信号触发后标记 `_html_template_loaded = True`
+- 后续渲染经适配器 `run_javascript()` 仅更新 `document.getElementById('content').innerHTML`
 - 切换文档（`base_path` 变化）时自动重置标志，强制下次全量加载
-- 非 WebEngine 模式（QTextBrowser）仍走全量 `setHtml` 路径
+
+**主题切换就地更新**：
+
+- `_preview_css_vars()` 是预览 CSS 变量的单一真相源（首屏模板注入与运行时更新同源），首屏经 `_build_preview_css_vars()` 写入 `--css-*` 变量
+- 模板已加载时，主题/排版（代码字体、正文行距、代码块行距）变更经适配器 `run_javascript(_css_vars_update_js(...))` 就地改写 `:root` CSS 变量，不再整页 `set_html` 重载（避免切换闪烁）；模板未加载则随首屏整页加载一并灌入
 
 **首次渲染稳定化**：
 
@@ -475,10 +505,25 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 - `ensure_preview_rendered()` — 仅在 `_preview_dirty` 时触发渲染，避免重复计算。选项卡切换时被调用，确保切换到该标签时预览已就绪
 - 启动恢复时首个标签以外的 Markdown 文件均以 `render_preview=False` 打开，加速启动
 
-**WebEngine 启动锚点集成**：
+**WebView2 后端集成**：
 
-- `MarkdownPreviewWidget.__init__()` 接收 `webengine_runtime` 参数
-- 首个真实 QWebEngineView 预览挂载到控件树后，调用 `_webengine_runtime.notify_real_view_attached()` 释放 1×1 启动锚点，回收占用的 GPU 资源
+- `MarkdownPreviewWidget` 经 `create_preview_adapter()` 构造 WebView2 后端（无 `webengine_runtime` 参数、无启动锚点）
+- 加载：`set_html` → `navigate_to_string`（后端按需注入资源根 `<base href>`）；资源根：`set_resource_root` → `set_virtual_host_name_to_folder_mapping`；显示控制：`controller.is_visible`
+- 加载完成：`NavigationCompleted` 事件 → 适配器 `load_finished` 信号；页面 → Python 消息：`chrome.webview.postMessage` → `add_web_message_received` → `message_received`（协议为 `<前缀>:<载荷>`，前缀见预览模板的 `window.pnPostMessage`；**不依赖 `document.title`**）
+- PDF 导出：`export_pdf` → `print_to_pdf_async`（临时文件中转后回传 bytes；`should_print_backgrounds = True` 对齐 WebEngine 的默认打印背景，否则代码块底色整片丢失）
+- 后端失败不可见即无效：Runtime 缺失或初始化异常时转入失败态，在预览区显示可读提示（`INSTALL_HINT` 或异常文案），不留空白
+- **释放职责（谁在什么时机关 controller）**：`close()` 是通用 teardown（幂等：摘除事件处理器 → 释放 controller → 兑掉排队导出）——「一次性」语义只属于 `export_pdf`。三条释放路径：① `MarkdownPreviewWidget` 关闭/析构时 `shutdown_preview()`；② 关闭 Markdown 标签页时 `EditorTabs` 触发同一调用（QTabWidget 不删除页面控件，不能指望父子链）；③ 退出序列在控件树析构**之前**经 `MainWindow.shutdown_previews()` 统一关闭全部面板的预览（`_finalize_close` 与 `main.py` 各一处，顺序在 `window.deleteLater()` 之前）。PyWinRT 绑定导入失败时 `create_preview_adapter()` 返回降级适配器（显示安装指引 + 原因，导出走失败回调），启动不因绑定损坏而崩溃
+- **同步接口防护**：`set_html` / `set_visible` / `set_resource_root` 内的 WinRT 调用全部包 try/except 转失败态（异常从 QTimer 槽逃逸在 PyQt6 下是 abort）；`_navigate` 前做体积判定（1.8 MB 阈值——`NavigateToString` 官方上限 2 MB，渲染产物是源码的数倍），超限给出可读提示。`load_finished` 只对本适配器经 `_navigate` 发起的导航发出（`_navigating` 归属标记），初始空白文档的完成事件不会误置「模板已加载」
+
+**数学公式与图表（C4）**：
+
+- **公式（KaTeX 0.18.7）**：语法在 **markdown 词法层**识别（`mdit_py_plugins.dollarmath`，定界符取 pandoc/GitHub 口径：开 `$` 后不接空白、闭 `$` 前不接空白且其后不接数字），不走「渲染后由 auto-render 扫 `$…$`」——后者会被 markdown 的转义与强调规则吃掉公式内容（`$a\,b$` → `a,b`、`$a*b$` → `a<em>b</em>`），且没有定界符规则，会把「价格 $5 与 $3」当成公式。注册点唯一：`math_render.register(md)`，预览与导出两个解析器共用；产物为 `<span class="math inline">` / `<div class="math block">`，样式与脚本由 `math_render` 提供（字体转 data URI，`lru_cache` 烘焙一次，仓库不落生成物）。
+- **公式注入时机**：预览模板**始终内联一次**（模板只在首屏加载，之后仅换 `#content` 内容），并在每次内容更新后重跑渲染；导出文档按 `has_math()` **按需内联**，无公式的文档不背约 645 KB。
+- **图表（Mermaid 12.0.0）**：围栏在渲染阶段经 `secure_markdown_renderer.extract_mermaid_blocks()` 转成容器 div，class 用**私有 `pn-mermaid`** 而非 mermaid 约定的 `mermaid`（库自带「文档就绪后自动渲染所有 `.mermaid`」，会与我们由 Python 控制渲染时机的模型撞车）。转换必须早于代码块处理，否则图表会占掉代码块序号（复制按钮索引）并被高亮器处理。
+- **图表资产三条加载路径**：预览**懒注入**（首次出现围栏才 `run_javascript` 注入 vendor，`_mermaid_loaded` 随整页重载失效）；HTML 导出**按需内联**（写盘文件由用户浏览器打开，不经 `NavigateToString`，保持单文件自包含）；PDF 导出**外置注入**（`NavigateToString` 对文档有 2 MB 上限，内联 5.6 MB 会以 E_INVALIDARG 失败；文档只声明 `<meta name="pn-mermaid-vendor" content="external">`，由适配器经 `add_script_to_execute_on_document_created_async` 注入）。
+- **异步就绪门**：Mermaid 渲染是异步的，`NavigationCompleted` 只代表装载完成。导出文档带 `<meta name="pn-async">`，页面渲染结束经 `chrome.webview.postMessage` 回传 `mermaid_render.READY_MESSAGE`（适配器 `_on_web_message` 消费，不冒泡给预览）；`_print_current` 在导航之后轮询该标志再打印（8s 超时降级打印并告警）。用轮询而非 `asyncio.Event`：消息回调不保证在事件循环线程上触发。
+- **打印视口**：按容器宽度计算自身宽度的图表（Mermaid 甘特图取 `parentElement.offsetWidth`）在从不进入布局的离屏容器里会失准，导出后挤在纸面左侧一小条。故 `_export_async` 打印前把视口调整为纸面内容框尺寸（`page_width - 左右边距`，1in = 96 CSS px）。
+- **资源与许可**：`data/assets/vendor/{katex,mermaid}/` 随包分发（`PanzerNote.spec` 的 `datas=[('data','data')]` 整体收集，无需额外打包改动），登记于 [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md)。
 
 ### 4.6 代码高亮主题 (`editor/highlight_themes.py`)
 
@@ -486,8 +531,7 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 - **`TOKEN_MAP` 映射表**：60+ 条 `{Pygments Token → syntax_* token}` 映射，覆盖 Keyword/Name/Literal/Comment/Operator/Punctuation/Text/Error/Generic 等所有 Pygments token 层级
 - **跨主题装饰**：`_TOKEN_BOLD` / `_TOKEN_ITALIC` frozenset 统一管理粗体/斜体装饰，不随主题切换变化
 - **编辑器端**：`get_editor_formats(theme_engine)` → 经 `v2_syntax_colors()` 动态构建 `{Token: QTextCharFormat}`
-- **预览端**：`highlight_code_html(code, language, theme_engine)` → 从主题颜色生成 Pygments style class，输出内联样式 HTML
-- **预览 CSS**：`get_preview_css(theme_engine)` → 从主题颜色生成代码高亮 CSS 变量，注入 Markdown 预览
+- **预览/导出端**：`highlight_code_html(code, language, theme_engine)` → 从主题颜色生成 Pygments style class，输出内联样式 HTML（预览与 PDF 导出共用）
 - 切换主题时语法高亮颜色无需任何额外处理——manager `theme_committed` 信号触发订阅组件经 v2 token 重读，颜色自动跟随（详见 [color_audit.md](theme-design/color_audit.md)）
 
 ### 4.7 小秘书 (`game/secretary_widget.py`)
@@ -507,7 +551,7 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
   - 若已启用：`scale_factor = 1.0`（Qt 自动处理 DPI 缩放，dpi_helper 所有 scale 函数为 no-op）
   - 若未启用：基于 `logicalDotsPerInch` / `devicePixelRatio` 计算缩放因子
 - **注意**：当前 `main.py` 已启用 `AA_EnableHighDpiScaling`，因此 dpi_helper 在生产环境中实际为 no-op
-- `scale(value)` / `scale_size(w, h)` / `scale_font(pt)` / `scale_stylesheet(css)` / `dp(value)`
+- `scale(value)` / `scale_stylesheet(css)`
 
 ### 4.9 快捷键管理 (`core/shortcut_manager.py`)
 
@@ -774,7 +818,7 @@ LOADED → on_unload() → UNLOADED
 **版本传播链路**：
 
 ```
-src/__init__.py (__version__ = "2.2.0")
+src/__init__.py (__version__ = "2.3.0")
   ├─→ main.py                    (from src import __version__)
   ├─→ src/main_window.py         (from . import __version__)
   ├─→ src/plugins/plugin_base.py (from .. import __version__ as _app_version)
@@ -786,7 +830,6 @@ src/__init__.py (__version__ = "2.2.0")
 
 **工具函数**：
 
-- `get_version()` — 返回版本号字符串
 - `get_version_tuple()` — 返回版本号元组，如 `(1, 8, 0)`
 
 **版本一致性验证** (`scripts/verify_version.py`)，5 项检查：
@@ -981,9 +1024,12 @@ DraggableTabBar.mouseMoveEvent (鼠标离开标签栏)
 ### 运行依赖
 
 ```bash
-pip install PyQt6>=6.8 PyQt6-WebEngine>=6.8 shiboken6>=6.8 Pygments>=2.19 markdown>=3.8 Pillow>=12.2.0 send2trash>=2.1.0 markdown-it-py>=3.0.0
+pip install PyQt6>=6.11.0 shiboken6>=6.11.2 Pygments>=2.21.0 markdown>=3.10.3 Pillow>=12.3.0 send2trash>=2.1.0 markdown-it-py>=4.2.0 mdit-py-plugins>=0.6.1 qasync>=0.28.0 webview2-Microsoft.Web.WebView2.Core>=3.2.1 winrt-Windows.Foundation>=3.2.1
 python main.py
 ```
+
+> 预览与 PDF 导出依赖系统安装的 **Microsoft Edge WebView2 Runtime**（Windows 11 与多数 Windows 10 已预装，**不随包分发**）；缺失时启动会记录 error 日志并在窗口显示后弹一次安装指引，预览区同时显示可读提示。
+> `qasync` / `webview2-*` / `winrt-*` 均为 Windows 专用；完整依赖清单以 `pyproject.toml` / `requirements.txt` 为准。
 
 ### 开发依赖
 
@@ -1049,7 +1095,7 @@ pip install mypy>=1.20                         # 类型检查
 29. **粘贴检测**：`Editor` 重写 `insertFromMimeData()` 设置 `_is_pasting` 标志，`EditorTabWidget._on_text_changed()` 检查此标志跳过粘贴的打字奖励计数。`_PASTE_THRESHOLD = 50`，仅字符增量 ≤50 且非粘贴时计入奖励
 30. **MarkdownIt 实例复用**：`MarkdownPreviewWidget._create_md_parser()` 在 `__init__` 中创建一次解析器实例并缓存为 `_md_parser`，`_render_markdown()` 直接调用缓存实例渲染
 31. **文件保存异步化**：`SaveTask`（`QRunnable`）+ `SaveTaskSignals`（`QObject`）将 `safe_write` 磁盘 IO 放到 `QThreadPool.globalInstance()` 后台线程执行；`safe_write` 原子化（同目录临时文件 + `os.replace`），并发写目标始终是完整版本（last-write-wins），共享 Document 另有跨面板唯一门闩保证最新内容最后落盘。保存失败时回滚修改状态并恢复标签页 `*` 标记
-32. **Markdown 预览 JS 局部更新**：首次渲染走 `setHtml` 加载完整模板，`loadFinished` 信号触发后标记 `_html_template_loaded = True`，后续渲染通过 `runJavaScript` 仅更新 `innerHTML`。切换文档时自动重置标志。非 WebEngine 模式仍走全量路径。注意：这不是真正 block 级增量渲染
+32. **Markdown 预览 JS 局部更新**：首次渲染经适配器 `set_html` 整页加载模板，`load_finished` 后标记 `_html_template_loaded = True`，后续经 `run_javascript` 仅更新 `innerHTML`。切换文档时自动重置标志。注意：这不是真正 block 级增量渲染
 33. **Minimap 块级增量失效**：`MinimapWidget` 改用 `QTextDocument.contentsChange` 信号，精确计算受影响缓存块范围并标记为脏块（`_block_dirty`），仅重新渲染脏块。常规打字仅重绘 1 个块，节省约 95% 渲染开销
 34. **状态栏信号驱动统计**：`signal_driven_stats` 默认开启，`characterCount()` 避免全文复制，词数 800ms 防抖，行列号由 `cursorPositionChanged` 驱动
 35. **搜索高亮集中管理**：`SearchService` 封装查找/替换，`QTextDocument.find()` 权威光标位置，`ExtraSelectionManager` 统一高亮层，`replace_all` 从后向前逐匹配替换
@@ -1074,4 +1120,4 @@ pip install mypy>=1.20                         # 类型检查
 
 ---
 
-_本文档基于 PanzerNote v2.2.0 源码整理。版本变更见 [../CHANGELOG.md](../CHANGELOG.md)，未完成规划见 [roadmap.md](roadmap.md)。_
+_本文档基于 PanzerNote v2.3.0 源码整理。版本变更见 [../CHANGELOG.md](../CHANGELOG.md)，未完成规划见 [roadmap.md](roadmap.md)。_

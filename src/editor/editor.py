@@ -27,7 +27,7 @@ from PyQt6.QtCore import Qt, QRect, QSize, QTimer, QPointF, pyqtSignal
 from PyQt6.QtGui import (
     QFont, QColor, QPainter, QTextFormat, QTextCharFormat, QPolygonF,
     QSyntaxHighlighter, QTextDocument, QTextCursor, QKeyEvent, QAction,
-    QHideEvent, QFocusEvent,
+    QHideEvent, QFocusEvent, QTextBlockFormat,
 )
 
 from ..core.config import Config
@@ -143,6 +143,8 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self._file_type = "纯文本"
         self._filepath_or_ext: str = ""
         self._wrap_mode = "no_wrap"
+        # 正文行距倍数（设置项「正文行距」）：按块存储，文档整篇替换后需重应用
+        self._line_spacing: float = float(config.get_line_spacing())
         self._programmatic_modify = False
         self._is_pasting = False
         self._composing = False  # IME 输入法组字中
@@ -274,6 +276,10 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             font_family = self.config.get_editor_setting("font_family", "Microsoft YaHei")
             font_size = self.config.get_editor_setting("font_size", 12)
             self._completion_popup.apply_font(font_family, font_size)
+
+        # 空白新文档也要先落一次行距：新块会继承前一块的块格式，否则未保存
+        # 标签页里的输入会一直用 Qt 默认行距
+        self._apply_line_spacing()
 
     def _show_context_menu(self, position):
         """显示中文右键菜单"""
@@ -695,8 +701,20 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             shared._highlighter = self._highlighter
             shared._highlighter_file_type = self._file_type
 
+        self.set_code_font(self.config.get_code_font_family())
         self._lazy_highlight.set_highlighter(self._highlighter)
         self.apply_auto_minimap()
+
+    def set_code_font(self, family: str) -> None:
+        """设置代码块字体（设置项「代码字体」）。
+
+        仅对支持该能力的高亮器生效——目前是 Markdown 高亮器（行内代码 /
+        fence / 代码块三类 format）；Pygments 等其他高亮器不做代码/正文区分，
+        沿用编辑器正文字体。
+        """
+        setter = getattr(self._highlighter, "set_code_font_family", None)
+        if callable(setter):
+            setter(family)
 
     # ═══════════════════ 行宽模式 ═══════════════════
 
@@ -982,6 +1000,57 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self._update_line_number_area_width(0)
         self._update_child_geometries()
 
+    def set_line_spacing(self, spacing: float):
+        """动态设置正文行距（倍数，设置项「正文行距」）。
+
+        Qt 用「字体默认行高的百分比」（ProportionalHeight）表达行距，与预览
+        CSS 的 line-height 语义相近但不完全等价：编辑器字号可调、预览代码块
+        字号固定，故同一数字在两侧的视觉松紧会有细微差异。
+
+        行距是**按块**存储的格式，文档被整篇替换后会丢失，因此载入内容
+        （setPlainText 覆写）与挂载/摘除共享文档后都要重新应用。
+        编辑器内正文与代码块不区分——同一文本流内按块切分代码块代价过高，
+        「代码块行距」只作用于预览与导出。
+        """
+        self._line_spacing = float(spacing)
+        self._apply_line_spacing()
+
+    def _apply_line_spacing(self):
+        """把当前行距落到全部块（不动光标/选区，也不改动脏状态）。
+
+        注意：``mergeBlockFormat`` 对文档而言是一次编辑——既会进入撤销栈，也会把
+        ``isModified`` 置 True。行距是显示属性而非内容改动，两者都必须还原：
+
+        - 脏标记不还原 →「打开文件即变脏」「关标签页误弹保存确认」
+          （SharedDocument 构造时对 setPlainText 也是同样的处理）
+        - 撤销栈不还原 →「刚打开的文件就可撤销」，用户第一次 Ctrl+Z 只会把行距
+          悄悄改回默认。只在文档本来就没有任何历史（撤销与重做都为空）时清掉这
+          一条；已有历史时保留——清栈会连带丢掉用户自己的重做记录。
+        """
+        doc = self.document()
+        assert doc is not None
+        was_modified = doc.isModified()
+        pristine = not doc.isUndoAvailable() and not doc.isRedoAvailable()
+        block_format = QTextBlockFormat()
+        block_format.setLineHeight(
+            self._line_spacing * 100.0,
+            # PyQt6 stub 把枚举 .value 标为枚举类型、运行期只接受 int，此处忽略
+            QTextBlockFormat.LineHeightTypes.ProportionalHeight.value,  # type: ignore[arg-type]
+        )
+        cursor = QTextCursor(doc)
+        cursor.beginEditBlock()
+        cursor.select(QTextCursor.SelectionType.Document)
+        cursor.mergeBlockFormat(block_format)
+        cursor.endEditBlock()
+        if pristine:
+            doc.clearUndoRedoStacks(QTextDocument.Stacks.UndoStack)
+        doc.setModified(was_modified)
+
+    def setPlainText(self, text: str | None):  # noqa: N802  （沿用 Qt 命名）
+        """覆写：整篇替换文本会丢弃按块存储的行距，替换后重新应用。"""
+        super().setPlainText(text)
+        self._apply_line_spacing()
+
     # ═══════════════════ 辅助方法 ═══════════════════
     def get_char_count(self) -> int:
         return len(self.toPlainText())
@@ -1032,6 +1101,9 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         """
         self._shared_doc = shared_doc
         self.setDocument(shared_doc.qdocument)
+        # 行距是按块格式：挂上共享文档后补一次（新建的共享文档此刻通常为空，
+        # 代价可忽略；分屏 View 挂到已有内容的文档时则保证格式齐备）
+        self._apply_line_spacing()
         if getattr(shared_doc, '_word_count_fn', None) is None:
             shared_doc.set_word_count_fn(count_mixed_words)
         if getattr(shared_doc, "_folding", None) is None:
@@ -1090,6 +1162,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         new_doc = QTextDocument(self)
         new_doc.setDocumentLayout(QPlainTextDocumentLayout(new_doc))
         self.setDocument(new_doc)
+        self._apply_line_spacing()
         # 3.5.8（批次 5 修复）：detach 后 Editor 用全新 document，原共享高亮仍
         # 挂在旧 Document 上——必须重建本地高亮，否则旧 Document 销毁后
         # self._highlighter 悬垂（切主题时报 PygmentsHighlighter has been deleted）。

@@ -23,7 +23,6 @@ classifiers = [
 ]
 dependencies = [
     "PyQt6>=6.11.0",
-    "PyQt6-WebEngine>=6.11.0",
     "shiboken6>=6.11.2",  # PyQt6 绑定，isValid 校验 C++ 对象存活（main_window.py 直接导入）
     "Pygments>=2.21.0",
     "markdown>=3.10.3",
@@ -31,6 +30,14 @@ dependencies = [
     "send2trash>=2.1.0",
     "markdown-it-py>=4.2.0",
     "mdit-py-plugins>=0.6.1",  # markdown 渲染扩展语法（定义列表/任务列表）
+    # C3-D：预览/PDF 导出改由系统共享的 WebView2 Runtime 承载，
+    # 不再随包分发 Qt WebEngine/Chromium（PyQt6-WebEngine 已摘除）。
+    # webview2-* 提供 webview2 命名空间；winrt-Windows.Foundation 提供
+    # winrt.windows.foundation（Rect / 异步类型）；两者传递依赖 winrt-runtime。
+    # 注意：这三个包均为 Windows 专用（预览实现亦依赖标准库 winreg）。
+    "qasync>=0.28.0",  # WebView2 要求 asyncio 与 Qt 事件循环同线程合并
+    "webview2-Microsoft.Web.WebView2.Core>=3.2.1",
+    "winrt-Windows.Foundation>=3.2.1",
 ]
 
 [project.optional-dependencies]
@@ -82,7 +89,7 @@ show_column_numbers = true
 show_error_context = true
 
 [[tool.mypy.overrides]]
-module = ["PyQt6.*", "PyQt6.QtCore", "PyQt6.QtWidgets", "PyQt6.QtGui", "PyQt6.QtWebEngineWidgets", "markdown", "pygments.*", "yaml", "cssbeautifier", "send2trash"]
+module = ["PyQt6.*", "PyQt6.QtCore", "PyQt6.QtWidgets", "PyQt6.QtGui", "markdown", "pygments.*", "yaml", "cssbeautifier", "send2trash"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

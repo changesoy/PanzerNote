@@ -2,6 +2,98 @@
 
 本文件记录 PanzerNote 各版本的变更。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
 
+## v2.3.0
+
+**Markdown 预览与 PDF 导出改用 WebView2（行为变化）**
+
+- **摘除 Qt WebEngine，预览/导出换用系统共享的 WebView2 Runtime**：预览与 PDF 导出经 Web Preview Adapter 统一走 WebView2 后端（`src/editor/web_preview_webview2.py`，PyWinRT 绑定），`create_preview_adapter()` 恒返回 WebView2 适配器（单路径，无 feature flag 分支）。删除 `web_preview_webengine.py`、`webengine_runtime.py`（启动锚点）与 `webview2_preview` flag，`src/` 内不再有 WebEngine 引用，`main.py` 移除 WebEngine 前置的 `AA_ShareOpenGLContexts`。行为含义：预览不再降级为 QTextBrowser，也不再随包分发 Chromium——预览与导出的可用性取决于系统 WebView2 Runtime
+- **运行前提：系统 WebView2 Runtime**：Windows 11 与多数 Windows 10 已预装（开发机探测到 152.0.4191.66），运行时**不随包分发**。启动时 `webview2_runtime.log_availability()` 只读注册表检测，缺失时记录 error 日志、并在窗口显示后弹一次可见提示（含安装指引与「打开下载页」按钮，地址取自 `webview2_runtime.DOWNLOAD_URL`，不自动下载/静默安装）；预览初始化失败时预览区显示可读占位提示，不再留空白
+- **事件循环合并（qasync）**：`main.py` 以 `qasync.QEventLoop` 取代 `app.exec()`，把 asyncio 与 Qt 事件循环合并到同一线程，并在主窗口创建前 `set_event_loop`——PyWinRT 禁止在 STA 上阻塞等待、`await` 又需要事件循环，二者必须在同一线程合并
+- **预览主题切换就地更新**：切换主题改为就地更新预览 CSS 变量（不再整页重载，避免闪烁）；预览/导出/编辑器代码块字体统一走新增「代码字体」设置项（默认 Courier New）
+- **小秘书改为独立置顶工具窗**：WebView2 是原生子窗口（HWND），Windows 下原生子窗口永远绘制在非原生 Qt 控件之上（QWebEngineView 不是原生窗口，故此前不暴露这个层级问题）——小秘书立绘与台词气泡会被预览盖住。现 `SecretaryWidget` 改为无边框 `Qt.Tool` 顶层窗：悬浮在主窗口之上、不进任务栏、随主窗口最小化，以 `WindowDoesNotAcceptFocus` + `WA_ShowWithoutActivating` 保证点击小秘书不把焦点从编辑器抢走；显隐统一走 `sync_visibility()`（顶层窗不再随父控件自动显隐，需按「设置 + 父容器可见性」对齐）
+
+**打包体积与依赖变化（约 362 MB → 98.7 MB）**
+
+- **产物体积 98.7 MB**：摘除 PyQt6-WebEngine 后不再随包分发 Chromium（纯 WebView2 形态为 92.8 MB，其后加入 KaTeX / Mermaid vendor 资产 +5.9 MB）。对照此前 WebEngine 形态约 362 MB；实测 WebEngine 相关占用 343.3 MB（`Qt6WebEngineCore.dll` 195.3 MB、devtools debug pak 72.3 MB、`icudtl.dat` 10 MB 等）随依赖一并消失
+- **依赖清单**：移除 `PyQt6-WebEngine`；新增 `qasync`、`webview2-Microsoft.Web.WebView2.Core`、`winrt-Windows.Foundation`（未显式声明传递依赖 `winrt-runtime`），三者均为 Windows 专用
+- **打包收集**：`webview2` / `winrt` 是命名空间包，原生文件属包内数据，PyInstaller 不会自动收集，`PanzerNote.spec` 以 `collect_submodules` / `collect_dynamic_libs` 显式收集并保留包内相对目录；B 分支为 WebEngine 引入的 QML/Quick3D 等 DLL 裁剪与 WebEngine debug 资源过滤随依赖摘除一并删除（本应用不再导入任何 QML），翻译只留中英与剔除 `opengl32sw.dll` 的裁剪保留（后者经实测仍在生效）
+
+**兼容性说明**
+
+- 无用户数据格式变更：笔记文件、设置与存档 schema 均不变
+- 预览渲染后端更换：程序不再携带 Chromium，未安装 WebView2 Runtime 的机器需先安装系统运行时（缺失时的引导文案见 `src/editor/webview2_runtime.py` 的 `INSTALL_HINT`）
+
+**新增：数学公式与图表渲染（KaTeX / Mermaid，行为变化）**
+
+- **数学公式**：行内 `$…$` 与块级 `$$…$$` 在预览、HTML 导出与 PDF 导出三处渲染，全程离线。公式在 markdown **词法层**识别（`mdit_py_plugins.dollarmath`），而不是渲染后扫 `$…$`——后者会吃掉公式内的转义命令（`$a\,b$` 的间距、矩阵 `\\` 换行）、被强调语法撕开（`$a*b$`），并把「价格 $5 与 $3 元」误判成公式。定界符取 pandoc/GitHub 口径（开 `$`后不接空白、闭`$` 前不接空白且其后不接数字），故 `$2x+3$` 这类以数字开头的公式仍正常渲染
+- **图表**：围栏 ` ```mermaid `（流程图、时序图、甘特图等由 Mermaid 12.0.0 提供）在预览与导出三处渲染为 SVG；渲染失败降级为源码文本显示，不阻断预览
+- **资产随包、断网可用**：KaTeX 0.18.7 与 Mermaid 12.0.0（均 MIT，登记于 `THIRD_PARTY_NOTICES.md`）存放于 `data/assets/vendor/`，KaTeX 字体转 data URI，预览与导出的 HTML 自包含，无任何 CDN / 远程字体请求
+- **注入策略按体积分流**：KaTeX（约 645 KB）预览侧始终内联一次、内容更新后重跑渲染，导出按需内联；Mermaid（约 5.6 MB）预览侧改为首次出现图表时才懒注入，HTML 导出按需内联；PDF 导出因 `NavigateToString` 有 2 MB 文档上限（内联必失败），改由宿主经文档级脚本注入提供 vendor
+- **导出等待渲染就绪**：导出文档带 `<meta name="pn-async">` 声明异步渲染，PDF 打印据此等待图表 SVG 生成后再开始（8s 未就绪则降级打印并告警）；打印前把视口调整为纸面内容框尺寸，按容器宽度自算尺寸的图表（甘特图）不再被压成纸面左侧一小条
+- 已知边界：块级公式不参与源码行锚点（滚动同步靠相邻锚点插值）；只认 `$…$` / `$$…$$`，不支持 `\(…\)` / `\[…\]`（与 VS Code 内置预览一致）
+
+**新增：正文与代码块行距设置（行为变化）**
+
+- 记事本设置新增「行间距」（正文，默认 1.5 倍）与「代码块行间距」（默认 1.35 倍）。正文行距作用于编辑器、Markdown 预览与导出文档；代码块行距只作用于预览与导出——编辑器内同一文本流按块切分代码块代价过高，故编辑器内代码块与正文共用正文行距
+- 行距不再硬编码：预览正文原为固定 `line-height: 1.7`、代码块为 1.55，现统一由设置项驱动，且预览与导出共用同一份排版 CSS（不会漂移）
+- 设置项变化：`editor.line_spacing` 的默认值本就为 1.5（此前已在 `DEFAULT_SETTINGS` 中定义、也参与导入校验，但全项目从无读取点，本次为首次接线，默认值不变），新增 `editor.code_line_spacing`（默认 1.35）
+- 兼容性：旧 `settings.json` 无需迁移（缺失键取默认值，已有 `line_spacing` 值原样生效）；界面区间与导入校验区间同源（0.5~5.0 倍）
+- 行距是显示属性而非内容改动：应用时不改动脏状态，也不给刚打开的文件留下可撤销步骤（否则「打开文件即变脏」与「首次 Ctrl+Z 只把行距改回默认」都会发生）
+- 已知差异：Qt 用块格式的线高百分比表达行距，与预览 CSS 的 `line-height` 语义相近但不完全等价（编辑器字号可调、预览代码块字号固定），同一数字在两侧的视觉松紧会有细微差异
+
+**启动与退出修复**
+
+- **修复退出时进程以 `ACCESS_VIOLATION（0xC0000005）` 终止**：该缺陷早于本次迁移，v2.2.0（已发布版本）实测同样复现；崩溃发生在全部写盘成功之后，不影响数据。根因是主窗口被控件图内部的循环引用持有（控件 ↔ 控制器 ↔ 绑定方法 ↔ 闭包），`main()` 帧展开后才成为循环垃圾，而那时解释器已进入终结阶段——Qt 控件析构回调 Python 时运行时已不可用（原生栈：`sip` → Qt 控件析构 → `sip` 回调 Python → ACCESS_VIOLATION）。修复为在 `sys.exit(0)` 前 `window.deleteLater()` 并投递处理 `DeferredDelete`，让析构发生在运行时健康时。实测退出码 0xC0000005（修复前 ×6）→ 0（修复后 ×7）
+- **修复首跑选定不可写数据目录时崩溃**：原校验只用 `os.makedirs`，只能证明目录可创建、不能证明能写入文件（权限或安全软件可以只拦截文件创建），写入失败即抛 `PermissionError`。现改用与 FileGuard 原子写同源的 `tempfile.mkstemp` 在同目录真实试写一次，不过就当场提示并留在对话框；`main.py` 侧保存失败时说明路径与原因后重开对话框让用户换位置，取消则正常退出
+- **修复 `panzernote.log` 从未生成**（源码与冻结运行均如此）：`_initialized` 同时代表「控制台已配置」与「全部已配置」，启动早期任何模块的 `get_logger()` 都会以 `log_dir=None` 完成初始化，随后 `main.py` 带真实数据目录的 `setup_logging` 直接返回，文件 handler 永远挂不上。现文件 handler 独立判重、只挂载一次；日志不可写仅告警并退回控制台，不阻断启动
+
+**导出修复**
+
+- 补齐导出 HTML/PDF 的 Markdown 渲染缺口：导出渲染启用 GFM 表格与删除线扩展，并经与预览同源的语法高亮回调渲染代码块。修复前导出的表格退化为一行竖线文本、删除线显示为字面 `~~…~~`、代码块完全没有高亮；预览走自有解析器不受影响，故表现为"预览正常、导出丢格式"
+- **深色主题下导出文档白底可读**：导出配色不再随当前激活主题取色，固定解析亮色变体（`v2_export_variant_id`），文本、代码块、引用块与语法高亮一律白纸黑字；亮色变体缺失时回退浅色常量，与明色主题下表现一致
+- 修复导出到白名单外路径（如 D 盘）被拦截：PDF 写入回调补 `FileAccessContext.EXPORT_TARGET`（该枚举预留但一直未接线），与另存为/导出 HTML 的既有授权语义一致，仍受文件大小限制与原子写入保护
+- **修复导出丢失行距设置**：菜单「导出 PDF / 导出 HTML」只把「代码字体」传给了渲染入口，正文行距与代码块行距回落 `build_export_html_document` 的默认倍数，表现为预览改了行距而导出纹丝不动（「另存为 PDF / HTML」路径本就整体传参，故只有导出菜单这条链路出错）。现将三项排版设置收敛为 `ExportActionController._typography()` 一次读取
+- **修复预览与导出的代码块行距不一致**：预览侧逐行 `.code-line` 之间残留的换行文本节点在 `white-space: pre` 下形成匿名行盒，每行多占一条 line-height（0.75 倍实测 21px = 2 × 0.75 × 14px）；导出侧 `body` 未设字号、落到浏览器默认 16px，而行距是无单位倍数，同一倍数在两侧换算出的像素行距不同（10.5px vs 12px）。现预览逐行 span 之间不再留换行符，导出外壳 `body` 显式 `font-size: 14px` 与预览同基准——**导出正文字号随之由浏览器默认 16px 变为 14px**
+
+**编辑器修复**
+
+- 修复折叠可见性变化后滚动条范围与缩略图不同步：展开/折叠后强制重算文档高度并广播折叠状态，缩略图改按可见块序号定位（此前展开后末尾内容滚不到、缩略图停留在折叠前状态且整块漏画）
+- 修复跨文件搜索面板在搜索**正常完成**时的潜在崩溃：`search_finished` 是跨线程队列投递，主线程处理它时 worker 往往还没从 `run()` 返回，此时就地清空 `self._worker` 会让 `QThread` 在运行中被析构，Qt 走 `qFatal` 直接终止进程（Windows 下退出码 `0xC0000409`，无 traceback）。现将完成路径与取消路径统一走 `_retire_worker()`：先交由 `_retiring_workers` 持有引用，等线程真正退出再释放（该机制原本只覆盖取消路径）
+
+**内部清理（无行为变化）**
+
+- 删除 A/B 两个实验分支共同的 10 项死代码（`get_preview_css`、`build_format`、`scale_size`、`scale_font`、`dp`、`get_all_flags`、`detect_eol`、`get_version`、`ComponentState`、`_get_code_highlight_theme`）
+- 收敛 fenced code 识别逻辑为单一来源：`secure_markdown_renderer.CODEBLOCK_RE` / `extract_language_from_code_attrs`，`markdown_preview` 改为导入复用，消除逐字重复的正则与职责重叠的语言提取实现
+- 导出渲染删除"无主题引擎则退化为纯文本代码块"的静默降级路径：`ExportService.render_content` / `export_html` / `export_pdf` 的 `theme_engine` 改为必填
+- 删除预览代码块的 QTextBrowser 时代遗留占位标记：`markdown_preview` 中 `_MK_S1/_MK_S2/_MK_E1/_MK_E2` 常量、`.code-marker` 样式与 `_build_container` 中的首尾隐藏 `<span>` 一并移除（单路径化后复制走 `self._code_blocks[idx]`，不依赖渲染 DOM）
+
+**UI 修复**
+
+- 记事本设置对话框改为滚动区域（按钮栏固定可见），对话框最大高度限制为屏幕 85%；快捷键面板最大高度限制为屏幕 80%
+- 修复对话框内 QScrollArea 视口不随主题变色的问题（全局 QSS 补 QDialog QScrollArea 背景规则）
+- 记事本设置对话框行宽模式文字与同列控件对齐：此前普通组合框文字由样式直画在编辑区左边缘（实测偏左约 6.5 逻辑像素，且随字体/DPI 变化），现改为可编辑+只读行编辑框，与字体下拉框走相同渲染路径自适应对齐
+- 记事本设置对话框组合框文字只作展示：字体/代码字体两个下拉框只可从列表选择，不可键入（此前可键入并把不存在的字体名写入配置）；行宽模式/界面动效下拉框一并统一；四个组合框文字均不可选中、不可复制
+- 记事本设置对话框数值框只有数字区域可编辑：单位（空格/pt/倍/秒）不可点击、不可选中（光标越出数字区即被收回），数字退格与键入不受影响
+- 记事本设置对话框数值框改值后不留选区：点上/下箭头、滚轮、键盘 ↑↓ 调完值，数字不再整段高亮（`QAbstractSpinBox` 在聚焦与 step 路径上都会 `selectAll()`，此前刚调完值就是选中态，下次键入还会整体替换）；点击数字区定位光标、键入与退格照旧
+- 修复记事本设置数值框上下箭头命中错位（点加号无效）：`QStyleSheetStyle` 在只给 `QSpinBox` 基础盒（padding/border）时会把 `SC_SpinBoxUp/Down` 的命中矩形算成「左右并排」，于是右侧边缘永远命中减号（缩进大小 / 字体大小 / 自动保存间隔 / 自动补全最小字符四个框均受影响）。现显式声明加减按钮几何（top/bottom right）恢复上下堆叠，箭头改用按 token 上色的 SVG 并与同一表单列的下拉框箭头对齐；`QDoubleSpinBox` 一并并入 input 配方（此前只写 `QSpinBox`，浮点框落原生样式，与相邻数值框外观不一致）
+- 修复记事本设置滚轮误改取值：真实滚轮的鼠标落点是数值框 / 下拉框内部的 `QLineEdit`（只装在控件自身的过滤器不会被触发），且「是否聚焦」判据在此不可用——对话框弹出时焦点默认落在首个可聚焦控件上，而 `QLineEdit` 是 spinbox 的 focus proxy，`hasFocus()` 实测恒为真，过滤器全程放行。现改为按控件类别分流并把滚轮显式转发给滚动区：数值类正在滚动（0.3s 内）只滚动不改值、界面静止时滚轮可调值；选择类一律只滚动、永不改选项
+- 修复字体下拉框（`QFontComboBox`）完全没有样式（系统默认外观，与普通下拉框不一致）：补进 combo_box recipe，下拉箭头改为按 token 颜色生成 SVG（Qt QSS 的 `::down-arrow` 无法给 image 重新上色）；生成失败记 warning 并退化为无箭头，不静默吞掉
+- 修复小秘书多行台词气泡被裁切（第三行起遮挡文字）：气泡高度原取自 `adjustSize()`（即 QLabel 的 sizeHint），而 `wordWrap` 标签的高度依赖宽度（`heightForWidth`），两者在换行文本下并不一致，而窗口留给气泡的空间只有约 25%。现按台词单行宽度（夹在 [0.55W, 0.9W]）求标签可用宽度、再以 `heightForWidth` 定高，并在气泡可见时按布局最小需求把窗口向上补高（底边不动、只增不减），气泡隐藏后收回基准高度
+
+**合并前 review 修复（安全 / 生命周期 / 崩溃防护）**
+
+- **修复「代码字体」族名可击穿 `<style>`（安全）**：`code_font_css_stack()` 此前只做「有空格加引号」，无任何过滤——经导入构造的设置 JSON 写入 `code_font_family: "X</style><script>…"` 可提前结束 style 元素并注入标记，绕过全部 sanitizer，影响预览与导出两份文档。现收敛为族名白名单化（仅保留 `[A-Za-z0-9 \-_.]`，过滤后为空回退默认值），预览与导出两条路径共用同一实现
+- **修复预览适配器没有释放路径（生命周期）**：`close()` 此前只服务导出路径，预览侧没有 teardown——每个 Markdown 标签页各持一个 WebView2 controller 与一组 `msedgewebview2` 进程，关标签与退出都不释放。现 `MarkdownPreviewWidget` 在关闭/销毁时调用 `preview.close()`（适配器内部摘除事件处理器、释放 controller，幂等），主窗口 `_finalize_close` 与 `main.py` 退出序列在控件树析构前统一关闭全部预览
+- **预览侧 WinRT 同步调用补异常防护（崩溃）**：`set_html` / `set_visible` / `set_resource_root` 内的 WinRT 调用此前无 try/except——渲染后的预览文档超过 `NavigateToString` 2 MB 上限（长笔记 + 内联样式 + 逐行 span 常数倍膨胀）时异常从 QTimer 槽逃逸，PyQt6 直接 abort。现三个方法统一转失败态显示可读提示；`_navigate` 前做体积判定（1.8 MB 阈值，留余量），超限给出明确提示而非裸 `E_INVALIDARG`
+- **失败提示不再被预览盖住**：失败路径先隐藏/关闭 controller 再显示提示 QLabel——WebView2 是原生子窗口（独立 HWND），Windows 下永远绘制在非原生 Qt 控件之上，不清理 controller 时「可读提示」实际是一块白板
+- **PyWinRT 绑定缺失时降级启动**：`main.py` 只检测 WebView2 Runtime（注册表），不检测 Python 绑定；`webview2-*`/`winrt-*` 缺失或损坏（依赖升级中断、杀软隔离）此前会让惰性导入的 ImportError 在启动期逃逸。现 `create_preview_adapter()` 捕获导入失败并返回降级适配器：应用照常启动，预览区显示安装指引与失败原因，导出走失败回调
+- **PDF 导出等待导航完成加超时**：`NavigationCompleted` 未派发（导出中关窗、WebView2 异常）时导出回调永不执行——既无文件也无提示，且适配器与临时 PDF 不释放。现 15s 超时走失败回调并清理
+- **导出导航归属标记**：`load_finished` 只对本适配器发起的导航发出——controller 创建时的初始空白文档若早于模板注入完成，会被消费方永久置位「模板已加载」，后续渲染静默失败（预览空白无提示）
+- **图表就绪超时对用户可见**：PDF 导出在图表 8s 未就绪时照常降级打印（宁可少一张图，行为不变），但此前面板仍提示成功、少图无任何信号，用户会当成 bug 反复重试。现经新增 `export_notice` 通道由小秘书提示「图表未在 8s 内渲染完成，本次导出可能缺少图表」；页面侧 `pnMermaidBoot` 同步异常也有 try/catch 兜底照常回传就绪
+- **修复搜索进行中退出应用的同类崩溃**：跨文件搜索面板被塞进 QStackedWidget，全仓无人调用其 `close()`——「等待线程结束再析构」防线不可达，搜索进行中直接退出仍会在解释器终结时析构运行中的 QThread（`0xC0000409`）。现面板新增 `shutdown()`（wait + 清空淘汰池），退出序列在析构前调用
+- **修复快捷键冲突提示不可见**：冲突校验在对话框已关闭之后才写入提示——用户点确认后对话框消失、快捷键没变、界面零反馈。现校验前移到对话框内：冲突时不关闭、就地显示「快捷键冲突：\<功能名\>」
+- 清理与收窄（无行为变化）：事件循环关闭后不再从 Qt 槽投递任务；资源映射权限 `ALLOW` 收窄为 `DENY_CORS`；就绪前的预览显隐调用不再被静默丢弃；数值框回调改用随控件销毁的成员 QTimer；图表容器保留源码行锚点（滚动同步不再只能插值）；帮助中心（QTextBrowser 无 JS）按纯文本语义渲染公式与图表围栏
+
 ## v2.2.0
 
 **帮助中心**

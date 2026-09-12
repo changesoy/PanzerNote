@@ -40,7 +40,6 @@ from .find_replace import FindReplaceBar
 from .save_task_manager import SaveTaskManager, SaveState
 from .temp_session_manager import TempSessionManager
 from .eol_utils import detect_eol_from_bytes
-from .webengine_runtime import WebEngineRuntime
 
 
 # ════════════════════════════════════════════════════════
@@ -319,7 +318,6 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self,
         config: Config,
         theme_engine,
-        webengine_runtime: WebEngineRuntime | None = None,
         document_registry=None,
         session_manager=None,
         panel_name: str = "main",
@@ -330,7 +328,6 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             raise RuntimeError("EditorTabs 必须传入 theme_engine，不允许为 None")
         self.config = config
         self._theme_engine = theme_engine
-        self._webengine_runtime = webengine_runtime
         # 3.5.8（R6）：面板标识——崩溃恢复时 autosave 按此字段路由回原面板
         # （主面板 "main"，分屏 "split_0" / "split_1" ...）
         self._panel_name = panel_name
@@ -739,7 +736,6 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             widget = MarkdownPreviewWidget(
                 self.config,
                 theme_engine=self._theme_engine,
-                webengine_runtime=self._webengine_runtime,
             )
             widget.editor.attach_shared_document(shared_doc)
             widget.editor.load_content(content)  # 幂等重建补全词集/折叠（内容相同）
@@ -844,7 +840,6 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             widget = MarkdownPreviewWidget(
                 self.config,
                 theme_engine=self._theme_engine,
-                webengine_runtime=self._webengine_runtime,
             )
             editor = widget.editor
         else:
@@ -1061,6 +1056,10 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 self,
                 _on_pdf_ready,
                 v2_export_colors(self._theme_engine),
+                theme_engine=self._theme_engine,
+                code_font=self.config.get_code_font_family(),
+                line_spacing=self.config.get_line_spacing(),
+                code_line_spacing=self.config.get_code_line_spacing(),
             )
             return True, 0
         except RuntimeError as e:
@@ -1086,10 +1085,13 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         is_md = ExportService.is_markdown_content(content, widget_type)
 
         try:
-            body_html = ExportService.render_content(content, is_md)
+            body_html = ExportService.render_content(content, is_md, self._theme_engine)
             full_html = build_export_html_document(
                 body_html,
                 v2_export_colors(self._theme_engine),
+                code_font=self.config.get_code_font_family(),
+                line_spacing=self.config.get_line_spacing(),
+                code_line_spacing=self.config.get_code_line_spacing(),
             )
             self.config.get_file_guard().safe_write_bytes(
                 filepath,
@@ -1704,6 +1706,17 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         widget.set_base_path(base)
         widget.invalidate_preview()  # 下次激活/内容变化时以新基准重渲染
 
+    @staticmethod
+    def _close_md_preview(widget) -> None:
+        """关闭标签时释放 Markdown 预览后端（WebView2 controller 等原生资源）。
+
+        QTabWidget.removeTab 不删除页面控件、也不触发 closeEvent，预览的
+        controller 若不经显式 teardown 会随标签累积、永不回收（H2）。
+        迁移路径（分屏合并/移动）不调用本方法：widget 迁移到目标面板继续使用。
+        """
+        if isinstance(widget, MarkdownPreviewWidget):
+            widget.shutdown_preview()
+
     def _close_tab(self, index: int, *, force: bool = False) -> bool:
         """关闭标签页。
 
@@ -1712,6 +1725,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         """
         widget = self.widget(index)
         if not widget or not hasattr(widget, 'tab_id'):
+            self._close_md_preview(widget)
             self.removeTab(index)
             self.tab_count_changed.emit(self.count())
             return True
@@ -1719,6 +1733,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         tab_id = widget.tab_id
         shared_doc = getattr(widget, "shared_doc", None)
         if shared_doc is None:
+            self._close_md_preview(widget)
             self.removeTab(index)
             self.tab_count_changed.emit(self.count())
             return True
@@ -1735,6 +1750,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             self._detach_shared_from_widget(widget)
             self._disconnect_doc_binding(widget)
             self._save_manager.unregister_tab(tab_id)
+            self._close_md_preview(widget)
             self.removeTab(index)
             self.tab_count_changed.emit(self.count())
             return True
@@ -1754,6 +1770,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if is_new and is_empty:
             self._release_untitled_number(title)
             self._save_manager.unregister_tab(tab_id)
+            self._close_md_preview(widget)
             self.removeTab(index)
             self.tab_count_changed.emit(self.count())
             # 批次 5 修复：最后 View 关闭前断开 Document 依赖——否则共享高亮
@@ -1815,6 +1832,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 self._record_closed_tab(filepath, widget)
 
         self._save_manager.unregister_tab(tab_id)
+        self._close_md_preview(widget)
         self.removeTab(index)
         self.tab_count_changed.emit(self.count())
         # Batch 4：最后一个 View 关闭 → document.closed（未命名文档不触发）
@@ -2146,6 +2164,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 self._record_closed_tab(filepath, widget)
 
         self._save_manager.unregister_tab(tab_id)
+        self._close_md_preview(widget)
         self.removeTab(index)
         self.tab_count_changed.emit(self.count())
         # 3.5.8（批次 4c）：保存后关闭的最后 View → 销毁 Document
@@ -2428,6 +2447,33 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         for editor in self._iter_editors():
             editor.set_editor_font(family, size)
 
+    def set_code_font_all(self, family: str):
+        """对所有已打开编辑器应用「代码字体」（编辑器侧改 Markdown 高亮器的
+        代码 format；预览侧见 refresh_preview_typography_all）。
+        """
+        for editor in self._iter_editors():
+            editor.set_code_font(family)
+
+    def set_line_spacing_all(self, spacing: float):
+        """对所有已打开编辑器应用「正文行距」。
+
+        编辑器内正文与代码块不区分（同一文本流按块设行距，切分代码块代价高），
+        代码块行距只作用于预览与导出，见 refresh_preview_typography_all。
+        """
+        for editor in self._iter_editors():
+            editor.set_line_spacing(spacing)
+
+    def refresh_preview_typography_all(self):
+        """刷新所有 Markdown 预览的排版 CSS（代码字体 / 正文行距 / 代码块行距）。
+
+        这三项只存在于 CSS：已加载的预览就地更新变量，未加载的由首屏整页灌入。
+        三者共用一次刷新，避免设置应用时重复整页重建。
+        """
+        for i in range(self.count()):
+            widget = self.widget(i)
+            if isinstance(widget, MarkdownPreviewWidget):
+                widget.refresh_typography_settings()
+
     def update_indent_settings_all(self):
         """缩进配置变更后，更新所有已打开编辑器的 Tab 显示宽度"""
         from .indentation import get_indent_width
@@ -2635,6 +2681,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             self._session_manager.remove_autosave_for_file(shared_doc.filepath)
 
         self._save_manager.unregister_tab(tab_id)
+        self._close_md_preview(widget)
         self.removeTab(index)
         self.tab_count_changed.emit(self.count())
         # 3.5.8（批次 4c）：最后一个 View 关闭（删除语义）→ 销毁 Document

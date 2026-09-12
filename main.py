@@ -5,6 +5,7 @@ PanzerNote - 战车少女主题记事本
 主程序入口
 """
 
+import asyncio
 import sys
 import os
 import shutil
@@ -101,13 +102,15 @@ def _activate_crash_log_dir(new_dir):
     _cleanup_crash_logs(new_dir)
     _crash_log_dir = new_dir
 
-from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont, QIcon
+from PyQt6.QtWidgets import QApplication, QMessageBox
+from PyQt6.QtCore import QCoreApplication, QEvent, QUrl
+from PyQt6.QtGui import QDesktopServices, QFont, QIcon
+from qasync import QEventLoop
 
 from src import __version__
 from src.core.config import Config
 from src.core.app_context import AppContext
+from src.editor.webview2_runtime import DOWNLOAD_URL, INSTALL_HINT
 from src.ui.first_run_dialog import FirstRunDialog
 from src.utils.logger import setup_logging, get_logger
 from src.utils.feature_flags import init_flags
@@ -135,17 +138,26 @@ def _verify_version_consistency(logger):
         logger.debug("版本号解析检查跳过: %s", e)
 
 
+def _show_runtime_missing_dialog(parent) -> None:
+    """WebView2 Runtime 缺失时的启动提示。
+
+    用带按钮的 QMessageBox 而非 ``QMessageBox.warning``：后者是纯文本，
+    里面的下载地址只能手抄。按钮走系统浏览器打开官方下载页 —— 不引入任何
+    网络行为，也不代替用户安装。
+    """
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Icon.Warning)
+    box.setWindowTitle("缺少 WebView2 Runtime")
+    box.setText(INSTALL_HINT)
+    open_button = box.addButton("打开下载页", QMessageBox.ButtonRole.AcceptRole)
+    box.addButton("稍后", QMessageBox.ButtonRole.RejectRole)
+    box.exec()
+    if box.clickedButton() is open_button:
+        QDesktopServices.openUrl(QUrl(DOWNLOAD_URL))
+
+
 def main():
     profiler = get_startup_profiler()
-
-    # ── 关键：必须在创建 QApplication 之前设置 ──────────────────────────────
-    # MainWindow（及其依赖 markdown_preview）是延迟导入的（见下方 PHASE_WINDOW_CREATE），
-    # 此时 QApplication 已存在。若不预先设置 AA_ShareOpenGLContexts，
-    # markdown_preview 里的 `from PyQt6.QtWebEngineWidgets import QWebEngineView`
-    # 会抛 ImportError（"must be set before a QCoreApplication instance is created"），
-    # 被 except 静默吞掉 → HAS_WEBENGINE=False → 预览回退到 QTextBrowser，
-    # 源码行号同步代码全部失效。设置此属性即可让稍后的 WebEngine 导入成功。
-    QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
 
     app = QApplication(sys.argv)
     app.setApplicationName("PanzerNote")
@@ -170,13 +182,26 @@ def main():
     config = Config(APP_DIR)
 
     if not config.is_initialized():
-        dialog = FirstRunDialog(APP_DIR)
-        if dialog.exec() != dialog.DialogCode.Accepted:
-            sys.exit(0)
-        selected_path = dialog.get_selected_path()
-        config.set_base_path(selected_path)
-        config.set_initialized(True)
-        config.save()
+        # 首跑：数据目录必须能真实落盘配置，否则本阶段之后的所有写入都会失败。
+        # 保存失败时提示重选，而不是让异常冒泡（曾有用户选定不可写目录 → 启动即崩溃）。
+        while True:
+            dialog = FirstRunDialog(APP_DIR)
+            if dialog.exec() != dialog.DialogCode.Accepted:
+                sys.exit(0)
+            selected_path = dialog.get_selected_path()
+            config.set_base_path(selected_path)
+            config.set_initialized(True)
+            try:
+                config.save()
+            except OSError as e:
+                QMessageBox.critical(
+                    None,
+                    "无法保存设置",
+                    f"无法在以下位置保存配置：\n{selected_path}\n\n"
+                    f"原因：{e}\n\n请重新选择一个可写的位置。",
+                )
+                continue
+            break
 
     config.ensure_directories()
     init_flags(os.path.join(config.get_base_path(), "data", "config"))
@@ -192,6 +217,13 @@ def main():
 
     _verify_version_consistency(logger)
     profiler.end_phase()
+
+    # ── C3-D：WebView2 Runtime 检测 ────────────────────────────────────────
+    # 摘除 WebEngine 后 WebView2 是唯一预览 / 导出后端，缺失即预览不可用；
+    # 检测只读注册表（不导入 PyWinRT），故绑定损坏时也能报出真正原因。
+    from src.editor.webview2_runtime import log_availability
+
+    webview2_ready = log_availability()
 
     crash_logs = list(_iter_crash_logs(log_dir))
     if crash_logs:
@@ -211,6 +243,21 @@ def main():
                 subprocess.Popen(['open', crash_path])
             else:
                 subprocess.Popen(['xdg-open', crash_path])
+
+    # ── C3-B：事件循环改造（qasync）────────────────────────────────────────
+    # WebView2 后端（PyWinRT）要求 asyncio 与 Qt 事件循环在**同一线程合并**：
+    # PyWinRT 禁止在 STA 上阻塞等待（.get() 报错），而 await 需要事件循环；
+    # 主线程 asyncio.run() 会停掉 Qt 消息泵（死锁），后台 asyncio 循环会让
+    # controller 创建永久挂起（见 111.txt 的 C1.6 判定性实验）。
+    # 因此以 qasync.QEventLoop 取代 app.exec()。
+    #
+    # 循环须**早于主窗口创建**：WebView2 预览后端在构造期即
+    # asyncio.ensure_future 启动 controller 创建协程，此刻若当前线程还没有
+    # 事件循环，会直接 RuntimeError: There is no current event loop。
+    loop = QEventLoop(app)
+    asyncio.set_event_loop(loop)
+    # 关窗 → quitOnLastWindowClosed → aboutToQuit → 停止 asyncio 循环
+    app.aboutToQuit.connect(loop.stop)
 
     profiler.begin_phase(PHASE_WINDOW_CREATE)
     from src.main_window import MainWindow
@@ -236,12 +283,32 @@ def main():
     window.present()
     profiler.end_phase()
 
+    if not webview2_ready:
+        # 可见提示：否则用户只会看到「预览空白」而无从判断原因
+        # （预览区本身也会显示同一份指引，见 web_preview_webview2._show_hint）
+        _show_runtime_missing_dialog(window)
+
     logger.info(profiler.get_report())
 
-    exit_code = app.exec()
+    with loop:
+        loop.run_forever()
+
     # 正常退出：清空 crash 日志，确保下次启动只对真正的异常退出提示
     _clear_crash_logs(log_dir)
-    sys.exit(exit_code)
+
+    # ── 显式销毁顶层窗口（必须在解释器终结前完成）────────────────────────────
+    # 主窗口及其控件图存在循环引用（控件 ↔ 控制器 ↔ 绑定方法），引用计数无法
+    # 释放，只能等循环 GC 或解释器终结时清理。若拖到解释器终结阶段才析构，
+    # 其析构过程会经 sip 回调 Python（控件虚函数、信号槽），而此时 Python
+    # 运行时已不可用，触发 ACCESS_VIOLATION（退出码 0xC0000005）。
+    # 故在此强制投递并处理 DeferredDelete，趁运行时健康时完成析构。
+    # 先关闭所有预览后端（H2）：controller 必须在控件树析构前释放，
+    # 否则退出时 WebView2 仍活着且 resize/show 回调可能踩进销毁中的控件树。
+    window.shutdown_previews()
+    window.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    # 应用内不存在显式 sys.exit / exit()，退出码恒为 0（与原先 app.exec() 返回值一致）
+    sys.exit(0)
 
 
 if __name__ == "__main__":

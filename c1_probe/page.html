@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>LocalPage</title>
+<style>
+  body { font-family: sans-serif; padding: 12px; }
+  #pic { width: 120px; height: 80px; border: 1px solid #999; }
+  #res { color: #1a6fb0; }
+</style>
+</head>
+<body>
+  <h1>本地资源加载测试</h1>
+  <p>下方图片以相对路径 <code>asset.svg</code> 引用：</p>
+  <img id="pic" src="asset.svg" alt="asset.svg">
+  <hr>
+  <h2>JS → Python 桥</h2>
+  <button id="btn"
+    onclick="window.qtwebview.api.python_hello('button-click')
+      .then(r => document.getElementById('res').textContent = r)">
+    Call Python
+  </button>
+  <p id="res">(未调用)</p>
+</body>
+</html>

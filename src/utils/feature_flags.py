@@ -94,10 +94,6 @@ def set_enabled(flag_name: str, enabled: bool):
     _save()
 
 
-def get_all_flags() -> Dict[str, bool]:
-    return dict(_FLAGS)
-
-
 def _save():
     if _config_path:
         try:

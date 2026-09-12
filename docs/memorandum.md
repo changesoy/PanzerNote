@@ -40,7 +40,7 @@ PyQt6 导入
 Qt 初始化
 QApplication 创建
 主窗口构建
-QtWebEngine / Markdown 预览初始化
+QtWebEngine / Markdown 预览初始化（现为 WebView2 后端）
 主题、图标、字体加载
 插件扫描
 会话恢复
@@ -126,11 +126,11 @@ PyQt Widgets 继续优化
 
 ```text
 使用 python -X importtime 分析 import 耗时
-延迟导入 PyQt6.QtWebEngineWidgets
+延迟导入 WebView2 绑定（`webview2` / `winrt`，PyWinRT，随预览后端按需加载）
 延迟导入 markdown / pygments / PIL / cryptography 等重模块
 主窗口先显示，再加载重组件
 插件启动时只读取 plugin.json，不 import 插件代码
-Markdown 预览首次使用时再创建
+Markdown 预览首次使用时再创建（后端模块经 `web_preview.create_preview_adapter()` 惰性导入）
 Minimap / 文件树 / 小秘书 / 图鉴等模块按需加载
 会话恢复分阶段进行，只立即加载当前标签
 ```

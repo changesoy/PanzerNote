@@ -10,9 +10,11 @@
 """
 from __future__ import annotations
 
-from enum import Enum
+import tempfile
+from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from ...utils.logger import get_logger
 from .constants import COLOR_VALUE_PATTERN
 from .service import ThemeV2Service
 
@@ -35,29 +37,42 @@ CORE_RECIPES: tuple[str, ...] = (
 # 结构辅助 recipe（B3 设计文档 5.2 契约说明）：不在 Core 原子性判据内，存在则输出。
 STRUCTURAL_RECIPES: tuple[str, ...] = ("group_box", "dialog")
 
-# 已定义但 QSS 暂无法表达的键（预留：B6 polish / icons 资源提供后启用）。
-# arrow/arrow_hover 需 image 资源；indicator_checked_fg 需勾选图形 image。
+# 已定义但 QSS 暂无法表达的键（预留：B6 polish 资源提供后启用）。
+# arrow_hover 需 hover 态第二张 image；indicator_checked_fg 需勾选图形 image。
+# arrow 已接线（combo_box 按 arrow token 颜色生成箭头 SVG）；
 # placeholder 已随补漏 C 接线（QSS placeholder-text-color，仅 QLineEdit）。
 _PENDING_KEYS: frozenset[str] = frozenset(
-    {"arrow", "arrow_hover", "indicator_checked_fg"}
+    {"arrow_hover", "indicator_checked_fg"}
 )
 
+# 箭头 SVG 模板（方向 → polygon 顶点）：颜色由 recipe 的 arrow token 解析值填充。
+_ARROW_SVG_TEMPLATE = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10">'
+    '<polygon points="{points}" fill="{color}"/></svg>'
+)
+_ARROW_POINTS = {"down": "5,7 1.5,3 8.5,3", "up": "5,3 1.5,7 8.5,7"}
 
-class ComponentState(Enum):
-    """统一状态模型（B3 设计文档 2.2）。
 
-    业务状态归 Stable Host 所有；视觉层只表现状态，不拥有状态。
+def _arrow_image_url(color: str, direction: str = "down") -> str:
+    """按 arrow token 颜色生成（并缓存）箭头 SVG，返回 QSS image url。
+
+    Qt QSS 的 ``::down-arrow``/``::up-arrow`` 无法给 image 重新上色，故按 token
+    颜色落成独立 SVG 文件；颜色变则文件名变，天然跟随主题变体切换。
+    生成失败时返回空串（该控件退化为无箭头），并记录警告，不静默吞掉。
     """
-
-    NORMAL = "normal"
-    HOVER = "hover"
-    PRESSED = "pressed"
-    FOCUS = "focus"
-    DISABLED = "disabled"
-    SELECTED = "selected"
-    CHECKED = "checked"
-    ACTIVE = "active"
-    INDETERMINATE = "indeterminate"
+    cache_dir = Path(tempfile.gettempdir()) / "PanzerNote" / "theme_icons"
+    path = cache_dir / f"{direction}_arrow_{color.lstrip('#').lower()}.svg"
+    try:
+        if not path.exists():
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                _ARROW_SVG_TEMPLATE.format(points=_ARROW_POINTS[direction], color=color),
+                encoding="utf-8",
+            )
+    except OSError as e:
+        get_logger(__name__).warning("生成箭头图标失败: %s", e)
+        return ""
+    return str(path).replace("\\", "/")
 
 
 class ThemeComponentLibrary:
@@ -151,9 +166,27 @@ QPushButton:focus {{ border: 1px solid {s['focus_border']}; }}
 
 def _b_input(s: Mapping[str, Any]) -> str:
     pad_v, pad_h = s["padding"], s["padding"] * 2
+    # QSpinBox 上下按钮必须显式声明几何：只给 QSS 基础盒（padding/border）时
+    # QStyleSheetStyle 会把 SC_SpinBoxUp/Down 的命中矩形算成「左右并排」，
+    # 导致点加号无效（点到的其实是减号）。箭头同样只能靠 token 上色的 SVG。
+    # 按钮带几何与 combo_box 的 drop-down 完全一致（宽 24 / origin padding /
+    # 右 padding 26），保证同一表单列里两类控件的箭头落在同一竖线上。
+    # QDoubleSpinBox 必须与 QSpinBox 并列出现：二者同为 QAbstractSpinBox 的
+    # 兄弟而非父子，只写 QSpinBox 会让浮点输入框完全落到原生样式（箭头、内边距、
+    # 命中区都与同列的整数框不一致）。
+    spin_w = 24
+    spin_pad_r = 26
+    up_url = _arrow_image_url(s["arrow"], "up")
+    down_url = _arrow_image_url(s["arrow"], "down")
+    arrow_rules = ""
+    if up_url and down_url:
+        arrow_rules = f"""
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{ image: url("{up_url}"); width: 10px; height: 10px; }}
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{ image: url("{down_url}"); width: 10px; height: 10px; }}
+"""
     # 补漏 C：placeholder 接线（QSS placeholder-text-color，QSpinBox 无该概念故拆分）
     return f"""
-QLineEdit, QSpinBox {{
+QLineEdit, QSpinBox, QDoubleSpinBox {{
     background-color: {s['background']};
     border: 1px solid {s['border']};
     border-radius: {s['radius']}px;
@@ -161,9 +194,24 @@ QLineEdit, QSpinBox {{
     color: {s['text']};
     selection-background-color: {s['selection_bg']};
 }}
-QLineEdit {{ placeholder-text-color: {s['placeholder']}; }}
-QLineEdit:focus, QSpinBox:focus {{ border-color: {s['focus_border']}; }}
-QLineEdit:disabled, QSpinBox:disabled {{
+QSpinBox, QDoubleSpinBox {{ padding-right: {spin_pad_r}px; }}
+QSpinBox::up-button, QDoubleSpinBox::up-button {{
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: {spin_w}px;
+    border: none;
+    background: transparent;
+}}
+QSpinBox::down-button, QDoubleSpinBox::down-button {{
+    subcontrol-origin: padding;
+    subcontrol-position: bottom right;
+    width: {spin_w}px;
+    border: none;
+    background: transparent;
+}}
+{arrow_rules}QLineEdit {{ placeholder-text-color: {s['placeholder']}; }}
+QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {{ border-color: {s['focus_border']}; }}
+QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled {{
     background-color: {s['disabled_background']};
     color: {s['disabled_text']};
 }}
@@ -172,18 +220,27 @@ QLineEdit:disabled, QSpinBox:disabled {{
 
 def _b_combo_box(s: Mapping[str, Any]) -> str:
     pad_v, pad_h = s["padding"], s["padding"] * 2
+    arrow_url = _arrow_image_url(s["arrow"])
+    arrow_rule = f'image: url("{arrow_url}");' if arrow_url else ""
     return f"""
-QComboBox {{
+QComboBox, QFontComboBox {{
     background-color: {s['background']};
     border: 1px solid {s['border']};
     border-radius: {s['radius']}px;
-    padding: {pad_v}px {pad_h}px;
+    padding: {pad_v}px 26px {pad_v}px {pad_h}px;
     color: {s['text']};
 }}
-QComboBox:focus {{ border-color: {s['focus_border']}; }}
-QComboBox::drop-down {{
+QComboBox:focus, QFontComboBox:focus {{ border-color: {s['focus_border']}; }}
+QComboBox::drop-down, QFontComboBox::drop-down {{
+    subcontrol-origin: padding;
+    subcontrol-position: right center;
     border: none;
-    width: 20px;
+    width: 24px;
+}}
+QComboBox::down-arrow, QFontComboBox::down-arrow {{
+    {arrow_rule}
+    width: 10px;
+    height: 10px;
 }}
 QComboBox QAbstractItemView {{
     background-color: {s['popup_background']};
@@ -446,6 +503,17 @@ QDialog {{
     color: {s['text']};
 }}
 QMessageBox {{
+    background-color: {s['background']};
+}}
+/* 对话框内 QScrollArea 的 viewport/内容容器默认不继承 QDialog 背景，
+   会露出 QPalette.Base 浅色（如记事本设置滚动区），需显式覆盖。
+   objectName 级规则（如 ThemePreviewArea）优先级更高，不受影响。 */
+QDialog QScrollArea {{
+    background-color: {s['background']};
+    border: none;
+}}
+QDialog QScrollArea > QWidget,
+QDialog QScrollArea > QWidget > QWidget {{
     background-color: {s['background']};
 }}
 """

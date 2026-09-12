@@ -72,6 +72,7 @@ from .secure_markdown_renderer import (
     strip_dangerous_html as _strip_dangerous_html,
 )
 from .document_render_cache import _DOC_RENDER_CACHE, clear_document_render_cache
+from . import math_render as _math_render
 
 # ════════════════════════════════════════════════════════
 #  HTML 模板
@@ -242,6 +243,7 @@ section[data-fold-heading].folded {{
     background: var(--scrollbar-track);
 }}
 </style>
+{math_style}
 </head>
 <body>
 <div id="content">
@@ -475,6 +477,7 @@ window.updateFoldVisibility = function(collapsedLinesJson) {{
     }});
 }})();
 </script>
+{math_script}
 </body>
 </html>"""
 
@@ -814,6 +817,8 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             js = (
                 f"document.getElementById('content').innerHTML = {escaped};"
                 "_nodesVersion = null; _cachedNodes = null;"
+                # 公式在内容变换后重渲染（$..$ 是 KaTeX 客户端展开，不经 Python）
+                f"{_math_render.content_update_js()}"
                 f"window.__lastFracLine={frac:.4f};"
                 f"window.__lastTotalLines={total_lines};"
                 f"window.__lastAtTop={at};"
@@ -835,6 +840,11 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
                 full_html = template.format(
                     content=html_content,
                     layout_css=_MARKDOWN_LAYOUT_CSS,
+                    # 模板只加载一次，之后仅换 #content 内容，故公式库始终内联一次
+                    math_style=_math_render.style_fragment(),
+                    math_script=_math_render.script_fragment(
+                        "document.getElementById('content')"
+                    ),
                 ).replace(
                     "</style>", css_vars + "\n</style>", 1
                 )
@@ -907,6 +917,7 @@ a {{
             tasklists_plugin(md)
         except ImportError:
             get_logger(__name__).debug("mdit_py_plugins 未安装，扩展语法（定义列表/任务列表）不可用")
+        _math_render.register(md)
         return md
 
     def _render_markdown(self, text: str) -> str:

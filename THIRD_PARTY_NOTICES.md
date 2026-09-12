@@ -29,6 +29,18 @@ PanzerNote 自身许可证：GPL-3.0-or-later（见 `LICENSE`）。
 > 上游 https://github.com/CabbageDevelopment/qasync ）；`webview2-*` / `winrt-*` 包元数据
 > `License-Expression: MIT`（PyWinRT 官方投影，上游 https://github.com/pywinrt/pywinrt ）。
 
+## 内置资产（随源码仓库引入）
+
+与 pip 依赖不同，这些文件直接随仓库分发，许可证文本各随其目录。
+
+| 资产  | 版本   | 许可证 | 用途与位置                                                             |
+| ----- | ------ | ------ | ---------------------------------------------------------------------- |
+| KaTeX | 0.18.7 | MIT    | 数学公式渲染；`data/assets/vendor/katex/`（katex.min.js / katex.min.css / fonts/*.woff2 / LICENSE） |
+
+> 说明：KaTeX 样式与脚本在运行时**内联**进预览模板与导出的 HTML，字体转 data URI，
+> 因此预览与导出文件都是自包含的（断网可用，无 CDN 请求），符合「零运行时网络依赖」。
+> 升级时替换 `data/assets/vendor/katex/` 下的文件并同步本表版本号。
+
 ## 可选依赖（格式化）
 
 | 组件                         | 许可证 |

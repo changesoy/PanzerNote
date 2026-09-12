@@ -20,6 +20,7 @@ from typing import Callable, List
 
 from ..core.settings_store import DEFAULT_CODE_FONT_FAMILY
 from ..utils.logger import get_logger
+from . import math_render
 
 try:
     from markdown_it import MarkdownIt as _MarkdownIt
@@ -170,6 +171,8 @@ def render_markdown_to_safe_html(
                 tasklists_plugin(md)
             except ImportError:
                 get_logger(__name__).debug("mdit_py_plugins 未安装，任务列表语法不可用")
+            # 公式语法与预览用同一套规则（math_render.register 是唯一注册点）
+            math_render.register(md)
             return _finish(md.render(markdown_text))
         except Exception:
             get_logger(__name__).debug("markdown-it 渲染失败，回退到 python-markdown")
@@ -331,8 +334,15 @@ def build_export_html_document(
       - :root 内联主题色值定义 CSS 变量（变量名与预览模板一致）
       - 内容排版复用 MARKDOWN_LAYOUT_CSS（与预览单一来源）
       - body / pre 为导出特有（静态文档外壳，居中限定宽度）
+
+    公式资源按需内联：由 body_html 自动判定，HTML 导出与 PDF 导出共用同一
+    判定，调用方无从遗漏。导出文件自包含（字体为 data URI），断网/换机器
+    打开仍可显示；无公式的文档不背约 645 KB 的 vendor 体积。
     """
     title_tag = f"<title>{html_module.escape(title)}</title>" if title else ""
+    has_math = math_render.has_math(body_html)
+    math_head = math_render.style_fragment() if has_math else ""
+    math_tail = math_render.script_fragment() if has_math else ""
     root_vars = f""":root {{
     --text-primary: {theme_colors["text_primary"]};
     --text-secondary: {theme_colors["text_secondary"]};
@@ -380,8 +390,10 @@ pre code {
 {MARKDOWN_LAYOUT_CSS}
 {export_shell_css}
 </style>
+{math_head}
 </head>
 <body>
 {body_html}
+{math_tail}
 </body>
 </html>"""

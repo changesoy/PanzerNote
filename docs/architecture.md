@@ -410,13 +410,15 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 | -------------------------- | ----------- | -------------------------------------- |
 | `editor.code_font_family`  | Courier New | 编辑器代码块 / 预览代码块 / 导出代码块 |
 | `editor.line_spacing`      | 1.5         | 编辑器正文 + 预览 + 导出               |
-| `editor.code_line_spacing` | 0.75        | 预览 + 导出（编辑器内不区分，见下）    |
+| `editor.code_line_spacing` | 1.35        | 预览 + 导出（编辑器内不区分，见下）    |
 
 - 读取处兜底：非法值回退默认，越界夹取到 `LINE_SPACING_MIN`~`LINE_SPACING_MAX`（0.5~5.0）。该区间同时是 `config_import_service` 的校验区间与设置对话框 `QDoubleSpinBox` 的区间——三者同源，避免「导入合法值被界面静默夹掉」
 - **编辑器侧**（`Editor.set_line_spacing()`）：Qt 以 `QTextBlockFormat` 的线高**百分比**（`ProportionalHeight`，即倍数 ×100）表达行距，与预览 CSS 的 `line-height` 语义相近但不完全等价（编辑器字号可调、预览代码块字号固定 14px，同一数字视觉松紧会有细微差异）。逐项接线：设置变更走 `EditorTabs.set_line_spacing_all()`；行距是**按块**存储的格式，整篇替换文本（`setPlainText` 覆写 / `load_content`）与共享文档 attach/detach 后都必须重新应用
 - 编辑器**内**正文与代码块不区分：同一文本流按块切分代码块代价过高，故 `code_line_spacing` 只作用于预览与导出
 - **`mergeBlockFormat` 会被 Qt 记为一次编辑**（进撤销栈并置 `isModified`），而行距是显示属性而非内容改动——应用后必须还原两项：脏标记不还原会出现「打开文件即变脏」与「关标签页误弹保存确认」；撤销栈不还原会出现「刚打开的文件就可撤销」，用户第一次 Ctrl+Z 只会把行距悄悄改回默认。仅当文档本来就没有任何历史（撤销与重做都为空）时才清掉这一条，已有历史时保留（清栈会连带丢掉用户自己的重做记录）
 - **预览 / 导出**：`_preview_css_vars()` 与 `build_export_html_document()` 分别把两个倍数注入 `--line-spacing` / `--code-line-spacing`（无单位数字，带单位会污染 `line-height` 与 `calc()`），由 `MARKDOWN_LAYOUT_CSS` 的代码块规则与导出外壳的 `body` 规则分别取用——预览与导出共用同一份排版 CSS，不会漂移
+- 导出侧接线必须**整体**传参：`ExportActionController._typography()` 一次读出「代码字体 / 正文行距 / 代码块行距」三项并展开给 `ExportService`。`build_export_html_document()` 的默认参数只是兜底，漏传不会报错、只会静默回落默认倍数（曾因此出现「预览改了行距、导出纹丝不动」）；「另存为 PDF / HTML」路径（`EditorTabs._save_as_pdf()` / `_save_as_html()`）逐项传同样三项，两条链路语义一致
+- 两侧行距可比的前提是**字号基准一致**：行距是无单位倍数，像素行距 = 倍数 × 自身 font-size。预览模板 `body` 为 14px，导出外壳 `body` 同样显式声明 `font-size: 14px`（此前缺省落到浏览器默认 16px，同一倍数在两侧换算出的像素行距不同）。预览代码块字号固定 14px，导出代码块继承同一基准
 
 ### 4.4 标签页管理 (`editor/editor_tabs.py`)
 

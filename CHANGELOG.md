@@ -2,7 +2,7 @@
 
 本文件记录 PanzerNote 各版本的变更。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
 
-## Unreleased
+## v2.3.0
 
 **Markdown 预览与 PDF 导出改用 WebView2（行为变化）**
 
@@ -12,9 +12,9 @@
 - **预览主题切换就地更新**：切换主题改为就地更新预览 CSS 变量（不再整页重载，避免闪烁）；预览/导出/编辑器代码块字体统一走新增「代码字体」设置项（默认 Courier New）
 - **小秘书改为独立置顶工具窗**：WebView2 是原生子窗口（HWND），Windows 下原生子窗口永远绘制在非原生 Qt 控件之上（QWebEngineView 不是原生窗口，故此前不暴露这个层级问题）——小秘书立绘与台词气泡会被预览盖住。现 `SecretaryWidget` 改为无边框 `Qt.Tool` 顶层窗：悬浮在主窗口之上、不进任务栏、随主窗口最小化，以 `WindowDoesNotAcceptFocus` + `WA_ShowWithoutActivating` 保证点击小秘书不把焦点从编辑器抢走；显隐统一走 `sync_visibility()`（顶层窗不再随父控件自动显隐，需按「设置 + 父容器可见性」对齐）
 
-**打包体积与依赖变化（约 362 MB → 92.8 MB）**
+**打包体积与依赖变化（约 362 MB → 98.7 MB）**
 
-- **产物体积 92.8 MB**：摘除 PyQt6-WebEngine 后不再随包分发 Chromium。对照此前 WebEngine 形态约 362 MB；实测 WebEngine 相关占用 343.3 MB（`Qt6WebEngineCore.dll` 195.3 MB、devtools debug pak 72.3 MB、`icudtl.dat` 10 MB 等）随依赖一并消失
+- **产物体积 98.7 MB**：摘除 PyQt6-WebEngine 后不再随包分发 Chromium（纯 WebView2 形态为 92.8 MB，其后加入 KaTeX / Mermaid vendor 资产 +5.9 MB）。对照此前 WebEngine 形态约 362 MB；实测 WebEngine 相关占用 343.3 MB（`Qt6WebEngineCore.dll` 195.3 MB、devtools debug pak 72.3 MB、`icudtl.dat` 10 MB 等）随依赖一并消失
 - **依赖清单**：移除 `PyQt6-WebEngine`；新增 `qasync`、`webview2-Microsoft.Web.WebView2.Core`、`winrt-Windows.Foundation`（未显式声明传递依赖 `winrt-runtime`），三者均为 Windows 专用
 - **打包收集**：`webview2` / `winrt` 是命名空间包，原生文件属包内数据，PyInstaller 不会自动收集，`PanzerNote.spec` 以 `collect_submodules` / `collect_dynamic_libs` 显式收集并保留包内相对目录；B 分支为 WebEngine 引入的 QML/Quick3D 等 DLL 裁剪与 WebEngine debug 资源过滤随依赖摘除一并删除（本应用不再导入任何 QML），翻译只留中英与剔除 `opengl32sw.dll` 的裁剪保留（后者经实测仍在生效）
 

@@ -373,47 +373,42 @@ class EditorSettingsDialog(QDialog):
 
         scroll_layout.addWidget(secretary_group)
 
-        # 数值框：只有数字区域可编辑，单位（" 空格"/" pt"/" 倍"/" 秒"）不可点击
-        for numeric_spin in (
+        # ── 输入控件分组 ──
+        # 下面三处登记（守卫、滚轮数值类、滚轮选择类）共用这两个清单，
+        # 新增控件只需在此加一次，不会出现「某处漏登记」的静默失效。
+        # 数值框带单位，只有数字区域可编辑（单位不可点击、不可选中）。
+        numeric_spins = (
             self.indent_size_spin,
             self.font_size_spin,
             self.line_spacing_spin,
             self.code_line_spacing_spin,
             self.autosave_spin,
             self.completion_min_chars_spin,
-        ):
-            _NumericRangeGuard(numeric_spin)
-
+        )
         # 组合框文字只作展示：不可编辑（否则可键入不存在的字体名等非法值并写进
-        # 配置）、不可选中、不可复制。四个组合框统一在此登记，原因见 _ComboTextGuard。
-        for text_combo in (
+        # 配置）、不可选中、不可复制。原理见 _ComboTextGuard / _NumericRangeGuard。
+        text_combos = (
             self.font_family_combo,
             self.code_font_combo,
             self.wrap_mode_combo,
             self.motion_level_combo,
-        ):
-            _ComboTextGuard(text_combo)
+        )
+
+        # 守卫显式持有：守卫靠父子关系与信号连接存活，收进列表让生命周期一目了然，
+        # 也避免「构造了却丢掉引用」被误读成无副作用的空语句。
+        self._input_guards: list[QObject] = []
+        for numeric_spin in numeric_spins:
+            self._input_guards.append(_NumericRangeGuard(numeric_spin))
+        for text_combo in text_combos:
+            self._input_guards.append(_ComboTextGuard(text_combo))
 
         # 滚轮守卫：滚动本对话框时不得误改设置
         self._wheel_guard = _WheelGuard(scroll, self)
-        # 数值类：滚动中只滚不改，界面静止后滚轮可调值
-        for value_widget in (
-            self.indent_size_spin,
-            self.font_size_spin,
-            self.line_spacing_spin,
-            self.code_line_spacing_spin,
-            self.autosave_spin,
-            self.completion_min_chars_spin,
-            self.secretary_size_slider,
-        ):
+        # 数值类（数值框 + 尺寸滑块）：滚动中只滚不改，界面静止后滚轮可调值
+        for value_widget in (*numeric_spins, self.secretary_size_slider):
             self._wheel_guard.guard_value(value_widget)
         # 选择类：滚轮永不改选项（只滚动对话框）
-        for selection_widget in (
-            self.font_family_combo,
-            self.code_font_combo,
-            self.wrap_mode_combo,
-            self.motion_level_combo,
-        ):
+        for selection_widget in text_combos:
             self._wheel_guard.guard_selection(selection_widget)
 
         # 收尾滚动区域

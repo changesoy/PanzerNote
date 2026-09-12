@@ -42,6 +42,25 @@ def _keep_translation(dest: str) -> bool:
 
 a.datas = [d for d in a.datas if _keep_translation(d[0])]
 
+# ── 运行期状态剔除 ──────────────────────────────────────────
+# data/gamedata/savegame.json 是运行期存档：SavegameManager.load() 在文件缺失时
+# 会自动创建，开发机跑一次应用就会在工作区生成。datas 里的 ('data', 'data') 是
+# 整体收集，不加处理会把它打进发行包；而首跑向导（first_run_dialog）又会把
+# data/gamedata 下的文件整体复制到用户数据目录 → 用户开局即继承开发机的资源数值
+# 与当日签到状态。故打包一律剔除（同目录的 characters.json / secretary_lines.json
+# 是随包数据，必须保留）。
+_RUNTIME_STATE_FILES = {'data/gamedata/savegame.json'}
+
+
+def _is_runtime_state(dest: str) -> bool:
+    return dest.replace('\\', '/') in _RUNTIME_STATE_FILES
+
+
+a.datas = [
+    d for d in a.datas
+    if _keep_translation(d[0]) and not _is_runtime_state(d[0])
+]
+
 # 注：B 分支遗留的 QML / Quick3D / Multimedia DLL 裁剪与 WebEngine debug 资源
 # （*.debug.pak / *.debug.bin）过滤已随 C3-D 删除：那些条目是 PyQt6-WebEngine
 # 的导入链把 QML 插件带进包才需要裁剪的。摘除该依赖后本应用不导入任何 QML，

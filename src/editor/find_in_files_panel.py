@@ -394,3 +394,20 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
         # 窗口关闭属于低频操作，等待线程结束再析构，避免运行中销毁 QThread
         self._cancel_search(wait=True)
         super().closeEvent(event)
+
+    def shutdown(self) -> None:
+        """应用退出路径专用：取消搜索并等待所有 worker 线程真正结束。
+
+        本面板被塞进 QStackedWidget，全仓没有对它调用 close()——closeEvent
+        的「等待线程结束再析构」防线在生产路径不可达；若搜索进行中直接退出
+        应用，解释器终结时会析构运行中的 QThread → qFatal → 0xC0000409。
+        由 MainWindow._finalize_close() 在窗口析构前调用（此刻控件树健康，
+        wait 安全）。
+        """
+        self._cancel_search(wait=True)
+        # wait=True 已等完淘汰池；但已结束 worker 的 finished 信号可能尚未
+        # 经事件循环派发（deleteLater 未执行），显式清理保证不悬挂引用
+        for w in list(self._retiring_workers):
+            w.wait()
+            self._retiring_workers.discard(w)
+            w.deleteLater()

@@ -789,6 +789,11 @@ class MainWindow(QMainWindow):
         """最终关闭逻辑：保存窗口状态、清理临时文件、关闭窗口"""
         self._closing = True
         self._save_state()
+        # 等待跨文件搜索的残留 worker（P1）：面板在 QStackedWidget 里
+        # closeEvent 不可达，搜索进行中退出会析构运行中的 QThread → qFatal
+        self.find_in_files_panel.shutdown()
+        # 关闭所有预览后端（H2）：controller 必须在控件树析构前释放
+        self.shutdown_previews()
         for tabs in [self.editor_tabs, *self.view_coordinator.split_tabs]:
             tabs.clear_temp_files()
         self.close()

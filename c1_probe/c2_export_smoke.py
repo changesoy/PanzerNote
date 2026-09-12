@@ -80,7 +80,13 @@ def build_config():
     cfg = MagicMock()
     cfg.get_app_dir = MagicMock(return_value=".")
     cfg.get_view_setting = MagicMock(side_effect=lambda key, default=None: default)
-    cfg.get_editor_setting = MagicMock(side_effect=lambda key, default=None: default)
+    # code_font_family 必须给 str：H1 后 code_font_css_stack 对族名做 re.sub
+    cfg.get_editor_setting = MagicMock(
+        side_effect=lambda key, default=None:
+            "" if key == "code_font_family" else default
+    )
+    # H1 后 code_font_css_stack 对族名做 re.sub，mock 必须给 str
+    cfg.get_code_font_family = MagicMock(return_value="")
     return cfg
 
 
@@ -242,6 +248,44 @@ async def math_phase(host: QWidget, colors) -> None:
     adapter.set_visible(False)
 
 
+async def navigation_ownership_phase(parent: QWidget) -> None:
+    """M5 真机时序证据：初始空白文档的导航完成不得 emit load_finished。
+
+    监听器在适配器构造后立即连接（早于 controller 创建完成）。controller
+    创建时会导航到初始空白文档，其 NavigationCompleted 可能晚于事件处理器
+    注册到达 —— 若被无条件 emit，消费方会在模板尚未 set_html 时永久置位
+    「模板已加载」，后续 innerHTML 分支找不到 #content，预览静默空白。
+    修复后：只有 _navigate 发起的导航才 emit。
+    """
+    from src.editor.web_preview import create_preview_adapter
+
+    adapter = create_preview_adapter(parent)
+    loads: list[bool] = []
+    adapter.load_finished.connect(lambda ok: loads.append(ok))
+
+    for _ in range(300):
+        if getattr(adapter, "_ready", False):
+            break
+        await asyncio.sleep(0.05)
+    report(
+        "适配器就绪前 load_finished 未 emit（初始空白文档不归属本适配器）",
+        not loads,
+        f"loads={loads}",
+    )
+
+    adapter.set_html("<html><body><div id='content'>m5</div></body></html>")
+    for _ in range(200):
+        if loads:
+            break
+        await asyncio.sleep(0.05)
+    report(
+        "set_html 发起的导航完成会 emit",
+        bool(loads) and loads[0] is True,
+        f"loads={loads}",
+    )
+    adapter.close()
+
+
 def mermaid_pdf_phase(loop, host: QWidget, colors, engine) -> None:
     """图表 PDF 导出：真机证据是图表渲染成 SVG 且源码未泄漏。
 
@@ -373,6 +417,7 @@ def main() -> int:
     report("临时文件中转已清理", not residue, ",".join(residue))
 
     loop.run_until_complete(math_phase(parent, colors))
+    loop.run_until_complete(navigation_ownership_phase(parent))
     loop.run_until_complete(preview_mermaid_phase(parent, engine))
     mermaid_pdf_phase(loop, parent, colors, engine)
     gantt_pdf_phase(loop, parent, colors, engine)

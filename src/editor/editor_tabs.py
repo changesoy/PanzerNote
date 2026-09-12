@@ -1706,6 +1706,17 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         widget.set_base_path(base)
         widget.invalidate_preview()  # 下次激活/内容变化时以新基准重渲染
 
+    @staticmethod
+    def _close_md_preview(widget) -> None:
+        """关闭标签时释放 Markdown 预览后端（WebView2 controller 等原生资源）。
+
+        QTabWidget.removeTab 不删除页面控件、也不触发 closeEvent，预览的
+        controller 若不经显式 teardown 会随标签累积、永不回收（H2）。
+        迁移路径（分屏合并/移动）不调用本方法：widget 迁移到目标面板继续使用。
+        """
+        if isinstance(widget, MarkdownPreviewWidget):
+            widget.shutdown_preview()
+
     def _close_tab(self, index: int, *, force: bool = False) -> bool:
         """关闭标签页。
 
@@ -1714,6 +1725,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         """
         widget = self.widget(index)
         if not widget or not hasattr(widget, 'tab_id'):
+            self._close_md_preview(widget)
             self.removeTab(index)
             self.tab_count_changed.emit(self.count())
             return True
@@ -1721,6 +1733,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         tab_id = widget.tab_id
         shared_doc = getattr(widget, "shared_doc", None)
         if shared_doc is None:
+            self._close_md_preview(widget)
             self.removeTab(index)
             self.tab_count_changed.emit(self.count())
             return True
@@ -1737,6 +1750,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             self._detach_shared_from_widget(widget)
             self._disconnect_doc_binding(widget)
             self._save_manager.unregister_tab(tab_id)
+            self._close_md_preview(widget)
             self.removeTab(index)
             self.tab_count_changed.emit(self.count())
             return True
@@ -1756,6 +1770,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if is_new and is_empty:
             self._release_untitled_number(title)
             self._save_manager.unregister_tab(tab_id)
+            self._close_md_preview(widget)
             self.removeTab(index)
             self.tab_count_changed.emit(self.count())
             # 批次 5 修复：最后 View 关闭前断开 Document 依赖——否则共享高亮
@@ -1817,6 +1832,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 self._record_closed_tab(filepath, widget)
 
         self._save_manager.unregister_tab(tab_id)
+        self._close_md_preview(widget)
         self.removeTab(index)
         self.tab_count_changed.emit(self.count())
         # Batch 4：最后一个 View 关闭 → document.closed（未命名文档不触发）
@@ -2148,6 +2164,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 self._record_closed_tab(filepath, widget)
 
         self._save_manager.unregister_tab(tab_id)
+        self._close_md_preview(widget)
         self.removeTab(index)
         self.tab_count_changed.emit(self.count())
         # 3.5.8（批次 4c）：保存后关闭的最后 View → 销毁 Document
@@ -2664,6 +2681,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             self._session_manager.remove_autosave_for_file(shared_doc.filepath)
 
         self._save_manager.unregister_tab(tab_id)
+        self._close_md_preview(widget)
         self.removeTab(index)
         self.tab_count_changed.emit(self.count())
         # 3.5.8（批次 4c）：最后一个 View 关闭（删除语义）→ 销毁 Document

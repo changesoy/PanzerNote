@@ -814,6 +814,22 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
     def invalidate_preview(self) -> None:
         self._preview_dirty = True
 
+    def shutdown_preview(self) -> None:
+        """释放预览后端（WebView2 controller 等原生资源），可重复调用。
+
+        标签关闭（editor_tabs._close_tab 系列）与应用退出（main.py 经
+        MainWindow.shutdown_previews）都走这里。QTabWidget.removeTab 不删除
+        页面控件、也不触发 closeEvent —— 若不显式 teardown，每个标签页的
+        controller 与一组 msedgewebview2 进程会累积、永不回收（H2）。
+        """
+        preview = getattr(self, "preview", None)
+        if preview is not None:
+            preview.close()
+
+    def closeEvent(self, ev):  # noqa: N802
+        self.shutdown_preview()
+        super().closeEvent(ev)
+
     def ensure_preview_rendered(self) -> None:
         if not self._preview_dirty:
             return

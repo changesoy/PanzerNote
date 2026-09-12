@@ -35,6 +35,7 @@ from .core.shortcut_manager import ShortcutManager
 from .core.path_resolver import load_json, save_json
 from .game.game_engine import GameEngine
 from .editor.editor_tabs import EditorTabWidget
+from .editor.markdown_preview import MarkdownPreviewWidget
 from .editor.status_bar import StatusBarWidget
 from .editor.file_open_service import FileOpenService, FileOpenSource, FileOpenSecurityError, _is_inside_root
 from .editor.file_action_controller import FileActionController
@@ -791,6 +792,20 @@ class MainWindow(QMainWindow):
         for tabs in [self.editor_tabs, *self.view_coordinator.split_tabs]:
             tabs.clear_temp_files()
         self.close()
+
+    def shutdown_previews(self) -> None:
+        """关闭所有 Markdown 预览后端（退出路径专用）。
+
+        在 window.deleteLater() 之前调用（main.py）：此时控件树仍健康，
+        WebView2 controller 可安全 close；若拖到析构过程中，controller 仍活着
+        而 Qt 正在销毁控件树，_WebView2Host 的 resize/show 事件还可能回调
+        _apply_bounds —— 正是显式退出序列要规避的析构脆弱性（H2）。
+        """
+        for tabs in [self.editor_tabs, *self.view_coordinator.split_tabs]:
+            for i in range(tabs.count()):
+                widget = tabs.widget(i)
+                if isinstance(widget, MarkdownPreviewWidget):
+                    widget.shutdown_preview()
 
     def _on_close_save_finished(self):
         """异步保存全部完成后的回调（3.5.7：多面板聚合）

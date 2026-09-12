@@ -55,6 +55,9 @@ _log = get_logger(__name__)
 # 虚拟主机名：资源根目录映射用（与 WebEngine 的 base_url 同职责）
 VHOST = "pnassets"
 
+# NavigateToString 官方文档上限 2 MB；留余量（预览模板恒内联 KaTeX 约 645 KB）
+_MAX_NAVIGATE_BYTES = 1_800_000
+
 # 图表等异步渲染的就绪等待上限（秒）
 _ASYNC_RENDER_TIMEOUT_S = 8.0
 _ASYNC_POLL_INTERVAL_S = 0.05
@@ -136,6 +139,12 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
         self._await_async_render = False
         self._async_ready = False
 
+        # 事件处理器注册 token：close 时显式摘除，打破跨 Python/WinRT 的引用环
+        self._webmsg_token: object | None = None
+        self._nav_token: object | None = None
+        # close() 幂等标志：导出完成后与预览 teardown 都可能触发释放
+        self._closed = False
+
         self._ready_signal.connect(self._flush_pending)
         self._schedule(self._init_async())
 
@@ -147,7 +156,12 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
         if not self._ready:
             self._pending_html = html
             return
-        self._navigate(html)
+        try:
+            self._navigate(html)
+        except Exception as exc:  # noqa: BLE001
+            # 同步路径上的 WinRT 调用异常若从这里逃逸（PyQt6 槽 → abort）
+            # 会直接终止进程，与模块「失败可见、不崩溃」的承诺相反。
+            self._fail(f"预览加载失败：{exc}")
 
     def run_javascript(self, script: str) -> None:
         if not self._ready:
@@ -156,8 +170,12 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
         self._schedule(self._execute_script(script))
 
     def set_visible(self, visible: bool) -> None:
-        if self._controller is not None:
+        if self._controller is None:
+            return
+        try:
             self._controller.is_visible = visible
+        except Exception as exc:  # noqa: BLE001
+            self._fail(f"预览显示控制失败：{exc}")
 
     def set_resource_root(self, root: str | None) -> None:
         root = root or None
@@ -217,13 +235,28 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
         task.add_done_callback(_swallow)
 
     def _fail(self, message: str) -> None:
-        """转入失败态：记录日志、显示可读提示，并兑掉排队中的导出回调。
+        """转入失败态：清理 controller、显示可读提示，并兑掉排队中的导出回调。
 
         导出是一次性调用，调用方靠 on_done 收尾；若失败时丢弃回调，用户点
         导出会毫无反应（连「PDF生成失败」提示都看不到），故此处也必须回调 b""。
+
+        先清理 controller 再显示提示：WebView2 是独立 HWND 的原生子窗口，
+        Windows 下永远绘制在非原生 Qt 控件之上——不隐藏/关闭它，失败提示
+        QLabel 会被盖成一片白板（M1）。
         """
         self._failed = True
         _log.error("WebView2 预览不可用：%s", message.replace("\n", " "))
+        if self._controller is not None:
+            try:
+                self._controller.is_visible = False
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                self._controller.close()
+            except Exception:  # noqa: BLE001
+                pass
+            self._controller = None
+            self._webview = None
         self._show_hint(message)
         pending, self._pending_export = self._pending_export, None
         if pending is not None:
@@ -270,8 +303,12 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
             self._controller.rasterization_scale = self._container.devicePixelRatioF()
             self._controller.should_detect_monitor_scale_changes = True
 
-            self._webview.add_web_message_received(self._on_web_message)
-            self._webview.add_navigation_completed(self._on_navigation_completed)
+            self._webmsg_token = self._webview.add_web_message_received(
+                self._on_web_message
+            )
+            self._nav_token = self._webview.add_navigation_completed(
+                self._on_navigation_completed
+            )
 
             if self._resource_root:
                 self._apply_resource_root()
@@ -312,11 +349,14 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
     # ── 内部机制 ────────────────────────────────────────────────────────
     def _apply_resource_root(self) -> None:
         if self._resource_root and self._webview is not None:
-            self._webview.set_virtual_host_name_to_folder_mapping(
-                VHOST,
-                self._resource_root,
-                core.CoreWebView2HostResourceAccessKind.ALLOW,
-            )
+            try:
+                self._webview.set_virtual_host_name_to_folder_mapping(
+                    VHOST,
+                    self._resource_root,
+                    core.CoreWebView2HostResourceAccessKind.ALLOW,
+                )
+            except Exception as exc:  # noqa: BLE001
+                self._fail(f"资源目录映射失败：{exc}")
 
     def _apply_bounds(self) -> None:
         if self._controller is None:
@@ -327,23 +367,37 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
         # 2) 原点是本容器客户区的 (0,0)，**不能**用 geometry().x()/y() —— 容器带
         #    WA_NativeWindow，已是独立 HWND，而 geometry() 是相对 splitter 的
         #    坐标，把它当原点会把视图整体推出容器外（预览整片空白）。
-        dpr = self._container.devicePixelRatioF()
-        w = self._container.width()
-        h = self._container.height()
-        _log.debug("WebView2 bounds: %dx%d dpr=%s", w, h, dpr)
-        self._controller.set_bounds_and_zoom_factor(
-            wf.Rect(
-                0.0,
-                0.0,
-                float(w) * dpr,
-                float(h) * dpr,
-            ),
-            1.0,
-        )
+        try:
+            dpr = self._container.devicePixelRatioF()
+            w = self._container.width()
+            h = self._container.height()
+            _log.debug("WebView2 bounds: %dx%d dpr=%s", w, h, dpr)
+            self._controller.set_bounds_and_zoom_factor(
+                wf.Rect(
+                    0.0,
+                    0.0,
+                    float(w) * dpr,
+                    float(h) * dpr,
+                ),
+                1.0,
+            )
+        except Exception:  # noqa: BLE001
+            # 由 _WebView2Host.resizeEvent/showEvent 调用：PyQt6 虚函数回调里
+            # 抛异常是致命的（abort），且销毁过程中容器尺寸已无意义，只记日志。
+            _log.debug("同步 WebView2 bounds 失败（控件可能正在销毁）", exc_info=True)
 
     def _navigate(self, html: str) -> None:
         if self._webview is None:
             return
+        # NavigateToString 有 2 MB 文档上限（官方文档 + 真机 E_INVALIDARG 复现）。
+        # 超限文档若直接导航会抛异常：预览侧由 set_html 转 _fail，导出侧由
+        # _export_async 的 try/except 兜住 —— 都不能让 E_INVALIDARG 裸奔。
+        if len(html) > _MAX_NAVIGATE_BYTES:
+            size_mb = len(html) / 1024 / 1024
+            raise RuntimeError(
+                f"文档过大（{size_mb:.1f} MB，上限约 1.7 MB）："
+                "WebView2 单次加载的文档不能超过 2 MB，请精简内容后重试。"
+            )
         if self._nav_event is not None:
             self._nav_event.clear()
         # 每轮导航重置异步就绪门：图表文档要等页面回传就绪信号才打印
@@ -525,7 +579,33 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
 
     # ── 释放 ────────────────────────────────────────────────────────────
     def close(self) -> None:
-        """关闭 controller 并释放控件（export_pdf 完成后自动调用）。"""
+        """通用 teardown：摘除事件处理器、关闭 controller、销毁控件。幂等。
+
+        预览与导出共用：导出完成后（_export_async / _print_current）自动调用；
+        预览侧在标签关闭 / 窗口退出时由上层显式调用（接口 close 契约，见
+        web_preview.py）。QTabWidget.removeTab 不删除页面控件也不触发
+        closeEvent，若不经本方法，每个标签页的 controller 与一组
+        msedgewebview2 进程会随标签累积、永不回收。
+
+        显式摘除事件处理器：add_web_message_received / add_navigation_completed
+        注册的处理器持有本适配器的绑定方法，形成跨 Python/WinRT 的引用环，
+        controller.close() 之外还需 remove 掉注册才能彻底断开。
+        """
+        if self._closed:
+            return
+        self._closed = True
+        webview = self._webview
+        if webview is not None:
+            if self._webmsg_token is not None:
+                try:
+                    webview.remove_web_message_received(self._webmsg_token)
+                except Exception:  # noqa: BLE001
+                    pass
+            if self._nav_token is not None:
+                try:
+                    webview.remove_navigation_completed(self._nav_token)
+                except Exception:  # noqa: BLE001
+                    pass
         if self._controller is not None:
             try:
                 self._controller.close()

@@ -302,6 +302,9 @@ def main():
     # 其析构过程会经 sip 回调 Python（控件虚函数、信号槽），而此时 Python
     # 运行时已不可用，触发 ACCESS_VIOLATION（退出码 0xC0000005）。
     # 故在此强制投递并处理 DeferredDelete，趁运行时健康时完成析构。
+    # 先关闭所有预览后端（H2）：controller 必须在控件树析构前释放，
+    # 否则退出时 WebView2 仍活着且 resize/show 回调可能踩进销毁中的控件树。
+    window.shutdown_previews()
     window.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     # 应用内不存在显式 sys.exit / exit()，退出码恒为 0（与原先 app.exec() 返回值一致）

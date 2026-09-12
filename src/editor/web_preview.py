@@ -76,7 +76,17 @@ class WebPreviewAdapter(QObject, ABC, metaclass=_AdapterMeta):
         时序与既有实现一致：加载完成后才触发导出。
 
         本方法是**一次性**的：调用后适配器即进入终结流程，回调触发后
-        自动释放（控件与适配器本身一并销毁）。因此不要对预览用的实例调用本方法。
+        自动释放（控件与适配器本身一并销毁）。预览用的实例不调用本方法。
+        """
+
+    @abstractmethod
+    def close(self) -> None:
+        """释放后端资源（WebView2 controller 等）并销毁控件。
+
+        幂等、可重复调用。导出路径在回调触发后自动调用；预览路径由上层在
+        标签关闭 / 窗口退出时显式调用 —— QTabWidget.removeTab 不删除页面
+        控件也不触发 closeEvent，若不经本方法，每个标签页的 controller 与
+        渲染进程会随标签累积、永不回收。
         """
 
 

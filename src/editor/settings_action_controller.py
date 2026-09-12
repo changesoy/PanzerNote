@@ -95,6 +95,8 @@ class SettingsActionController:
             "font_family": self._config.get_editor_setting("font_family", "Microsoft YaHei"),
             "font_size": self._config.get_editor_setting("font_size", 12),
             "code_font_family": self._config.get_code_font_family(),
+            "line_spacing": self._config.get_line_spacing(),
+            "code_line_spacing": self._config.get_code_line_spacing(),
             "wrap_mode": self._config.get_editor_setting("wrap_mode", "no_wrap"),
             "auto_save_interval": self._config.get_editor_setting("auto_save_interval", 30),
             "enable_completion": self._config.get_editor_setting("enable_completion", False),
@@ -111,6 +113,10 @@ class SettingsActionController:
         self._editor_tabs.set_highlight_current_line_all(editor["highlight_current_line"])
         self._editor_tabs.set_font_all(editor["font_family"], editor["font_size"])
         self._editor_tabs.set_code_font_all(editor["code_font_family"])
+        self._editor_tabs.set_line_spacing_all(editor["line_spacing"])
+        # 预览侧的排版属性（代码字体 / 正文行距 / 代码块行距）只存在于 CSS，
+        # 三项共用一次整页变量刷新，避免逐项重复重建
+        self._editor_tabs.refresh_preview_typography_all()
         self._editor_tabs.set_wrap_mode_all(editor["wrap_mode"])
         self._editor_tabs.apply_auto_minimap_all()
         self._editor_tabs.update_indent_settings_all()

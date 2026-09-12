@@ -18,7 +18,11 @@ import re
 import html as html_module
 from typing import Callable, List
 
-from ..core.settings_store import DEFAULT_CODE_FONT_FAMILY
+from ..core.settings_store import (
+    DEFAULT_CODE_FONT_FAMILY,
+    DEFAULT_CODE_LINE_SPACING,
+    DEFAULT_LINE_SPACING,
+)
 from ..utils.logger import get_logger
 from . import math_render
 from . import mermaid_render
@@ -274,9 +278,10 @@ p { margin: 8px 0; }
 strong { font-weight: 700; }
 em { font-style: italic; }
 
-/* ========== 代码字体（--code-font 由预览/导出各自注入） ========== */
+/* ========== 代码字体与行距（--code-font / --code-line-spacing 由预览/导出各自注入） ========== */
 pre, pre code {
     font-family: var(--code-font);
+    line-height: var(--code-line-spacing);
 }
 
 /* ========== 行内代码 ========== */
@@ -344,6 +349,8 @@ def build_export_html_document(
     theme_colors: dict[str, str],
     title: str = "",
     code_font: str = DEFAULT_CODE_FONT_FAMILY,
+    line_spacing: float = DEFAULT_LINE_SPACING,
+    code_line_spacing: float = DEFAULT_CODE_LINE_SPACING,
     inline_mermaid: bool = True,
 ) -> str:
     """构建完整的导出 HTML 文档
@@ -353,6 +360,8 @@ def build_export_html_document(
       theme_colors：v2 色值集合（v2_export_colors 产物），提供主题色值
       title：文档标题（可选）
       code_font：代码块字体族名（设置项「代码字体」，默认 Courier New）
+      line_spacing：正文行距倍数（设置项「正文行距」）
+      code_line_spacing：代码块行距倍数（设置项「代码块行距」）
       inline_mermaid：是否把约 5.6 MB 的图表库内联进文档。HTML 导出（写盘、由
         用户浏览器打开）用 True 保持单文件自包含；PDF 导出必须用 False ——
         WebView2 的 NavigateToString 有 2 MB 上限，内联后会直接失败，
@@ -361,7 +370,7 @@ def build_export_html_document(
     返回：完整的 HTML 文档字符串
 
     样式来源（Wave 1.5）：
-      - :root 内联主题色值定义 CSS 变量（变量名与预览模板一致）
+      - :root 内联主题色值与排版变量（变量名与预览模板一致）
       - 内容排版复用 MARKDOWN_LAYOUT_CSS（与预览单一来源）
       - body / pre 为导出特有（静态文档外壳，居中限定宽度）
 
@@ -405,6 +414,8 @@ def build_export_html_document(
     --bg-codeblock: {theme_colors["bg_codeblock"]};
     --scrollbar-thumb-hover: {theme_colors["text_disabled"]};
     --code-font: {code_font_css_stack(code_font)};
+    --line-spacing: {line_spacing:g};
+    --code-line-spacing: {code_line_spacing:g};
 }}"""
     export_shell_css = """/* ========== 导出文档外壳 ========== */
 body {
@@ -412,7 +423,7 @@ body {
     padding: 20px;
     max-width: 800px;
     margin: 0 auto;
-    line-height: 1.7;
+    line-height: var(--line-spacing);
     color: var(--text-primary);
 }
 pre {

@@ -14,13 +14,14 @@ import time
 
 from PyQt6.QtWidgets import (
     QWidget, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox,
-    QPushButton, QSpinBox, QComboBox, QGroupBox, QFormLayout,
+    QPushButton, QSpinBox, QDoubleSpinBox, QComboBox, QGroupBox, QFormLayout,
     QFontComboBox, QSlider, QScrollArea, QApplication
 )
 from PyQt6.QtCore import QObject, QEvent, Qt
 from PyQt6.QtGui import QFont, QWheelEvent
 
 from ..core.config import Config
+from ..core.settings_store import LINE_SPACING_MAX, LINE_SPACING_MIN
 from ..utils.feature_flags import is_enabled as _feature_is_enabled
 
 
@@ -200,6 +201,29 @@ class EditorSettingsDialog(QDialog):
         self.font_size_spin.setSuffix(" pt")
         editor_layout.addRow("字体大小:", self.font_size_spin)
 
+        # 行距：正文全篇；代码块只作用于预览与导出（编辑器内两者不区分）
+        # 区间直接取设置项的校验区间，避免界面与导入校验两套范围互相打架
+        self.line_spacing_spin = QDoubleSpinBox()
+        self.line_spacing_spin.setRange(LINE_SPACING_MIN, LINE_SPACING_MAX)
+        self.line_spacing_spin.setSingleStep(0.05)
+        self.line_spacing_spin.setDecimals(2)
+        self.line_spacing_spin.setSuffix(" 倍")
+        self.line_spacing_spin.setToolTip(
+            "正文行距（倍数）：作用于编辑器正文、Markdown 预览与导出文档。"
+        )
+        editor_layout.addRow("行间距:", self.line_spacing_spin)
+
+        self.code_line_spacing_spin = QDoubleSpinBox()
+        self.code_line_spacing_spin.setRange(LINE_SPACING_MIN, LINE_SPACING_MAX)
+        self.code_line_spacing_spin.setSingleStep(0.05)
+        self.code_line_spacing_spin.setDecimals(2)
+        self.code_line_spacing_spin.setSuffix(" 倍")
+        self.code_line_spacing_spin.setToolTip(
+            "代码块行距（倍数）：作用于 Markdown 预览与导出文档的代码块。\n"
+            "编辑器内的代码块与正文共用上方「行间距」。"
+        )
+        editor_layout.addRow("代码块行间距:", self.code_line_spacing_spin)
+
         self.wrap_mode_combo = QComboBox()
         self.wrap_mode_combo.addItem("不换行", "no_wrap")
         self.wrap_mode_combo.addItem("限制行宽", "limit_width")
@@ -286,6 +310,8 @@ class EditorSettingsDialog(QDialog):
         for value_widget in (
             self.indent_size_spin,
             self.font_size_spin,
+            self.line_spacing_spin,
+            self.code_line_spacing_spin,
             self.autosave_spin,
             self.completion_min_chars_spin,
             self.secretary_size_slider,
@@ -354,6 +380,9 @@ class EditorSettingsDialog(QDialog):
             self.config.get_editor_setting("font_size", 12)
         )
 
+        self.line_spacing_spin.setValue(self.config.get_line_spacing())
+        self.code_line_spacing_spin.setValue(self.config.get_code_line_spacing())
+
         wrap_mode = self.config.get_editor_setting("wrap_mode", "no_wrap")
         index = self.wrap_mode_combo.findData(wrap_mode)
         if index >= 0:
@@ -403,6 +432,8 @@ class EditorSettingsDialog(QDialog):
                 "auto_minimap": self.auto_minimap_cb.isChecked(),
                 "font_family": self.font_family_combo.currentFont().family(),
                 "font_size": self.font_size_spin.value(),
+                "line_spacing": round(self.line_spacing_spin.value(), 2),
+                "code_line_spacing": round(self.code_line_spacing_spin.value(), 2),
                 "code_font_family": self.code_font_combo.currentFont().family(),
                 "wrap_mode": self.wrap_mode_combo.currentData(),
                 "auto_save_interval": self.autosave_spin.value(),

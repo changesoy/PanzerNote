@@ -20,6 +20,15 @@ from .path_resolver import PathResolver, load_json, save_json, merge_dicts
 # 代码块字体默认值：编辑器代码块 / Markdown 预览 / 导出文档共用同一真相源
 DEFAULT_CODE_FONT_FAMILY = "Courier New"
 
+# 行距默认值（倍数）。正文行距作用于编辑器正文 + 预览 + 导出；代码块行距作用于
+# 预览与导出的代码块（编辑器内正文/代码块不区分，见 docs/architecture.md）。
+DEFAULT_LINE_SPACING = 1.5
+DEFAULT_CODE_LINE_SPACING = 0.75
+
+# 行距可接受区间：与 config_import_service 的校验区间一致，读取时兜底夹取
+LINE_SPACING_MIN = 0.5
+LINE_SPACING_MAX = 5.0
+
 
 class SettingsStore:
     """设置存储：settings dict + 命名空间访问"""
@@ -31,7 +40,8 @@ class SettingsStore:
             "font_family": "Microsoft YaHei",
             "font_size": 12,
             "code_font_family": DEFAULT_CODE_FONT_FAMILY,
-            "line_spacing": 1.5,
+            "line_spacing": DEFAULT_LINE_SPACING,
+            "code_line_spacing": DEFAULT_CODE_LINE_SPACING,
             "show_line_numbers": True,
             "auto_wrap": False,
             "wrap_mode": "no_wrap",
@@ -147,6 +157,22 @@ class SettingsStore:
         """
         value = self.get_editor_setting("code_font_family", DEFAULT_CODE_FONT_FAMILY)
         return str(value or DEFAULT_CODE_FONT_FAMILY)
+
+    def get_line_spacing(self) -> float:
+        """设置项「正文行距」倍数（编辑器 / 预览 / 导出共用的唯一读取入口）。"""
+        return self._read_line_spacing("line_spacing", DEFAULT_LINE_SPACING)
+
+    def get_code_line_spacing(self) -> float:
+        """设置项「代码块行距」倍数（预览 / 导出代码块共用，编辑器内不区分）。"""
+        return self._read_line_spacing("code_line_spacing", DEFAULT_CODE_LINE_SPACING)
+
+    def _read_line_spacing(self, key: str, default: float) -> float:
+        """读行距并兜底：非法值回退默认，越界夹取到可接受区间。"""
+        try:
+            value = float(self.get_editor_setting(key, default))
+        except (TypeError, ValueError):
+            return default
+        return min(LINE_SPACING_MAX, max(LINE_SPACING_MIN, value))
 
     def set_editor_setting(self, key: str, value: Any) -> None:
         self._set_ns_setting("editor", key, value)

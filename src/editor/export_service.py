@@ -12,7 +12,11 @@
 关闭时行为：离屏适配器在 printToPdf 回调完成后自动释放（deleteLater）
 """
 
-from ..core.settings_store import DEFAULT_CODE_FONT_FAMILY
+from ..core.settings_store import (
+    DEFAULT_CODE_FONT_FAMILY,
+    DEFAULT_CODE_LINE_SPACING,
+    DEFAULT_LINE_SPACING,
+)
 from ..security.file_access_context import FileAccessContext
 from ..themes.theme_engine import ThemeEngine
 from ..themes.theme_v2.consumer import v2_export_variant_id
@@ -91,7 +95,9 @@ class ExportService:
     def export_html(content: str, is_markdown: bool, filepath: str, colors,
                     theme_engine: ThemeEngine, title: str = "",
                     file_guard=None,
-                    code_font: str = DEFAULT_CODE_FONT_FAMILY) -> None:
+                    code_font: str = DEFAULT_CODE_FONT_FAMILY,
+                    line_spacing: float = DEFAULT_LINE_SPACING,
+                    code_line_spacing: float = DEFAULT_CODE_LINE_SPACING) -> None:
         """导出为 HTML 文件
 
         参数：
@@ -103,11 +109,15 @@ class ExportService:
           title：文档标题
           file_guard：FileGuard 实例（必填），写入经 safe_write_bytes 安全执行
           code_font：代码块字体族名（设置项「代码字体」）
+          line_spacing：正文行距倍数（设置项「正文行距」）
+          code_line_spacing：代码块行距倍数（设置项「代码块行距」）
 
         异常：文件写入失败时抛出 IOError
         """
         body_html = ExportService.render_content(content, is_markdown, theme_engine)
-        full_html = build_export_html_document(body_html, colors, title, code_font)
+        full_html = build_export_html_document(
+            body_html, colors, title, code_font, line_spacing, code_line_spacing
+        )
 
         file_guard.safe_write_bytes(
             filepath,
@@ -119,7 +129,9 @@ class ExportService:
     def export_pdf(content: str, is_markdown: bool, parent_widget,
                    on_pdf_generated, colors, theme_engine: ThemeEngine,
                    title: str = "",
-                   code_font: str = DEFAULT_CODE_FONT_FAMILY) -> object:
+                   code_font: str = DEFAULT_CODE_FONT_FAMILY,
+                   line_spacing: float = DEFAULT_LINE_SPACING,
+                   code_line_spacing: float = DEFAULT_CODE_LINE_SPACING) -> object:
         """导出为 PDF 文件
 
         参数：
@@ -131,6 +143,8 @@ class ExportService:
           theme_engine：主题引擎，用于代码块语法高亮（必填）
           title：文档标题
           code_font：代码块字体族名（设置项「代码字体」）
+          line_spacing：正文行距倍数（设置项「正文行距」）
+          code_line_spacing：代码块行距倍数（设置项「代码块行距」）
 
         返回：离屏预览控件（调用方不应持有，由内部自动清理）
         """
@@ -138,7 +152,8 @@ class ExportService:
         # PDF 走 WebView2 导航：图表库不能内联（NavigateToString 有 2 MB 上限，
         # 内联 Mermaid 约 5.6 MB 会直接失败），改由适配器注入 vendor
         full_html = build_export_html_document(
-            body_html, colors, title, code_font, inline_mermaid=False
+            body_html, colors, title, code_font, line_spacing, code_line_spacing,
+            inline_mermaid=False,
         )
 
         # PDF 导出经 Web 预览适配器（离屏实例），后端由 create_preview_adapter 选择

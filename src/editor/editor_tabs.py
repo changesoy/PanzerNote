@@ -1058,6 +1058,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 v2_export_colors(self._theme_engine),
                 theme_engine=self._theme_engine,
                 code_font=self.config.get_code_font_family(),
+                line_spacing=self.config.get_line_spacing(),
+                code_line_spacing=self.config.get_code_line_spacing(),
             )
             return True, 0
         except RuntimeError as e:
@@ -1088,6 +1090,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 body_html,
                 v2_export_colors(self._theme_engine),
                 code_font=self.config.get_code_font_family(),
+                line_spacing=self.config.get_line_spacing(),
+                code_line_spacing=self.config.get_code_line_spacing(),
             )
             self.config.get_file_guard().safe_write_bytes(
                 filepath,
@@ -2427,17 +2431,31 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             editor.set_editor_font(family, size)
 
     def set_code_font_all(self, family: str):
-        """对所有已打开编辑器与预览应用「代码字体」设置。
-
-        编辑器侧改 Markdown 高亮器的代码 format；预览侧走整页重建
-        （字体只存在于 CSS，无法靠局部 JS 更新）。
+        """对所有已打开编辑器应用「代码字体」（编辑器侧改 Markdown 高亮器的
+        代码 format；预览侧见 refresh_preview_typography_all）。
         """
         for editor in self._iter_editors():
             editor.set_code_font(family)
+
+    def set_line_spacing_all(self, spacing: float):
+        """对所有已打开编辑器应用「正文行距」。
+
+        编辑器内正文与代码块不区分（同一文本流按块设行距，切分代码块代价高），
+        代码块行距只作用于预览与导出，见 refresh_preview_typography_all。
+        """
+        for editor in self._iter_editors():
+            editor.set_line_spacing(spacing)
+
+    def refresh_preview_typography_all(self):
+        """刷新所有 Markdown 预览的排版 CSS（代码字体 / 正文行距 / 代码块行距）。
+
+        这三项只存在于 CSS：已加载的预览就地更新变量，未加载的由首屏整页灌入。
+        三者共用一次刷新，避免设置应用时重复整页重建。
+        """
         for i in range(self.count()):
             widget = self.widget(i)
             if isinstance(widget, MarkdownPreviewWidget):
-                widget.refresh_code_font_setting()
+                widget.refresh_typography_settings()
 
     def update_indent_settings_all(self):
         """缩进配置变更后，更新所有已打开编辑器的 Tab 显示宽度"""

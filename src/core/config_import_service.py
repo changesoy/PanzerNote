@@ -11,6 +11,7 @@ import json as json_module
 from typing import Dict, List, Optional, Tuple
 
 from ..utils.logger import get_logger
+from .settings_store import LINE_SPACING_MAX, LINE_SPACING_MIN
 from .workspace_store import WorkspaceStore
 
 
@@ -66,7 +67,8 @@ class ConfigImportService:
             "font_family": ((str,), None),
             "font_size": ((int,), (1, 200)),
             "code_font_family": ((str,), None),
-            "line_spacing": ((int, float), (0.5, 5.0)),
+            "line_spacing": ((int, float), (LINE_SPACING_MIN, LINE_SPACING_MAX)),
+            "code_line_spacing": ((int, float), (LINE_SPACING_MIN, LINE_SPACING_MAX)),
             "show_line_numbers": ((bool,), None),
             "auto_wrap": ((bool,), None),
             "wrap_mode": ((str,), None),
@@ -142,7 +144,7 @@ class ConfigImportService:
     })
 
     _NESTED_NUMERIC_REJECT_BOOL: Dict[str, frozenset] = {
-        "editor": frozenset({"font_size", "line_spacing", "auto_save_interval", "max_history_count"}),
+        "editor": frozenset({"font_size", "line_spacing", "code_line_spacing", "auto_save_interval", "max_history_count"}),
         "game": frozenset({"typing_reward_rate", "idle_reward_rate", "daily_typing_limit", "construction_time_rate", "construction_slots"}),
         "secretary": frozenset({"size_percent"}),
         "view": frozenset({"sidebar_width"}),

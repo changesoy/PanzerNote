@@ -46,6 +46,7 @@ except ImportError:
     HAS_MARKDOWN = False
 
 from ..core.config import Config
+from ..core.settings_store import DEFAULT_CODE_LINE_SPACING, DEFAULT_LINE_SPACING
 from ..editor.editor import Editor
 from ..utils.logger import get_logger
 from ..utils.feature_flags import is_enabled
@@ -109,6 +110,8 @@ PREVIEW_HTML_TEMPLATE = """<!DOCTYPE html>
     --scrollbar-thumb: var(--css-scrollbar-thumb);
     --scrollbar-thumb-hover: var(--css-scrollbar-thumb-hover);
     --code-font: var(--css-code-font);
+    --line-spacing: var(--css-line-spacing);
+    --code-line-spacing: var(--css-code-line-spacing);
     --sb-width: var(--css-sb-width);
     --sb-radius: var(--css-sb-radius);
     --sb-margin: var(--css-sb-margin);
@@ -119,7 +122,7 @@ body {{
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei UI",
                  "Microsoft YaHei", Helvetica, Arial, sans-serif;
     font-size: 14px;
-    line-height: 1.7;
+    line-height: var(--line-spacing);
     color: var(--text-primary);
     padding: 12px 20px 40px 20px;
     margin: 0;
@@ -176,13 +179,13 @@ body {{
     border-radius: 0 !important;
     font-family: var(--code-font);
     font-size: 14px;
-    line-height: 1.55;
+    line-height: var(--code-line-spacing);
     white-space: pre;
     color: var(--text-primary);
 }}
 .code-line {{
     display: block;
-    min-height: 1.55em;
+    min-height: calc(var(--code-line-spacing) * 1em);
     white-space: pre;
     background: transparent !important;
 }}
@@ -507,21 +510,34 @@ window.updateFoldVisibility = function(collapsedLinesJson) {{
 #  预览模板 CSS 变量注入（替代旧的正则颜色替换）
 # ════════════════════════════════════════════════════════
 
-def _preview_css_vars(theme_engine, code_font_family: str | None = None) -> dict[str, str]:
+def _preview_css_vars(
+    theme_engine,
+    code_font_family: str | None = None,
+    line_spacing: float | None = None,
+    code_line_spacing: float | None = None,
+) -> dict[str, str]:
     """预览 CSS 变量表（键为 CSS 变量短名，值为实际值）。
 
-    单一真相源：首屏模板注入块（_build_preview_css_vars）与主题切换时的
+    单一真相源：首屏模板注入块（_build_preview_css_vars）与主题切换/设置变更时的
     运行时更新（_css_vars_update_js）都从本表取值，避免两处漂移。
 
-    覆盖范围 = 预览中**全部随主题变化的样式**：颜色 token + 代码字体 +
-    滚动条尺寸。滚动条尺寸也纳入变量，主题切换才能不重载页面
+    覆盖范围 = 预览中**全部随主题或设置变化的样式**：颜色 token + 代码字体 +
+    行距 + 滚动条尺寸。滚动条尺寸也纳入变量，主题切换才能不重载页面
     （否则只能整页 set_html 重新灌入模板里的字面量）。
     """
     sb_width = int(v2_style_value(theme_engine, "scrollbar", "width", 12))
     sb_margin = int(v2_style_value(theme_engine, "scrollbar", "margin", 2))
+    # 行距是倍数，必须写成无单位数字（与 px 项同理：变量替换是纯文本替换，
+    # 带了单位会污染 line-height 与 calc()）
+    spacing = DEFAULT_LINE_SPACING if line_spacing is None else float(line_spacing)
+    code_spacing = (
+        DEFAULT_CODE_LINE_SPACING if code_line_spacing is None else float(code_line_spacing)
+    )
     # 颜色语义映射：CSS 变量名 → v2 token / recipe 值（B8：字面量 fallback = v1 light 值）
     return {
         "code-font": _code_font_css_stack(code_font_family),
+        "line-spacing": f"{spacing:g}",
+        "code-line-spacing": f"{code_spacing:g}",
         "bg-card": v2_token(theme_engine, "surface_primary", "#FFFFFF"),
         "text-primary": v2_token(theme_engine, "text_primary", "#212121"),
         "text-secondary": v2_token(theme_engine, "text_secondary", "#757575"),
@@ -549,15 +565,23 @@ def _preview_css_vars(theme_engine, code_font_family: str | None = None) -> dict
     }
 
 
-def _build_preview_css_vars(theme_engine, code_font_family: str | None = None) -> str:
+def _build_preview_css_vars(
+    theme_engine,
+    code_font_family: str | None = None,
+    line_spacing: float | None = None,
+    code_line_spacing: float | None = None,
+) -> str:
     """根据主题引擎构造 :root CSS 变量覆盖块（首屏整页模板注入用）。
 
     B2：纯消费 Theme v2（semantic token + markdown/scrollbar recipe），无 v1 回退。
     theme_engine 必须传入，不允许为 None。
-    code_font_family：设置项「代码字体」族名，缺省回退默认值。
+    code_font_family / line_spacing / code_line_spacing：设置项「代码字体 /
+    正文行距 / 代码块行距」，缺省回退各自默认值。
     """
     lines = [":root {"]
-    for k, v in _preview_css_vars(theme_engine, code_font_family).items():
+    for k, v in _preview_css_vars(
+        theme_engine, code_font_family, line_spacing, code_line_spacing
+    ).items():
         lines.append(f"    --css-{k}: {v};")
     lines.append("}")
     return "\n".join(lines)
@@ -736,7 +760,10 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         if not self._html_template_loaded:
             return
         vars_map = _preview_css_vars(
-            self._theme_engine, self.config.get_code_font_family()
+            self._theme_engine,
+            self.config.get_code_font_family(),
+            self.config.get_line_spacing(),
+            self.config.get_code_line_spacing(),
         )
         self.preview.run_javascript(_css_vars_update_js(vars_map))
 
@@ -760,11 +787,11 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self._mermaid_loaded = True
         self.preview.run_javascript(payload)
 
-    def refresh_code_font_setting(self) -> None:
-        """「代码字体」设置变更后应用新 CSS（--code-font）。
+    def refresh_typography_settings(self) -> None:
+        """「代码字体 / 正文行距 / 代码块行距」变更后应用新 CSS。
 
-        与主题变更同一路径：已加载则就地更新变量，未加载则由首屏整页灌入。
-        渲染产物不含字体信息（字体纯 CSS），故无需清 Document 渲染缓存。
+        三项都只存在于 CSS（渲染产物不含排版信息），与主题变更同一路径：
+        已加载则就地更新变量，未加载则由首屏整页灌入，故无需清 Document 渲染缓存。
         """
         self._apply_preview_css_vars()
         self._update_preview()
@@ -891,7 +918,10 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             self.preview.run_javascript(js)
         else:
             css_vars = _build_preview_css_vars(
-                self._theme_engine, self.config.get_code_font_family()
+                self._theme_engine,
+                self.config.get_code_font_family(),
+                self.config.get_line_spacing(),
+                self.config.get_code_line_spacing(),
             )
             template = PREVIEW_HTML_TEMPLATE
             try:

@@ -23,7 +23,7 @@ DEFAULT_CODE_FONT_FAMILY = "Courier New"
 # 行距默认值（倍数）。正文行距作用于编辑器正文 + 预览 + 导出；代码块行距作用于
 # 预览与导出的代码块（编辑器内正文/代码块不区分，见 docs/architecture.md）。
 DEFAULT_LINE_SPACING = 1.5
-DEFAULT_CODE_LINE_SPACING = 0.75
+DEFAULT_CODE_LINE_SPACING = 1.35
 
 # 行距可接受区间：与 config_import_service 的校验区间一致，读取时兜底夹取
 LINE_SPACING_MIN = 0.5

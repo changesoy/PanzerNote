@@ -267,13 +267,29 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
             self._status_label.setText("已取消")
         if worker is not None and worker.isRunning():
             worker.cancel()
-            self._retiring_workers.add(worker)
-            worker.finished.connect(lambda w=worker: self._on_retiring_finished(w))
+            self._retire_worker(worker)
             if wait:
                 worker.wait()
         if wait:
             for w in list(self._retiring_workers):
                 w.wait()
+
+    def _retire_worker(self, worker: FindInFilesWorker) -> None:
+        """把收尾中的 worker 交给 _retiring_workers 持有，等线程真的退出再释放。
+
+        search_finished / finished 都是**跨线程队列投递**：主线程处理它们时 run()
+        往往还没返回，此刻若丢掉最后一个引用（`self._worker = None`），C++ QThread
+        会在运行中被析构，Qt 直接 qFatal 终止进程（Windows 下退出码 0xC0000409，
+        无 traceback）。实测：同目录下丢弃引用第 1 轮即崩，wait() 后丢弃连跑 5 轮存活。
+
+        已退出（isFinished）时直接交给事件循环销毁，不挂池子空等 —— 线程早已结束的
+        情况下 finished 不会再发，挂上就永远留在池子里。
+        """
+        if worker.isFinished():
+            worker.deleteLater()
+            return
+        self._retiring_workers.add(worker)
+        worker.finished.connect(lambda w=worker: self._on_retiring_finished(w))
 
     def _on_retiring_finished(self, worker: FindInFilesWorker) -> None:
         """已淘汰 worker 线程结束后释放。"""
@@ -287,6 +303,10 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
             return
         self._cancel_btn.setVisible(False)
         timed_out = bool(sender is not None and sender.timed_out)
+        # 先交淘汰池、再清引用：完成信号处理时 run() 往往还没返回，直接清空引用
+        # 会让 QThread 在运行中被析构（见 _retire_worker）
+        if isinstance(sender, FindInFilesWorker):
+            self._retire_worker(sender)
         self._worker = None
         if timed_out:
             self._status_label.setText("搜索超时，已自动停止（显示部分结果）")

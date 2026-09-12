@@ -171,6 +171,9 @@ def _b_input(s: Mapping[str, Any]) -> str:
     # 导致点加号无效（点到的其实是减号）。箭头同样只能靠 token 上色的 SVG。
     # 按钮带几何与 combo_box 的 drop-down 完全一致（宽 24 / origin padding /
     # 右 padding 26），保证同一表单列里两类控件的箭头落在同一竖线上。
+    # QDoubleSpinBox 必须与 QSpinBox 并列出现：二者同为 QAbstractSpinBox 的
+    # 兄弟而非父子，只写 QSpinBox 会让浮点输入框完全落到原生样式（箭头、内边距、
+    # 命中区都与同列的整数框不一致）。
     spin_w = 24
     spin_pad_r = 26
     up_url = _arrow_image_url(s["arrow"], "up")
@@ -178,12 +181,12 @@ def _b_input(s: Mapping[str, Any]) -> str:
     arrow_rules = ""
     if up_url and down_url:
         arrow_rules = f"""
-QSpinBox::up-arrow {{ image: url("{up_url}"); width: 10px; height: 10px; }}
-QSpinBox::down-arrow {{ image: url("{down_url}"); width: 10px; height: 10px; }}
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{ image: url("{up_url}"); width: 10px; height: 10px; }}
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{ image: url("{down_url}"); width: 10px; height: 10px; }}
 """
     # 补漏 C：placeholder 接线（QSS placeholder-text-color，QSpinBox 无该概念故拆分）
     return f"""
-QLineEdit, QSpinBox {{
+QLineEdit, QSpinBox, QDoubleSpinBox {{
     background-color: {s['background']};
     border: 1px solid {s['border']};
     border-radius: {s['radius']}px;
@@ -191,15 +194,15 @@ QLineEdit, QSpinBox {{
     color: {s['text']};
     selection-background-color: {s['selection_bg']};
 }}
-QSpinBox {{ padding-right: {spin_pad_r}px; }}
-QSpinBox::up-button {{
+QSpinBox, QDoubleSpinBox {{ padding-right: {spin_pad_r}px; }}
+QSpinBox::up-button, QDoubleSpinBox::up-button {{
     subcontrol-origin: padding;
     subcontrol-position: top right;
     width: {spin_w}px;
     border: none;
     background: transparent;
 }}
-QSpinBox::down-button {{
+QSpinBox::down-button, QDoubleSpinBox::down-button {{
     subcontrol-origin: padding;
     subcontrol-position: bottom right;
     width: {spin_w}px;
@@ -207,8 +210,8 @@ QSpinBox::down-button {{
     background: transparent;
 }}
 {arrow_rules}QLineEdit {{ placeholder-text-color: {s['placeholder']}; }}
-QLineEdit:focus, QSpinBox:focus {{ border-color: {s['focus_border']}; }}
-QLineEdit:disabled, QSpinBox:disabled {{
+QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {{ border-color: {s['focus_border']}; }}
+QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled {{
     background-color: {s['disabled_background']};
     color: {s['disabled_text']};
 }}

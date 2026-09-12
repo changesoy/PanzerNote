@@ -232,12 +232,23 @@ def render_plain_text_to_safe_html(text: str) -> str:
     return f"<pre>{html_module.escape(text)}</pre>"
 
 
+# 可击穿 <style> / 破坏 font-family 属性值的危险字符（含控制字符）。
+# 族名做白名单化时剔除；中文等安全字符保留，避免误伤合法字体名。
+_CODE_FONT_UNSAFE_RE = re.compile(r"""[<>"'`;{}()/\\\x00-\x1f\x7f]""")
+
+
 def code_font_css_stack(family: str | None = None) -> str:
     """由「代码字体」族名生成 CSS font-family 值（含通用回退）
 
     预览模板与导出文档共用；族名缺失时空回退到默认值，保证 --code-font 恒有效。
+    族名先做白名单化：剔除可击穿 <style> 的属性值危险字符（< > " ' ; { } ( ) / \\ 等），
+    防止经构造的设置 JSON 注入 HTML/脚本（预览与导出两份文档均经过本函数）。
+    过滤后为空再回退默认族名。
     """
     name = (family or "").strip() or DEFAULT_CODE_FONT_FAMILY
+    name = _CODE_FONT_UNSAFE_RE.sub("", name)
+    if not name:
+        name = DEFAULT_CODE_FONT_FAMILY
     quoted = f'"{name}"' if " " in name else name
     return f"{quoted}, Consolas, monospace"
 

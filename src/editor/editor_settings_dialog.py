@@ -104,6 +104,16 @@ class _WheelGuard(QObject):
         return super().eventFilter(obj, event)
 
 
+def _number_bounds(spin: QSpinBox | QDoubleSpinBox) -> tuple[int, int]:
+    """数字区在编辑框文本里的 [起, 止) 区间（prefix + 数字，不含后缀）。
+
+    数值框把 prefix + 数字 + suffix 塞进同一个内部 QLineEdit，「操作数字」与
+    「操作单位」的区分全靠这个区间。按 prefix / cleanText 长度计算，与字体、DPI 无关。
+    """
+    start = len(spin.prefix())
+    return start, start + len(spin.cleanText())
+
+
 class _NumericRangeGuard(QObject):
     """数值框只允许数字区域可编辑：单位（前缀/后缀，如 " 空格"/" pt"）不可点击、不可选中。
 
@@ -131,8 +141,7 @@ class _NumericRangeGuard(QObject):
         line_edit = self._spin.lineEdit()
         if line_edit is None:
             return
-        start = len(self._spin.prefix())
-        end = start + len(self._spin.cleanText())
+        start, end = _number_bounds(self._spin)
         position = line_edit.cursorPosition()
         if position < start:
             target = start
@@ -142,6 +151,36 @@ class _NumericRangeGuard(QObject):
             return
         # 仅在实际越界时移动，避免 setSelection 反复触发信号形成定时器回环
         line_edit.setSelection(target, 0)
+
+
+class _NumericSelectionGuard(QObject):
+    """数值框改值后不留选区：点上/下箭头、滚轮、键盘 ↑↓ 调完值，数字不再整段高亮。
+
+    QAbstractSpinBox 在聚焦与 step 路径上都会 `selectAll()`（实测：点上箭头后
+    `selectedText()` 就是整个数字），于是刚调完值就出现高亮选区 —— 看着像「被选中」，
+    下一次键入又会把它整体替换掉。用户要的是：改完值不选中，但点击输入照旧。
+
+    挂在 valueChanged 上把清除动作排到当前事件处理之后：同一轮里同步撤销会被 Qt
+    随后的定位覆盖（与 _NumericRangeGuard 同因，实测无效）。清选区后光标收到数字区
+    末尾 —— 与 _NumericRangeGuard 的落点约定一致，键入即追加在数字之后。
+
+    点击数字区定位光标是 QLineEdit 自身行为，不经过 valueChanged，故「点击输入」不受
+    影响；Tab 聚焦时的全选（键入即可整体替换，属于便捷而非「改值」）也不在改值路径上。
+    """
+
+    def __init__(self, spin: QSpinBox | QDoubleSpinBox) -> None:
+        super().__init__(spin)
+        self._spin = spin
+        spin.valueChanged.connect(self._schedule_clear)
+
+    def _schedule_clear(self) -> None:
+        QTimer.singleShot(0, self._clear)
+
+    def _clear(self) -> None:
+        line_edit = self._spin.lineEdit()
+        if line_edit is None or not line_edit.hasSelectedText():
+            return
+        line_edit.setSelection(_number_bounds(self._spin)[1], 0)
 
 
 class _ComboTextGuard(QObject):
@@ -376,7 +415,7 @@ class EditorSettingsDialog(QDialog):
         # ── 输入控件分组 ──
         # 下面三处登记（守卫、滚轮数值类、滚轮选择类）共用这两个清单，
         # 新增控件只需在此加一次，不会出现「某处漏登记」的静默失效。
-        # 数值框带单位，只有数字区域可编辑（单位不可点击、不可选中）。
+        # 数值框带单位，只有数字区域可编辑（单位不可点击、不可选中），且改值后不留选区。
         numeric_spins = (
             self.indent_size_spin,
             self.font_size_spin,
@@ -396,9 +435,11 @@ class EditorSettingsDialog(QDialog):
 
         # 守卫显式持有：守卫靠父子关系与信号连接存活，收进列表让生命周期一目了然，
         # 也避免「构造了却丢掉引用」被误读成无副作用的空语句。
+        # 数值框装两道：区间守卫（单位不可点/不可选）+ 选区守卫（改值后不留选区）。
         self._input_guards: list[QObject] = []
         for numeric_spin in numeric_spins:
             self._input_guards.append(_NumericRangeGuard(numeric_spin))
+            self._input_guards.append(_NumericSelectionGuard(numeric_spin))
         for text_combo in text_combos:
             self._input_guards.append(_ComboTextGuard(text_combo))
 

@@ -130,12 +130,18 @@ class _NumericRangeGuard(QObject):
     def __init__(self, spin: QSpinBox | QDoubleSpinBox) -> None:
         super().__init__(spin)
         self._spin = spin
+        # L8：QTimer 以 spin 为 parent —— 控件先销毁时定时器随之销毁，
+        # 回调不会打到已删除对象上（PyQt6 事件回调里逃逸是致命的）。
+        # （singleShot(0, ctx, callable) 重载在 PyQt6 不可用，故用成员定时器。）
+        self._timer = QTimer(spin)
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self._clamp)
         line_edit = spin.lineEdit()
         if line_edit is not None:
             line_edit.cursorPositionChanged.connect(self._schedule_clamp)
 
     def _schedule_clamp(self, _position: int) -> None:
-        QTimer.singleShot(0, self._clamp)
+        self._timer.start(0)
 
     def _clamp(self) -> None:
         line_edit = self._spin.lineEdit()
@@ -171,10 +177,14 @@ class _NumericSelectionGuard(QObject):
     def __init__(self, spin: QSpinBox | QDoubleSpinBox) -> None:
         super().__init__(spin)
         self._spin = spin
+        # L8：同 _NumericRangeGuard —— 成员定时器以 spin 为 parent，随其销毁
+        self._timer = QTimer(spin)
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self._clear)
         spin.valueChanged.connect(self._schedule_clear)
 
     def _schedule_clear(self) -> None:
-        QTimer.singleShot(0, self._clear)
+        self._timer.start(0)
 
     def _clear(self) -> None:
         line_edit = self._spin.lineEdit()

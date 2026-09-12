@@ -153,6 +153,8 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
         # 导航才 emit load_finished —— 否则消费方会在模板尚未 set_html 时
         # 永久置位，预览静默空白
         self._navigating = False
+        # L5：就绪前的 set_visible 期望值（初始化完成时按它显示）
+        self._pending_visible = True
 
         self._ready_signal.connect(self._flush_pending)
         self._schedule(self._init_async())
@@ -180,6 +182,9 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
 
     def set_visible(self, visible: bool) -> None:
         if self._controller is None:
+            # L5：就绪前记住期望值 —— 初始化完成时按该值显示，否则冷启动期间
+            # 切过显隐会被硬编码的「初始化后显示」重新显示出来
+            self._pending_visible = visible
             return
         try:
             self._controller.is_visible = visible
@@ -239,6 +244,12 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
                 "当前没有事件循环，无法初始化 WebView2 预览。\n"
                 "应用需经 qasync 事件循环启动（见 main.py）。"
             )
+            return
+        if loop.is_closed():
+            # L2：循环已关闭时 create_task 会抛 RuntimeError，且 coro 未被消费
+            #（"never awaited" 告警）；异常从 Qt 槽逃逸在 PyQt6 下是致命的
+            coro.close()
+            _log.debug("事件循环已关闭，丢弃待执行协程")
             return
         task = loop.create_task(coro)
         task.add_done_callback(_swallow)
@@ -308,7 +319,7 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
             )
             self._controller = await self._env.create_core_webview2_controller_async(ref)
             self._webview = self._controller.core_webview2
-            self._controller.is_visible = True
+            self._controller.is_visible = self._pending_visible
             self._controller.rasterization_scale = self._container.devicePixelRatioF()
             self._controller.should_detect_monitor_scale_changes = True
 
@@ -338,6 +349,9 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
         if self._pending_export is not None:
             html, on_done = self._pending_export
             self._pending_export = None
+            # L4：导出优先 —— 排队中的预览 html 让位（语义：两者并存时导出
+            # 用的文档更完整，预览随后会因内容更新重新 set_html）
+            self._pending_html = None
         if html is None and self._pending_html is not None:
             html = self._pending_html
             self._pending_html = None
@@ -362,7 +376,9 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
                 self._webview.set_virtual_host_name_to_folder_mapping(
                     VHOST,
                     self._resource_root,
-                    core.CoreWebView2HostResourceAccessKind.ALLOW,
+                    # L3：DENY_CORS —— 预览只加载本地资源（字体/mermaid vendor），
+                    # 不需要跨源读取；权限收窄到最小所需
+                    core.CoreWebView2HostResourceAccessKind.DENY_CORS,
                 )
             except Exception as exc:  # noqa: BLE001
                 self._fail(f"资源目录映射失败：{exc}")

@@ -40,7 +40,14 @@ def _load_help_fragment(app_dir: str, page_id: str) -> str:
     except OSError as e:
         get_logger(__name__).warning("帮助文档加载失败: %s, 错误: %s", path, e)
         return _MISSING_FRAGMENT
-    return render_markdown_to_safe_html(markdown_text)
+    return render_markdown_to_safe_html(
+        markdown_text,
+        # L10：QTextBrowser 无 JS 环境 —— 公式只会显示原始 TeX，mermaid 容器
+        # 是无样式的裸 div；帮助中心按纯文本语义渲染（公式/图表围栏回落为
+        # 源码或代码块），预览/导出路径不受影响
+        enable_math=False,
+        enable_mermaid=False,
+    )
 
 
 class HelpDialog(ThemeAwareMixin, QDialog):

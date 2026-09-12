@@ -112,7 +112,9 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
 
         self._cancel_btn = QPushButton("取消")
         self._cancel_btn.setVisible(False)
-        self._cancel_btn.clicked.connect(self._cancel_search)
+        # L7：clicked(bool checked) 不能直连 —— checked 会被当成 wait 形参
+        #（当前靠按钮不可勾选「巧合正确」）；显式 lambda 隔离信号签名
+        self._cancel_btn.clicked.connect(lambda: self._cancel_search())
         opts_layout.addWidget(self._cancel_btn)
 
         layout.addLayout(opts_layout)
@@ -254,11 +256,11 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
         self._cancel_btn.setVisible(True)
         self._status_label.setText("搜索中…")
 
-    def _cancel_search(self, wait: bool = False) -> None:
-        """取消当前搜索。默认不阻塞主线程；wait=True 时等待线程结束（仅窗口关闭场景）。
+    def _cancel_search(self, *, wait: bool = False) -> None:
+        """取消当前搜索。默认不阻塞主线程；wait=True 时等待线程结束（仅退出场景）。
 
-        被取消的 worker 转入 _retiring_workers 持有引用，等其自然结束后清理，
-        避免 QThread 在运行中被销毁。
+        wait 是关键字专用参数（L7）：clicked 信号会附带 bool checked，若允许
+        位置传参，按钮直连就会把 checked 当成 wait，在 UI 线程做无超时阻塞。
         """
         worker = self._worker
         self._worker = None
@@ -284,12 +286,17 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
 
         已退出（isFinished）时直接交给事件循环销毁，不挂池子空等 —— 线程早已结束的
         情况下 finished 不会再发，挂上就永远留在池子里。
+
+        L6：先 connect 再 check —— isFinished 与 connect 之间存在窗口（GIL 压得
+        极窄但非零），连接在前保证 finished 必有接收者；isFinished 为真时把
+        刚建立的连接无害地保留（cleanup 幂等，重复触发只是重复 deleteLater 前的
+        discard）。
         """
+        worker.finished.connect(lambda w=worker: self._on_retiring_finished(w))
         if worker.isFinished():
             worker.deleteLater()
             return
         self._retiring_workers.add(worker)
-        worker.finished.connect(lambda w=worker: self._on_retiring_finished(w))
 
     def _on_retiring_finished(self, worker: FindInFilesWorker) -> None:
         """已淘汰 worker 线程结束后释放。"""

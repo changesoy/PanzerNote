@@ -162,13 +162,25 @@ def extract_mermaid_blocks(html_text: str) -> str:
         body = match.group("body")
         if body.endswith("\n"):
             body = body[:-1]
+        # L9：保留 fence 上由 markdown_preview 注入的源码行锚点 —— 图表容器
+        # 丢掉它会让滚动同步在图表处只能靠相邻锚点插值
+        m = re.search(r'data-source-line="(\d+)"', attrs)
+        if m:
+            return (
+                f'<div class="{mermaid_render.CONTAINER_CLASS} src-line" '
+                f'data-source-line="{m.group(1)}">{body}</div>'
+            )
         return f'<div class="{mermaid_render.CONTAINER_CLASS}">{body}</div>'
 
     return CODEBLOCK_RE.sub(_replace, html_text)
 
 
 def render_markdown_to_safe_html(
-    markdown_text: str, highlight: CodeHighlighter | None = None
+    markdown_text: str,
+    highlight: CodeHighlighter | None = None,
+    *,
+    enable_math: bool = True,
+    enable_mermaid: bool = True,
 ) -> str:
     """将 Markdown 文本渲染为安全的 HTML
 
@@ -181,13 +193,19 @@ def render_markdown_to_safe_html(
       markdown_text：Markdown 源文本
       highlight：可选的代码高亮回调 (源码, 语言名) → HTML；提供时 fenced code
         块会被替换为高亮 HTML（导出与预览保持一致的语法高亮）
+      enable_math：是否注册公式语法（L10）——QTextBrowser 无 JS 环境，
+        公式只会显示原始 TeX，帮助中心等纯 Qt 消费方应传 False
+      enable_mermaid：是否把 mermaid 围栏转成图表容器（L10）——容器在
+        QTextBrowser 里是无 JS 的裸 div（连代码块样式都没有），传 False 时
+        围栏按普通代码块渲染
 
     返回：安全的 HTML 片段（不含 <html>/<body> 等外层标签）
     """
     def _finish(rendered: str) -> str:
         safe = strip_dangerous_html(rendered)
         # 图表围栏先于高亮转换：它不是代码，且转换产物不含 <pre><code>
-        safe = extract_mermaid_blocks(safe)
+        if enable_mermaid:
+            safe = extract_mermaid_blocks(safe)
         return _apply_code_highlight(safe, highlight) if highlight else safe
 
     if HAS_MARKDOWN_IT:
@@ -201,7 +219,8 @@ def render_markdown_to_safe_html(
             except ImportError:
                 get_logger(__name__).debug("mdit_py_plugins 未安装，任务列表语法不可用")
             # 公式语法与预览用同一套规则（math_render.register 是唯一注册点）
-            math_render.register(md)
+            if enable_math:
+                math_render.register(md)
             return _finish(md.render(markdown_text))
         except Exception:
             get_logger(__name__).debug("markdown-it 渲染失败，回退到 python-markdown")

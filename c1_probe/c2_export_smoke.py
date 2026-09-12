@@ -11,7 +11,9 @@
   → 本探针
 
 断言：回调类型 / %PDF- 字节头 / 体积 / 可解析页数 / 第 1 页正文文本 /
-pn_preview_*.pdf 临时文件中转无残留。
+pn_preview_*.pdf 临时文件中转无残留；随后在同一进程里把「含公式的导出文档」
+灌进真实 WebView2，断言 KaTeX 确实把 .math 渲染成了 .katex DOM
+（数学公式第一批的运行时证据）。
 
 历史：本文件原为 C2 时期的 QWebEngineView 版（AA_ShareOpenGLContexts +
 printToPdf），C3-D 摘除 WebEngine 后已失效，C4 改写为 WebView2 版。
@@ -35,6 +37,7 @@ from qasync import QEventLoop
 
 TIMEOUT_MS = 30_000
 MD = "# 标题\n\n中文正文与 `code`。\n\n```python\nprint('hello')\n```\n"
+MATH_MD = "行内 $E=mc^2$ 公式\n\n$$\n\\int_0^1 x\\,dx\n$$\n"
 
 PASSED: list[str] = []
 FAILED: list[str] = []
@@ -92,6 +95,64 @@ def inspect_pdf(data: bytes) -> tuple[int, str]:
         buffer.close()
 
 
+async def _eval(adapter, expr: str) -> object:
+    """仅探针使用的读取通道：直接取 WebView 求值（接口不提供返回值）。"""
+    import json
+
+    try:
+        raw = await adapter._webview.execute_script_async(expr)
+        return json.loads(raw) if raw else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+async def math_phase(host: QWidget, colors) -> None:
+    """含公式的导出文档在真实 WebView2 里的渲染结果。
+
+    KaTeX 走同步渲染（页面脚本在 load 事件前跑完），故导航完成即可读 DOM：
+    公式的最终证据是 .math 容器里出现 .katex 产物，而 KaTeX 若没加载出来
+    容器只会保留原始 TeX 文本 —— 两种情况下 PDF 文本都拿不到定界符，
+    所以必须在 DOM 层断言。
+    """
+    from src.editor.secure_markdown_renderer import (
+        build_export_html_document,
+        render_markdown_to_safe_html,
+    )
+    from src.editor.web_preview import create_preview_adapter
+
+    html = build_export_html_document(
+        render_markdown_to_safe_html(MATH_MD), colors, "公式冒烟"
+    )
+    adapter = create_preview_adapter(host)
+    loads: list[bool] = []
+    adapter.load_finished.connect(lambda ok: loads.append(ok))
+
+    for _ in range(300):
+        if getattr(adapter, "_ready", False):
+            break
+        await asyncio.sleep(0.05)
+    adapter.set_html(html)
+    for _ in range(200):
+        if loads:
+            break
+        await asyncio.sleep(0.05)
+    report("公式文档导航完成", bool(loads) and loads[0] is True, f"loads={loads}")
+
+    containers = await _eval(adapter, "document.querySelectorAll('.math').length")
+    report("公式容器（.math）两个：行内 + 块级", containers == 2, f"count={containers}")
+    katex = await _eval(adapter, "document.querySelectorAll('.katex').length")
+    report("KaTeX 渲染出 .katex DOM", katex == 2, f"count={katex}")
+    glyphs = await _eval(
+        adapter, "document.querySelectorAll('.katex .mord,.katex .mrel').length"
+    )
+    report(
+        "公式内含排版字符节点",
+        isinstance(glyphs, int) and glyphs > 0,
+        f"nodes={glyphs}",
+    )
+    adapter.set_visible(False)
+
+
 def main() -> int:
     app = QApplication(sys.argv)
     loop = QEventLoop(app)
@@ -144,6 +205,8 @@ def main() -> int:
 
     residue = sorted(leftover_preview_pdfs() - before)
     report("临时文件中转已清理", not residue, ",".join(residue))
+
+    loop.run_until_complete(math_phase(parent, colors))
 
     loop.close()
     print(f"\n[smoke] 通过 {len(PASSED)} 项，失败 {len(FAILED)} 项", flush=True)

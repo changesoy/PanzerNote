@@ -7,7 +7,7 @@
 **Markdown 预览与 PDF 导出改用 WebView2（行为变化）**
 
 - **摘除 Qt WebEngine，预览/导出换用系统共享的 WebView2 Runtime**：预览与 PDF 导出经 Web Preview Adapter 统一走 WebView2 后端（`src/editor/web_preview_webview2.py`，PyWinRT 绑定），`create_preview_adapter()` 恒返回 WebView2 适配器（单路径，无 feature flag 分支）。删除 `web_preview_webengine.py`、`webengine_runtime.py`（启动锚点）与 `webview2_preview` flag，`src/` 内不再有 WebEngine 引用，`main.py` 移除 WebEngine 前置的 `AA_ShareOpenGLContexts`。行为含义：预览不再降级为 QTextBrowser，也不再随包分发 Chromium——预览与导出的可用性取决于系统 WebView2 Runtime
-- **运行前提：系统 WebView2 Runtime**：Windows 11 与多数 Windows 10 已预装（开发机探测到 152.0.4191.66），运行时**不随包分发**。启动时 `webview2_runtime.log_availability()` 只读注册表检测，缺失时记录 error 日志、并在窗口显示后弹一次可见提示（含安装指引）；预览初始化失败时预览区显示可读占位提示，不再留空白
+- **运行前提：系统 WebView2 Runtime**：Windows 11 与多数 Windows 10 已预装（开发机探测到 152.0.4191.66），运行时**不随包分发**。启动时 `webview2_runtime.log_availability()` 只读注册表检测，缺失时记录 error 日志、并在窗口显示后弹一次可见提示（含安装指引与「打开下载页」按钮，地址取自 `webview2_runtime.DOWNLOAD_URL`，不自动下载/静默安装）；预览初始化失败时预览区显示可读占位提示，不再留空白
 - **事件循环合并（qasync）**：`main.py` 以 `qasync.QEventLoop` 取代 `app.exec()`，把 asyncio 与 Qt 事件循环合并到同一线程，并在主窗口创建前 `set_event_loop`——PyWinRT 禁止在 STA 上阻塞等待、`await` 又需要事件循环，二者必须在同一线程合并
 - **预览主题切换就地更新**：切换主题改为就地更新预览 CSS 变量（不再整页重载，避免闪烁）；预览/导出/编辑器代码块字体统一走新增「代码字体」设置项（默认 Courier New）
 

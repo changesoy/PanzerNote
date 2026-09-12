@@ -21,7 +21,6 @@ from PyQt6.QtCore import QObject, QEvent, Qt
 from PyQt6.QtGui import QFont, QWheelEvent
 
 from ..core.config import Config
-from ..core.settings_store import DEFAULT_CODE_FONT_FAMILY
 from ..utils.feature_flags import is_enabled as _feature_is_enabled
 
 
@@ -349,10 +348,7 @@ class EditorSettingsDialog(QDialog):
         target_font = QFont(font_family)
         self.font_family_combo.setCurrentFont(target_font)
 
-        code_font_family = self.config.get_editor_setting(
-            "code_font_family", DEFAULT_CODE_FONT_FAMILY
-        )
-        self.code_font_combo.setCurrentFont(QFont(code_font_family))
+        self.code_font_combo.setCurrentFont(QFont(self.config.get_code_font_family()))
 
         self.font_size_spin.setValue(
             self.config.get_editor_setting("font_size", 12)

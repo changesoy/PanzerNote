@@ -19,7 +19,6 @@ from ..themes.theme_v2.consumer import v2_export_colors
 from ..utils.error_handler import ErrorHandler, ErrorCategory
 
 from .editor_tabs import EditorTabWidget
-from .secure_markdown_renderer import DEFAULT_CODE_FONT_FAMILY
 
 
 class ExportActionController:
@@ -41,11 +40,8 @@ class ExportActionController:
         self._parent_widget = parent_widget
 
     def _code_font(self) -> str:
-        """设置项「代码字体」族名（未初始化时回退默认值）"""
-        value = self._editor_tabs.config.get_editor_setting(
-            "code_font_family", DEFAULT_CODE_FONT_FAMILY
-        )
-        return str(value or DEFAULT_CODE_FONT_FAMILY)
+        """设置项「代码字体」族名（PDF 与 HTML 导出共用）"""
+        return self._editor_tabs.config.get_code_font_family()
 
     def export_pdf(self) -> None:
         """导出当前文档为 PDF（经 WebView2 print_to_pdf_async 异步生成）。"""

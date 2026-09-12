@@ -12,12 +12,12 @@
 关闭时行为：离屏适配器在 printToPdf 回调完成后自动释放（deleteLater）
 """
 
+from ..core.settings_store import DEFAULT_CODE_FONT_FAMILY
 from ..security.file_access_context import FileAccessContext
 from ..themes.theme_engine import ThemeEngine
 from ..themes.theme_v2.consumer import v2_export_variant_id
 from .highlight_themes import highlight_code_html
 from .secure_markdown_renderer import (
-    DEFAULT_CODE_FONT_FAMILY,
     CodeHighlighter,
     render_markdown_to_safe_html,
     render_plain_text_to_safe_html,

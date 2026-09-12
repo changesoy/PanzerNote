@@ -23,7 +23,6 @@ from PyQt6.QtWidgets import QDialog, QFileDialog, QMessageBox, QWidget
 from .. import __version__
 from ..core.config import Config
 from ..core.config_import_service import ConfigImportError, ConfigImportService
-from ..core.settings_store import DEFAULT_CODE_FONT_FAMILY
 from ..core.timer_manager import TimerManager
 from ..game.secretary_widget import SecretaryWidget
 from ..utils.feature_flags import set_enabled as _feature_set_enabled
@@ -95,9 +94,7 @@ class SettingsActionController:
             "highlight_current_line": self._config.get_editor_setting("highlight_current_line", True),
             "font_family": self._config.get_editor_setting("font_family", "Microsoft YaHei"),
             "font_size": self._config.get_editor_setting("font_size", 12),
-            "code_font_family": self._config.get_editor_setting(
-                "code_font_family", DEFAULT_CODE_FONT_FAMILY
-            ),
+            "code_font_family": self._config.get_code_font_family(),
             "wrap_mode": self._config.get_editor_setting("wrap_mode", "no_wrap"),
             "auto_save_interval": self._config.get_editor_setting("auto_save_interval", 30),
             "enable_completion": self._config.get_editor_setting("enable_completion", False),
@@ -113,9 +110,7 @@ class SettingsActionController:
         self._editor_tabs.set_line_numbers_all(editor["show_line_numbers"])
         self._editor_tabs.set_highlight_current_line_all(editor["highlight_current_line"])
         self._editor_tabs.set_font_all(editor["font_family"], editor["font_size"])
-        self._editor_tabs.set_code_font_all(
-            editor.get("code_font_family", DEFAULT_CODE_FONT_FAMILY)
-        )
+        self._editor_tabs.set_code_font_all(editor["code_font_family"])
         self._editor_tabs.set_wrap_mode_all(editor["wrap_mode"])
         self._editor_tabs.apply_auto_minimap_all()
         self._editor_tabs.update_indent_settings_all()

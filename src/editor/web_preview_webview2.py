@@ -46,7 +46,8 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from ..utils.logger import get_logger
-from . import webview2_runtime
+from . import mermaid_render, webview2_runtime
+from .mermaid_render import READY_MESSAGE, needs_async_render, needs_vendor_injection
 from .web_preview import WebPreviewAdapter
 
 _log = get_logger(__name__)
@@ -54,8 +55,27 @@ _log = get_logger(__name__)
 # 虚拟主机名：资源根目录映射用（与 WebEngine 的 base_url 同职责）
 VHOST = "pnassets"
 
+# 图表等异步渲染的就绪等待上限（秒）
+_ASYNC_RENDER_TIMEOUT_S = 8.0
+_ASYNC_POLL_INTERVAL_S = 0.05
+
+# 打印渲染视口：Chromium 的打印排版与 CSS 一样按 1in = 96px 换算
+_CSS_PX_PER_INCH = 96.0
+# 取不到打印设置时的退化视口（A4 纸面）
+_FALLBACK_PRINT_SIZE = (794, 1123)
+
 # 共享环境对象：create_async 开销大，按进程缓存一份
 _ENV: core.CoreWebView2Environment | None = None
+
+
+def _safe_remove(path: str | None) -> None:
+    """尽力删除临时文件（Windows 下文件句柄占用是常态，忽略一切失败）。"""
+    if path is None:
+        return
+    try:
+        os.remove(path)
+    except OSError:
+        pass
 
 
 def _swallow(task: "asyncio.Task[object]") -> None:
@@ -107,6 +127,10 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
         self._pending_scripts: list[str] = []
         self._pending_export: tuple[str, Callable[[bytes], None]] | None = None
         self._nav_event: asyncio.Event | None = None
+        # 页面异步渲染（图表）就绪标志：本轮导航的文档是否声明了 pn-async，
+        # 以及页面是否已回传就绪信号
+        self._await_async_render = False
+        self._async_ready = False
 
         self._ready_signal.connect(self._flush_pending)
         self._schedule(self._init_async())
@@ -255,8 +279,10 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
 
         if html is not None:
             if on_done is not None:
-                self._navigate(html)
-                self._schedule(self._print_current(on_done))
+                # 必须复用 _export_async（而非直接 _navigate）：导出前的资源准备
+                # （图表库注入）都在那里。export_pdf 几乎总在适配器就绪前被调用，
+                # 因此这条补发路径才是常规路径，绕过它会让注入静默失效。
+                self._schedule(self._export_async(html, on_done))
             else:
                 self._navigate(html)
 
@@ -301,6 +327,9 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
             return
         if self._nav_event is not None:
             self._nav_event.clear()
+        # 每轮导航重置异步就绪门：图表文档要等页面回传就绪信号才打印
+        self._async_ready = False
+        self._await_async_render = needs_async_render(html)
         _log.debug("WebView2 导航：html %d 字符，资源根=%s", len(html), self._resource_root)
         self._webview.navigate_to_string(self._inject(html))
 
@@ -326,6 +355,10 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
             msg = args.try_get_web_message_as_string()
         except Exception:  # noqa: BLE001
             return
+        if msg == READY_MESSAGE:
+            # 页面异步渲染就绪（仅图表导出文档会发），不向 Qt 侧转发
+            self._async_ready = True
+            return
         if msg:
             self.message_received.emit(msg)
 
@@ -341,8 +374,68 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
 
     # ── PDF 导出 ────────────────────────────────────────────────────────
     async def _export_async(self, html: str, on_done: Callable[[bytes], None]) -> None:
+        self._size_viewport_for_print()
+        await self._provide_external_vendor(html)
         self._navigate(html)
         await self._print_current(on_done)
+
+    def _size_viewport_for_print(self) -> None:
+        """打印前把离屏视口调成纸面内容框尺寸。
+
+        离屏容器从不进入布局，尺寸停留在 Qt 的默认值；正文类内容在打印时按纸面
+        重新排版，故此前无需过问。但**按容器宽度计算自身宽度**的图表会因此失准：
+        Mermaid 甘特图取 ``parentElement.offsetWidth`` 作 viewBox 宽度，袖珍视口
+        下算出的宽度只有纸面的约 1/10，导出后整张图挤在纸面左侧。
+
+        视口取「纸面宽 - 左右页边距」：打印排版用的就是这个内容框宽度，图表据此
+        得到与纸面一致的宽度。``resize`` 后须显式同步 bounds —— 隐藏控件不派发
+        resizeEvent（见 _WebView2Host.resizeEvent）。
+        """
+        width, height = _FALLBACK_PRINT_SIZE
+        env = self._env
+        if env is not None:
+            try:
+                settings = env.create_print_settings()
+                w = (
+                    float(settings.page_width)
+                    - float(settings.margin_left)
+                    - float(settings.margin_right)
+                )
+                h = (
+                    float(settings.page_height)
+                    - float(settings.margin_top)
+                    - float(settings.margin_bottom)
+                )
+                if w > 0 and h > 0:
+                    width = int(w * _CSS_PX_PER_INCH)
+                    height = int(h * _CSS_PX_PER_INCH)
+            except Exception:  # noqa: BLE001
+                _log.debug("读取打印设置失败，视口退化为 A4", exc_info=True)
+        _log.debug("打印视口：%dx%d CSS px", width, height)
+        self._container.resize(width, height)
+        self._apply_bounds()
+
+    async def _provide_external_vendor(self, html: str) -> None:
+        """文档声明「图表库外置」时，经文档级脚本注入提供 vendor。
+
+        为什么不内联进文档：NavigateToString 对文档有 2 MB 上限（官方文档
+        "may not be larger than 2 MB"），内联 Mermaid（约 5.6 MB）会以
+        E_INVALIDARG 直接失败。文档级注入没有该上限（实测 5.6 MB 可用），
+        且脚本在页面自身脚本之前执行，页面里的 pnMermaidBoot 照常工作。
+
+        注入失败不致命：脚本缺失时页面渲染无产出，就绪门等超时后降级打印，
+        图表位置留空但正文照常导出（见 _await_page_render 的超时兜底）。
+        """
+        webview = self._webview
+        if webview is None or not needs_vendor_injection(html):
+            return
+        vendor = mermaid_render.vendor_js()
+        if not vendor:
+            return
+        try:
+            await webview.add_script_to_execute_on_document_created_async(vendor)
+        except Exception:  # noqa: BLE001
+            _log.warning("图表库注入失败，导出的 PDF 可能缺少图表", exc_info=True)
 
     async def _print_current(self, on_done: Callable[[bytes], None]) -> None:
         """等待当前导航完成 → 导出 PDF → 以 bytes 回调 → 释放自身。"""
@@ -356,6 +449,7 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
         try:
             if self._nav_event is not None:
                 await self._nav_event.wait()
+            await self._await_page_render()
             fd, path = tempfile.mkstemp(suffix=".pdf", prefix="pn_preview_")
             os.close(fd)
             settings = env.create_print_settings()
@@ -373,11 +467,31 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
             on_done(b"")
         finally:
             if path is not None:
-                try:
-                    os.remove(path)
-                except OSError:
-                    pass
+                _safe_remove(path)
             self.close()
+
+    async def _await_page_render(self) -> None:
+        """等待页面声明的异步渲染（图表）就绪后再打印。
+
+        NavigationCompleted 只代表文档装载完成：Mermaid 渲染是异步的，此刻 SVG
+        可能尚未生成，直接打印会把图表位置印成源码文本。页面渲染结束后经 title
+        shim 回传 READY_MESSAGE，此处轮询该标志（页面声明了 pn-async 时才等）。
+
+        用轮询而非 asyncio.Event.wait：消息回调不保证在事件循环线程上触发，
+        跨线程 set asyncio.Event 并不安全，而布尔标志的赋值是原子的。
+
+        超时兜底：超时后照常打印 —— 宁可少一张图，也不让整个导出失败。
+        """
+        if not self._await_async_render:
+            return
+        attempts = int(_ASYNC_RENDER_TIMEOUT_S / _ASYNC_POLL_INTERVAL_S)
+        for _ in range(attempts):
+            if self._async_ready:
+                return
+            await asyncio.sleep(_ASYNC_POLL_INTERVAL_S)
+        _log.warning(
+            "图表渲染未在 %.1fs 内就绪，本次导出可能缺少图表", _ASYNC_RENDER_TIMEOUT_S
+        )
 
     # ── 释放 ────────────────────────────────────────────────────────────
     def close(self) -> None:

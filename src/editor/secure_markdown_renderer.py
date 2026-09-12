@@ -21,6 +21,7 @@ from typing import Callable, List
 from ..core.settings_store import DEFAULT_CODE_FONT_FAMILY
 from ..utils.logger import get_logger
 from . import math_render
+from . import mermaid_render
 
 try:
     from markdown_it import MarkdownIt as _MarkdownIt
@@ -140,6 +141,28 @@ def _apply_code_highlight(html_text: str, highlight: CodeHighlighter) -> str:
     return CODEBLOCK_RE.sub(_replace, html_text)
 
 
+def extract_mermaid_blocks(html_text: str) -> str:
+    """把 ```mermaid 围栏从代码块形态转成图表容器 div（class 见 CONTAINER_CLASS）。
+
+    必须在代码高亮之前执行：图表源码不是代码，不该进高亮器，也不该出现在
+    预览的「复制代码」按钮序列里。转换后容器内容保持 HTML 转义形态 —— 浏览器
+    读回时（innerHTML / textContent）会还原实体，Mermaid 拿到的是原始源码；
+    若在此处 unescape，图表源码里的 <b> 之类会被浏览器当标签解析而丢失。
+
+    非 mermaid 围栏原样返回，故本函数可无差别地作用在所有渲染产物上。
+    """
+    def _replace(match: re.Match[str]) -> str:
+        attrs = match.group("code_attrs") or ""
+        if extract_language_from_code_attrs(attrs).lower() != mermaid_render.LANG:
+            return match.group(0)
+        body = match.group("body")
+        if body.endswith("\n"):
+            body = body[:-1]
+        return f'<div class="{mermaid_render.CONTAINER_CLASS}">{body}</div>'
+
+    return CODEBLOCK_RE.sub(_replace, html_text)
+
+
 def render_markdown_to_safe_html(
     markdown_text: str, highlight: CodeHighlighter | None = None
 ) -> str:
@@ -159,6 +182,8 @@ def render_markdown_to_safe_html(
     """
     def _finish(rendered: str) -> str:
         safe = strip_dangerous_html(rendered)
+        # 图表围栏先于高亮转换：它不是代码，且转换产物不含 <pre><code>
+        safe = extract_mermaid_blocks(safe)
         return _apply_code_highlight(safe, highlight) if highlight else safe
 
     if HAS_MARKDOWN_IT:
@@ -319,6 +344,7 @@ def build_export_html_document(
     theme_colors: dict[str, str],
     title: str = "",
     code_font: str = DEFAULT_CODE_FONT_FAMILY,
+    inline_mermaid: bool = True,
 ) -> str:
     """构建完整的导出 HTML 文档
 
@@ -327,6 +353,10 @@ def build_export_html_document(
       theme_colors：v2 色值集合（v2_export_colors 产物），提供主题色值
       title：文档标题（可选）
       code_font：代码块字体族名（设置项「代码字体」，默认 Courier New）
+      inline_mermaid：是否把约 5.6 MB 的图表库内联进文档。HTML 导出（写盘、由
+        用户浏览器打开）用 True 保持单文件自包含；PDF 导出必须用 False ——
+        WebView2 的 NavigateToString 有 2 MB 上限，内联后会直接失败，
+        此时文档改声明 EXTERNAL_VENDOR_META_TAG，由适配器注入 vendor。
 
     返回：完整的 HTML 文档字符串
 
@@ -338,11 +368,28 @@ def build_export_html_document(
     公式资源按需内联：由 body_html 自动判定，HTML 导出与 PDF 导出共用同一
     判定，调用方无从遗漏。导出文件自包含（字体为 data URI），断网/换机器
     打开仍可显示；无公式的文档不背约 645 KB 的 vendor 体积。
+
+    图表（Mermaid）按需加入，并额外声明 <meta name="pn-async">：
+    图表是异步渲染，PDF 打印必须等页面回传就绪信号（适配器据此加第二道门）。
+    资源缺失时既不内联脚本、也不声明异步 —— 否则打印会白等到超时才降级。
+
+    inline_mermaid=False 时文档不内联 vendor，改声明 EXTERNAL_VENDOR_META_TAG，
+    由适配器经文档级脚本注入提供（仍声明 pn-async：注入完成后才渲染并回传就绪）。
     """
     title_tag = f"<title>{html_module.escape(title)}</title>" if title else ""
     has_math = math_render.has_math(body_html)
     math_head = math_render.style_fragment() if has_math else ""
     math_tail = math_render.script_fragment() if has_math else ""
+    # 导出文档恒用亮色变体（打印在白底上），图表主题同样取 default(light)。
+    # vendor 缺失且需自包含时 fragment 为空 → 此时也不该声明异步（等不到就绪信号）
+    has_mermaid = mermaid_render.has_mermaid(body_html)
+    mermaid_tail = (
+        mermaid_render.script_fragment(False, include_vendor=inline_mermaid)
+        if has_mermaid
+        else ""
+    )
+    vendor_meta = mermaid_render.EXTERNAL_VENDOR_META_TAG if mermaid_tail and not inline_mermaid else ""
+    async_meta = mermaid_render.ASYNC_META_TAG if mermaid_tail else ""
     root_vars = f""":root {{
     --text-primary: {theme_colors["text_primary"]};
     --text-secondary: {theme_colors["text_secondary"]};
@@ -385,6 +432,8 @@ pre code {
 <head>
 <meta charset="utf-8">
 {title_tag}
+{async_meta}
+{vendor_meta}
 <style>
 {root_vars}
 {MARKDOWN_LAYOUT_CSS}
@@ -395,5 +444,6 @@ pre code {
 <body>
 {body_html}
 {math_tail}
+{mermaid_tail}
 </body>
 </html>"""

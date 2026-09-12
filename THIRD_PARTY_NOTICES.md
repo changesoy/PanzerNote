@@ -33,13 +33,17 @@ PanzerNote 自身许可证：GPL-3.0-or-later（见 `LICENSE`）。
 
 与 pip 依赖不同，这些文件直接随仓库分发，许可证文本各随其目录。
 
-| 资产  | 版本   | 许可证 | 用途与位置                                                             |
-| ----- | ------ | ------ | ---------------------------------------------------------------------- |
-| KaTeX | 0.18.7 | MIT    | 数学公式渲染；`data/assets/vendor/katex/`（katex.min.js / katex.min.css / fonts/*.woff2 / LICENSE） |
+| 资产    | 版本   | 许可证 | 用途与位置                                                                                           |
+| ------- | ------ | ------ | ---------------------------------------------------------------------------------------------------- |
+| KaTeX   | 0.18.7 | MIT    | 数学公式渲染；`data/assets/vendor/katex/`（katex.min.js / katex.min.css / fonts/\*.woff2 / LICENSE） |
+| Mermaid | 12.0.0 | MIT    | 图表（流程图/时序图等）渲染；`data/assets/vendor/mermaid/`（mermaid.min.js / LICENSE）               |
 
 > 说明：KaTeX 样式与脚本在运行时**内联**进预览模板与导出的 HTML，字体转 data URI，
 > 因此预览与导出文件都是自包含的（断网可用，无 CDN 请求），符合「零运行时网络依赖」。
-> 升级时替换 `data/assets/vendor/katex/` 下的文件并同步本表版本号。
+> Mermaid 体积较大（约 5.6 MB），预览侧改为**懒注入**（首次出现图表时才注入），
+> 导出侧按需内联；导出文档带 `<meta name="pn-async">` 声明异步渲染，
+> PDF 打印据此等待渲染就绪后再开始。
+> 升级时替换 `data/assets/vendor/<名称>/` 下的文件并同步本表版本号。
 
 ## 可选依赖（格式化）
 

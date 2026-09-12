@@ -50,7 +50,12 @@ from ..editor.editor import Editor
 from ..utils.logger import get_logger
 from ..utils.feature_flags import is_enabled
 from ..themes.theme_aware_mixin import ThemeAwareMixin
-from ..themes.theme_v2.consumer import v2_color, v2_style_value, v2_token
+from ..themes.theme_v2.consumer import (
+    v2_active_variant,
+    v2_color,
+    v2_style_value,
+    v2_token,
+)
 from .highlight_themes import highlight_code_html
 
 # ════════════════════════════════════════════════════════
@@ -69,10 +74,12 @@ from .secure_markdown_renderer import (
     MARKDOWN_LAYOUT_CSS as _MARKDOWN_LAYOUT_CSS,
     code_font_css_stack as _code_font_css_stack,
     extract_language_from_code_attrs as _extract_language_from_code_attrs,
+    extract_mermaid_blocks as _extract_mermaid_blocks,
     strip_dangerous_html as _strip_dangerous_html,
 )
 from .document_render_cache import _DOC_RENDER_CACHE, clear_document_render_cache
 from . import math_render as _math_render
+from . import mermaid_render as _mermaid_render
 
 # ════════════════════════════════════════════════════════
 #  HTML 模板
@@ -413,26 +420,28 @@ function _schedulePreviewScrollReport() {{
 }}
 window.addEventListener("scroll", _schedulePreviewScrollReport, {{ passive: true }});
 
+// 页面尺寸在渲染后变化（图片加载完成 / 图表渲染出 SVG）时，锚点缓存与滚动
+// 位置都已过期，需要按上次的同步状态重算一次。
+window.resyncAfterLayout = function() {{
+    _nodesVersion = null;
+    _cachedNodes = null;
+    if (window.scrollToSourceLine) {{
+        window.scrollToSourceLine(
+            typeof window.__lastFracLine === "number" ? window.__lastFracLine : 1,
+            window.__lastTotalLines || 0,
+            window.__lastAtTop === true,
+            window.__lastAtBottom === true
+        );
+    }}
+}};
+
 window.resyncAfterImagesLoaded = function() {{
     document.querySelectorAll("img").forEach(function(img) {{
         if (img.__panzerNoteSyncBound) {{ return; }}
         img.__panzerNoteSyncBound = true;
 
-        var resync = function() {{
-            _nodesVersion = null;
-            _cachedNodes = null;
-            if (window.scrollToSourceLine) {{
-                window.scrollToSourceLine(
-                    typeof window.__lastFracLine === "number" ? window.__lastFracLine : 1,
-                    window.__lastTotalLines || 0,
-                    window.__lastAtTop === true,
-                    window.__lastAtBottom === true
-                );
-            }}
-        }};
-
-        img.addEventListener("load", resync);
-        img.addEventListener("error", resync);
+        img.addEventListener("load", window.resyncAfterLayout);
+        img.addEventListener("error", window.resyncAfterLayout);
     }});
 }};
 
@@ -590,7 +599,7 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self._last_render_text: str = ""
         self._last_render_html: str = ""
         self._md_parser = self._create_md_parser()
-        self._html_template_loaded = False
+        self._reset_template_state()
         self._preview_dirty = True
         self._last_sync_frac: float = 1.0
         self._last_at_top: bool = True
@@ -623,12 +632,28 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         v1.5.4 新增
         """
         if path != self._base_path:
-            self._html_template_loaded = False
+            self._reset_template_state()
         self._base_path = path
 
     def _on_load_finished(self, ok):
-        if ok:
-            self._html_template_loaded = True
+        if not ok:
+            return
+        self._html_template_loaded = True
+        # 整页灌入这条路（见 _push_to_preview 的 else 分支）不注入图表库，而
+        # 「首次推送就带着图表」恰好走它：会话恢复时内容在模板加载完成前就推了进来，
+        # 之后没有内容更新，图表便一直以源码文本留在页面上。故「模板已加载」这一
+        # 事实本身就要补齐一次能力 —— 注入载荷自带当前 #content 的渲染，
+        # 不需要再推一次内容（_mermaid_loaded 保证同一 JS 上下文只注入一次）。
+        self._ensure_mermaid_capability(self._last_render_html)
+
+    def _reset_template_state(self) -> None:
+        """整页（重新）加载前作废「模板已加载」与「图表库已注入」两项状态。
+
+        两者都只在同一个 JS 上下文内成立：重新导航会重置页面上下文，任何
+        「已注入」记忆都会失真。故集中在一处作废，避免将来只改一处留下静默失效。
+        """
+        self._html_template_loaded = False
+        self._mermaid_loaded = False
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
@@ -700,6 +725,26 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             return
         vars_map = _preview_css_vars(self._theme_engine, self._code_font_family())
         self.preview.run_javascript(_css_vars_update_js(vars_map))
+
+    def _is_dark_theme(self) -> bool:
+        """当前激活主题是否为深色（与 editor.py 同一判据）。"""
+        return v2_active_variant(self._theme_engine) == "dark"
+
+    def _ensure_mermaid_capability(self, html_content: str) -> None:
+        """首次出现图表时把 Mermaid vendor 懒注入页面（每个 JS 上下文一次）。
+
+        模板只在首屏加载一次，且不内联图表库（约 5.58 MB，绝大多数文稿用不到），
+        故首次真正需要时才经 run_javascript 注入。注入载荷自身会渲染当前
+        #content，与紧随其后的内容更新脚本互为幂等（见 mermaid_render 中
+        data-pn-graph 的说明），两者执行顺序不影响结果。
+        """
+        if self._mermaid_loaded or not _mermaid_render.has_mermaid(html_content):
+            return
+        payload = _mermaid_render.lazy_load_js(self._is_dark_theme())
+        if not payload:
+            return  # vendor 缺失：不置位，资产补齐后同一次会话内仍会尝试
+        self._mermaid_loaded = True
+        self.preview.run_javascript(payload)
 
     def _code_font_family(self) -> str:
         """当前设置的代码字体族名（缺省/未初始化时回退默认值）"""
@@ -785,6 +830,10 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         else:
             html_content = self._basic_md_to_html(text)
 
+        # 图表围栏 → 图表容器 div，必须在代码块处理之前：否则它会占掉
+        # 代码块序号（复制按钮索引）并被当成代码高亮
+        html_content = _extract_mermaid_blocks(html_content)
+
         if self._async_renderer and is_enabled("async_highlight"):
             html_content = self._process_code_blocks_async(html_content)
         else:
@@ -807,6 +856,7 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         - 否则：整页 setHtml(首次加载)。
         """
         if self._html_template_loaded:
+            self._ensure_mermaid_capability(html_content)
             escaped = json.dumps(html_content)
             doc = self.editor.document()
             assert doc is not None
@@ -817,8 +867,9 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             js = (
                 f"document.getElementById('content').innerHTML = {escaped};"
                 "_nodesVersion = null; _cachedNodes = null;"
-                # 公式在内容变换后重渲染（$..$ 是 KaTeX 客户端展开，不经 Python）
+                # 公式与图表都是客户端展开（不经 Python），内容变换后各自重跑
                 f"{_math_render.content_update_js()}"
+                f"{_mermaid_render.content_update_js(self._is_dark_theme())}"
                 f"window.__lastFracLine={frac:.4f};"
                 f"window.__lastTotalLines={total_lines};"
                 f"window.__lastAtTop={at};"
@@ -965,6 +1016,12 @@ a {{
 
             for token in tokens:
                 if token.type in ("fence", "code_block") and token.map:
+                    # 图表围栏稍后转成图表容器 div，不占代码块序号：
+                    # 否则 _code_block_source_lines 与真实代码块索引错位
+                    if token.type == "fence" and _mermaid_render.is_mermaid_fence(
+                        getattr(token, "info", "") or ""
+                    ):
+                        continue
                     self._code_block_source_lines.append(token.map[0] + 1)
 
                 if not token.map:
@@ -1197,6 +1254,10 @@ a {{
             html_content = self._render_markdown_with_source_map(text)
         else:
             html_content = self._basic_md_to_html(text)
+
+        # 与 _render_full 同一步骤：图表围栏先转成容器 div。否则下面这轮重渲染会把
+        # 它当普通代码块（转义后的源码文本），图表退化成文字。
+        html_content = _extract_mermaid_blocks(html_content)
 
         self._code_blocks = []
         block_idx = [0]

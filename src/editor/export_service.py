@@ -135,7 +135,11 @@ class ExportService:
         返回：离屏预览控件（调用方不应持有，由内部自动清理）
         """
         body_html = ExportService.render_content(content, is_markdown, theme_engine)
-        full_html = build_export_html_document(body_html, colors, title, code_font)
+        # PDF 走 WebView2 导航：图表库不能内联（NavigateToString 有 2 MB 上限，
+        # 内联 Mermaid 约 5.6 MB 会直接失败），改由适配器注入 vendor
+        full_html = build_export_html_document(
+            body_html, colors, title, code_font, inline_mermaid=False
+        )
 
         # PDF 导出经 Web 预览适配器（离屏实例），后端由 create_preview_adapter 选择
         adapter = create_preview_adapter(parent_widget)

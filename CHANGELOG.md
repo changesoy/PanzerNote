@@ -80,6 +80,20 @@
 - 修复字体下拉框（`QFontComboBox`）完全没有样式（系统默认外观，与普通下拉框不一致）：补进 combo_box recipe，下拉箭头改为按 token 颜色生成 SVG（Qt QSS 的 `::down-arrow` 无法给 image 重新上色）；生成失败记 warning 并退化为无箭头，不静默吞掉
 - 修复小秘书多行台词气泡被裁切（第三行起遮挡文字）：气泡高度原取自 `adjustSize()`（即 QLabel 的 sizeHint），而 `wordWrap` 标签的高度依赖宽度（`heightForWidth`），两者在换行文本下并不一致，而窗口留给气泡的空间只有约 25%。现按台词单行宽度（夹在 [0.55W, 0.9W]）求标签可用宽度、再以 `heightForWidth` 定高，并在气泡可见时按布局最小需求把窗口向上补高（底边不动、只增不减），气泡隐藏后收回基准高度
 
+**合并前 review 修复（安全 / 生命周期 / 崩溃防护）**
+
+- **修复「代码字体」族名可击穿 `<style>`（安全）**：`code_font_css_stack()` 此前只做「有空格加引号」，无任何过滤——经导入构造的设置 JSON 写入 `code_font_family: "X</style><script>…"` 可提前结束 style 元素并注入标记，绕过全部 sanitizer，影响预览与导出两份文档。现收敛为族名白名单化（仅保留 `[A-Za-z0-9 \-_.]`，过滤后为空回退默认值），预览与导出两条路径共用同一实现
+- **修复预览适配器没有释放路径（生命周期）**：`close()` 此前只服务导出路径，预览侧没有 teardown——每个 Markdown 标签页各持一个 WebView2 controller 与一组 `msedgewebview2` 进程，关标签与退出都不释放。现 `MarkdownPreviewWidget` 在关闭/销毁时调用 `preview.close()`（适配器内部摘除事件处理器、释放 controller，幂等），主窗口 `_finalize_close` 与 `main.py` 退出序列在控件树析构前统一关闭全部预览
+- **预览侧 WinRT 同步调用补异常防护（崩溃）**：`set_html` / `set_visible` / `set_resource_root` 内的 WinRT 调用此前无 try/except——渲染后的预览文档超过 `NavigateToString` 2 MB 上限（长笔记 + 内联样式 + 逐行 span 常数倍膨胀）时异常从 QTimer 槽逃逸，PyQt6 直接 abort。现三个方法统一转失败态显示可读提示；`_navigate` 前做体积判定（1.8 MB 阈值，留余量），超限给出明确提示而非裸 `E_INVALIDARG`
+- **失败提示不再被预览盖住**：失败路径先隐藏/关闭 controller 再显示提示 QLabel——WebView2 是原生子窗口（独立 HWND），Windows 下永远绘制在非原生 Qt 控件之上，不清理 controller 时「可读提示」实际是一块白板
+- **PyWinRT 绑定缺失时降级启动**：`main.py` 只检测 WebView2 Runtime（注册表），不检测 Python 绑定；`webview2-*`/`winrt-*` 缺失或损坏（依赖升级中断、杀软隔离）此前会让惰性导入的 ImportError 在启动期逃逸。现 `create_preview_adapter()` 捕获导入失败并返回降级适配器：应用照常启动，预览区显示安装指引与失败原因，导出走失败回调
+- **PDF 导出等待导航完成加超时**：`NavigationCompleted` 未派发（导出中关窗、WebView2 异常）时导出回调永不执行——既无文件也无提示，且适配器与临时 PDF 不释放。现 15s 超时走失败回调并清理
+- **导出导航归属标记**：`load_finished` 只对本适配器发起的导航发出——controller 创建时的初始空白文档若早于模板注入完成，会被消费方永久置位「模板已加载」，后续渲染静默失败（预览空白无提示）
+- **图表就绪超时对用户可见**：PDF 导出在图表 8s 未就绪时照常降级打印（宁可少一张图，行为不变），但此前面板仍提示成功、少图无任何信号，用户会当成 bug 反复重试。现经新增 `export_notice` 通道由小秘书提示「图表未在 8s 内渲染完成，本次导出可能缺少图表」；页面侧 `pnMermaidBoot` 同步异常也有 try/catch 兜底照常回传就绪
+- **修复搜索进行中退出应用的同类崩溃**：跨文件搜索面板被塞进 QStackedWidget，全仓无人调用其 `close()`——「等待线程结束再析构」防线不可达，搜索进行中直接退出仍会在解释器终结时析构运行中的 QThread（`0xC0000409`）。现面板新增 `shutdown()`（wait + 清空淘汰池），退出序列在析构前调用
+- **修复快捷键冲突提示不可见**：冲突校验在对话框已关闭之后才写入提示——用户点确认后对话框消失、快捷键没变、界面零反馈。现校验前移到对话框内：冲突时不关闭、就地显示「快捷键冲突：\<功能名\>」
+- 清理与收窄（无行为变化）：事件循环关闭后不再从 Qt 槽投递任务；资源映射权限 `ALLOW` 收窄为 `DENY_CORS`；就绪前的预览显隐调用不再被静默丢弃；数值框回调改用随控件销毁的成员 QTimer；图表容器保留源码行锚点（滚动同步不再只能插值）；帮助中心（QTextBrowser 无 JS）按纯文本语义渲染公式与图表围栏
+
 ## v2.2.0
 
 **帮助中心**

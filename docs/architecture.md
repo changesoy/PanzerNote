@@ -512,6 +512,8 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 - 加载完成：`NavigationCompleted` 事件 → 适配器 `load_finished` 信号；页面 → Python 消息：`chrome.webview.postMessage` → `add_web_message_received` → `message_received`（协议为 `<前缀>:<载荷>`，前缀见预览模板的 `window.pnPostMessage`；**不依赖 `document.title`**）
 - PDF 导出：`export_pdf` → `print_to_pdf_async`（临时文件中转后回传 bytes；`should_print_backgrounds = True` 对齐 WebEngine 的默认打印背景，否则代码块底色整片丢失）
 - 后端失败不可见即无效：Runtime 缺失或初始化异常时转入失败态，在预览区显示可读提示（`INSTALL_HINT` 或异常文案），不留空白
+- **释放职责（谁在什么时机关 controller）**：`close()` 是通用 teardown（幂等：摘除事件处理器 → 释放 controller → 兑掉排队导出）——「一次性」语义只属于 `export_pdf`。三条释放路径：① `MarkdownPreviewWidget` 关闭/析构时 `shutdown_preview()`；② 关闭 Markdown 标签页时 `EditorTabs` 触发同一调用（QTabWidget 不删除页面控件，不能指望父子链）；③ 退出序列在控件树析构**之前**经 `MainWindow.shutdown_previews()` 统一关闭全部面板的预览（`_finalize_close` 与 `main.py` 各一处，顺序在 `window.deleteLater()` 之前）。PyWinRT 绑定导入失败时 `create_preview_adapter()` 返回降级适配器（显示安装指引 + 原因，导出走失败回调），启动不因绑定损坏而崩溃
+- **同步接口防护**：`set_html` / `set_visible` / `set_resource_root` 内的 WinRT 调用全部包 try/except 转失败态（异常从 QTimer 槽逃逸在 PyQt6 下是 abort）；`_navigate` 前做体积判定（1.8 MB 阈值——`NavigateToString` 官方上限 2 MB，渲染产物是源码的数倍），超限给出可读提示。`load_finished` 只对本适配器经 `_navigate` 发起的导航发出（`_navigating` 归属标记），初始空白文档的完成事件不会误置「模板已加载」
 
 **数学公式与图表（C4）**：
 

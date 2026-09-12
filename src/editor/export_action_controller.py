@@ -39,9 +39,18 @@ class ExportActionController:
         self._secretary = secretary
         self._parent_widget = parent_widget
 
-    def _code_font(self) -> str:
-        """设置项「代码字体」族名（PDF 与 HTML 导出共用）"""
-        return self._editor_tabs.config.get_code_font_family()
+    def _typography(self) -> dict:
+        """导出所需的排版设置（设置项「代码字体 / 正文行距 / 代码块行距」）。
+
+        三者必须整体取自设置——曾漏传两个行距，导出只能吃到 `build_export_html_document`
+        的默认倍数，表现为「预览改了行距、导出纹丝不动」。
+        """
+        config = self._editor_tabs.config
+        return {
+            "code_font": config.get_code_font_family(),
+            "line_spacing": config.get_line_spacing(),
+            "code_line_spacing": config.get_code_line_spacing(),
+        }
 
     def export_pdf(self) -> None:
         """导出当前文档为 PDF（经 WebView2 print_to_pdf_async 异步生成）。"""
@@ -71,7 +80,7 @@ class ExportActionController:
                 on_pdf_ready,
                 v2_export_colors(self._theme_engine),
                 theme_engine=self._theme_engine,
-                code_font=self._code_font(),
+                **self._typography(),
             )
         except RuntimeError as e:
             QMessageBox.warning(self._parent_widget, "导出失败", str(e))
@@ -123,7 +132,7 @@ class ExportActionController:
                 v2_export_colors(self._theme_engine),
                 file_guard=self._editor_tabs.config.get_file_guard(),
                 theme_engine=self._theme_engine,
-                code_font=self._code_font(),
+                **self._typography(),
             )
             self._secretary.show_message(
                 f"已导出HTML: {os.path.basename(filepath)}"

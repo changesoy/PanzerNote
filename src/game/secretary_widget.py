@@ -50,10 +50,12 @@ _BASE_ASPECT_RATIO = 210 / 380
 _MARGIN_RIGHT = 10
 _MARGIN_BOTTOM = 5
 
-# 气泡内边距（SpeechBubble 布局的 contentsMargins 之和）与 QSS 边框宽度
+# 气泡内边距（SpeechBubble 布局的 contentsMargins）与 QSS 边框宽度
 # （见 apply_theme_colors 的 `border: 2px solid`）—— 两者共同决定文字的可用宽度
-_PAD_X = 14 + 14
-_PAD_Y = 12 + 12
+_PAD_H = 14
+_PAD_V = 12
+_PAD_X = 2 * _PAD_H  # 左右内边距之和
+_PAD_Y = 2 * _PAD_V  # 上下内边距之和
 _BORDER_W = 2
 _MIN_BUBBLE_HEIGHT = 40
 _DEFAULT_BUBBLE_MIN_W = 60
@@ -74,7 +76,7 @@ class SpeechBubble(QFrame):
         super().__init__(parent)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(_PAD_X // 2, _PAD_Y // 2, _PAD_X // 2, _PAD_Y // 2)
+        layout.setContentsMargins(_PAD_H, _PAD_V, _PAD_H, _PAD_V)
 
         self.label = QLabel()
         self.label.setWordWrap(True)

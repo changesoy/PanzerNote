@@ -30,12 +30,15 @@ _REG_PATHS: tuple[tuple[int, str], ...] = (
     (winreg.HKEY_CURRENT_USER, rf"SOFTWARE\Microsoft\EdgeUpdate\Clients\{_RUNTIME_GUID}"),
 )
 
+# WebView2 Runtime 官方下载页（指引文案与「打开下载页」按钮共用同一地址）
+DOWNLOAD_URL = "https://developer.microsoft.com/microsoft-edge/webview2/"
+
 # 缺失时的用户可读指引（预览占位与启动提示共用同一文案）
 INSTALL_HINT = (
     "未检测到 WebView2 Runtime，Markdown 预览与 PDF 导出不可用。\n\n"
     "WebView2 Runtime 是 Windows 系统组件（Windows 11 与多数 Windows 10 已预装）。\n"
     "如缺失，请安装 Microsoft Edge WebView2 Runtime 后重启 PanzerNote。\n\n"
-    "下载地址：https://developer.microsoft.com/microsoft-edge/webview2/"
+    f"下载地址：{DOWNLOAD_URL}"
 )
 
 

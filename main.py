@@ -103,13 +103,14 @@ def _activate_crash_log_dir(new_dir):
     _crash_log_dir = new_dir
 
 from PyQt6.QtWidgets import QApplication, QMessageBox
-from PyQt6.QtCore import QCoreApplication, QEvent
-from PyQt6.QtGui import QFont, QIcon
+from PyQt6.QtCore import QCoreApplication, QEvent, QUrl
+from PyQt6.QtGui import QDesktopServices, QFont, QIcon
 from qasync import QEventLoop
 
 from src import __version__
 from src.core.config import Config
 from src.core.app_context import AppContext
+from src.editor.webview2_runtime import DOWNLOAD_URL, INSTALL_HINT
 from src.ui.first_run_dialog import FirstRunDialog
 from src.utils.logger import setup_logging, get_logger
 from src.utils.feature_flags import init_flags
@@ -135,6 +136,24 @@ def _verify_version_consistency(logger):
             logger.warning("版本号格式异常: %s (期望 X.Y.Z)", __version__)
     except Exception as e:
         logger.debug("版本号解析检查跳过: %s", e)
+
+
+def _show_runtime_missing_dialog(parent) -> None:
+    """WebView2 Runtime 缺失时的启动提示。
+
+    用带按钮的 QMessageBox 而非 ``QMessageBox.warning``：后者是纯文本，
+    里面的下载地址只能手抄。按钮走系统浏览器打开官方下载页 —— 不引入任何
+    网络行为，也不代替用户安装。
+    """
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Icon.Warning)
+    box.setWindowTitle("缺少 WebView2 Runtime")
+    box.setText(INSTALL_HINT)
+    open_button = box.addButton("打开下载页", QMessageBox.ButtonRole.AcceptRole)
+    box.addButton("稍后", QMessageBox.ButtonRole.RejectRole)
+    box.exec()
+    if box.clickedButton() is open_button:
+        QDesktopServices.openUrl(QUrl(DOWNLOAD_URL))
 
 
 def main():
@@ -202,7 +221,7 @@ def main():
     # ── C3-D：WebView2 Runtime 检测 ────────────────────────────────────────
     # 摘除 WebEngine 后 WebView2 是唯一预览 / 导出后端，缺失即预览不可用；
     # 检测只读注册表（不导入 PyWinRT），故绑定损坏时也能报出真正原因。
-    from src.editor.webview2_runtime import INSTALL_HINT, log_availability
+    from src.editor.webview2_runtime import log_availability
 
     webview2_ready = log_availability()
 
@@ -267,9 +286,7 @@ def main():
     if not webview2_ready:
         # 可见提示：否则用户只会看到「预览空白」而无从判断原因
         # （预览区本身也会显示同一份指引，见 web_preview_webview2._show_hint）
-        from PyQt6.QtWidgets import QMessageBox
-
-        QMessageBox.warning(window, "缺少 WebView2 Runtime", INSTALL_HINT)
+        _show_runtime_missing_dialog(window)
 
     logger.info(profiler.get_report())
 

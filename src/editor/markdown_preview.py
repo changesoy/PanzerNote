@@ -1351,7 +1351,12 @@ a {{
                 f'<span class="code-line src-line" data-source-line="{line_no}">{line_html}</span>'
             )
 
-        return "\n".join(wrapped)
+        # 行与行之间**不能**留换行文本节点：.code-block 是 white-space: pre
+        # （无 source map 的裸文本回退路径要靠它保留换行），而 .code-line 是块级，
+        # 夹在两者之间的 "\n" 会被 pre 保留成一个匿名行盒 —— 每行代码因此多占
+        # 一条 line-height，实测行距翻倍（0.75 倍行距 → 实测 2 × 0.75 × 字号）。
+        # 行间分隔由 display: block 提供，不需要换行符。
+        return "".join(wrapped)
 
     @staticmethod
     def _build_container(index: int, code_html: str, source_line: Optional[int] = None) -> str:

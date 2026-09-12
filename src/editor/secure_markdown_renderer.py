@@ -417,9 +417,13 @@ def build_export_html_document(
     --line-spacing: {line_spacing:g};
     --code-line-spacing: {code_line_spacing:g};
 }}"""
+    # 字号基准必须与预览一致：预览模板 body 是 14px，导出若沿用浏览器默认值
+    # 16px，行距倍数（line-height 无单位）会按各自字号换算 —— 代码块实测
+    # 0.75 × 14 = 10.5px（预览）vs 0.75 × 16 = 12px（导出），用户能看出差别。
     export_shell_css = """/* ========== 导出文档外壳 ========== */
 body {
     font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;
+    font-size: 14px;
     padding: 20px;
     max-width: 800px;
     margin: 0 auto;

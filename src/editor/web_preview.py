@@ -46,6 +46,10 @@ class WebPreviewAdapter(QObject, ABC, metaclass=_AdapterMeta):
     # 能力 8：页面 -> Python 消息通道（WebView2 官方 postMessage）
     message_received = pyqtSignal(str)
 
+    # 导出降级提示（M4）：导出成功但图表未在就绪门超时前渲染完成等
+    # 「非致命降级」发生时发出；失败路径（回调 b""）不发。
+    export_notice = pyqtSignal(str)
+
     @abstractmethod
     def widget(self) -> QWidget:
         """返回可挂载到布局中的控件本体。"""

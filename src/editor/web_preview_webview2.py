@@ -549,6 +549,7 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
             return
 
         path: str | None = None
+        chart_ready = True
         try:
             if self._nav_event is not None:
                 try:
@@ -563,7 +564,7 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
                         "PDF 导出等待导航完成超时（%.0fs）", _EXPORT_NAV_TIMEOUT_S
                     )
                     raise
-            await self._await_page_render()
+            chart_ready = await self._await_page_render()
             fd, path = tempfile.mkstemp(suffix=".pdf", prefix="pn_preview_")
             os.close(fd)
             settings = env.create_print_settings()
@@ -577,6 +578,13 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
                 if not data.startswith(b"%PDF"):
                     data = b""
             on_done(data)
+            if data and not chart_ready:
+                # M4：就绪门超时后降级打印（宁可少一张图），但必须让用户可见，
+                # 否则「导出成功 + 图表缺失」会被当成 bug 反复重试
+                self.export_notice.emit(
+                    f"图表未在 {_ASYNC_RENDER_TIMEOUT_S:.0f}s 内渲染完成，"
+                    "本次导出的 PDF 可能缺少图表"
+                )
         except Exception:  # noqa: BLE001
             on_done(b"")
         finally:
@@ -584,28 +592,30 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
                 _safe_remove(path)
             self.close()
 
-    async def _await_page_render(self) -> None:
+    async def _await_page_render(self) -> bool:
         """等待页面声明的异步渲染（图表）就绪后再打印。
 
         NavigationCompleted 只代表文档装载完成：Mermaid 渲染是异步的，此刻 SVG
-        可能尚未生成，直接打印会把图表位置印成源码文本。页面渲染结束后经 title
-        shim 回传 READY_MESSAGE，此处轮询该标志（页面声明了 pn-async 时才等）。
+        可能尚未生成，直接打印会把图表位置印成源码文本。页面渲染结束后经官方
+        postMessage 回传 READY_MESSAGE，此处轮询该标志（页面声明了 pn-async 时才等）。
 
         用轮询而非 asyncio.Event.wait：消息回调不保证在事件循环线程上触发，
         跨线程 set asyncio.Event 并不安全，而布尔标志的赋值是原子的。
 
-        超时兜底：超时后照常打印 —— 宁可少一张图，也不让整个导出失败。
+        返回是否就绪：超时后照常打印 —— 宁可少一张图，也不让整个导出失败；
+        但「少图」须经 export_notice 对用户可见（M4），不允许静默降级。
         """
         if not self._await_async_render:
-            return
+            return True
         attempts = int(_ASYNC_RENDER_TIMEOUT_S / _ASYNC_POLL_INTERVAL_S)
         for _ in range(attempts):
             if self._async_ready:
-                return
+                return True
             await asyncio.sleep(_ASYNC_POLL_INTERVAL_S)
         _log.warning(
             "图表渲染未在 %.1fs 内就绪，本次导出可能缺少图表", _ASYNC_RENDER_TIMEOUT_S
         )
+        return False
 
     # ── 释放 ────────────────────────────────────────────────────────────
     def close(self) -> None:

@@ -12,6 +12,8 @@
 关闭时行为：离屏适配器在 printToPdf 回调完成后自动释放（deleteLater）
 """
 
+from typing import Callable
+
 from ..core.settings_store import (
     DEFAULT_CODE_FONT_FAMILY,
     DEFAULT_CODE_LINE_SPACING,
@@ -131,20 +133,23 @@ class ExportService:
                    title: str = "",
                    code_font: str = DEFAULT_CODE_FONT_FAMILY,
                    line_spacing: float = DEFAULT_LINE_SPACING,
-                   code_line_spacing: float = DEFAULT_CODE_LINE_SPACING) -> object:
+                   code_line_spacing: float = DEFAULT_CODE_LINE_SPACING,
+                   on_notice: Callable[[str], None] | None = None) -> object:
         """导出为 PDF 文件
 
         参数：
           content：原始文本
           is_markdown：是否按 Markdown 渲染
           parent_widget：父 widget（用于离屏预览控件的 parent）
-          on_pdf_generated：回调函数 (pdf_data: bytes, filepath: str) -> None
+          on_pdf_generated：回调函数 (pdf_data: bytes) -> None
           colors：v2_export_colors 产物（dict），提供主题色值
           theme_engine：主题引擎，用于代码块语法高亮（必填）
           title：文档标题
           code_font：代码块字体族名（设置项「代码字体」）
           line_spacing：正文行距倍数（设置项「正文行距」）
           code_line_spacing：代码块行距倍数（设置项「代码块行距」）
+          on_notice：非致命降级提示回调 (message: str) -> None（M4：如
+            图表未在就绪门超时前渲染完成，导出仍成功但可能少图，须让用户可见）
 
         返回：离屏预览控件（调用方不应持有，由内部自动清理）
         """
@@ -158,5 +163,7 @@ class ExportService:
 
         # PDF 导出经 Web 预览适配器（离屏实例），后端由 create_preview_adapter 选择
         adapter = create_preview_adapter(parent_widget)
+        if on_notice is not None:
+            adapter.export_notice.connect(on_notice)
         adapter.export_pdf(full_html, on_pdf_generated)
         return adapter.widget()

@@ -120,7 +120,12 @@ window.pnMermaidBoot = function () {
       }
     } catch (e) {}
   };
-  window.pnRenderMermaid().then(done, done);
+  // pnRenderMermaid 内部有同步阶段（查询/标记节点、pnMermaidApply），
+  // 同步抛错时 .then(done, done) 不会被触发 —— 就绪信号会永久缺失，
+  // 导出侧只能等 8s 超时降级。此处兜住同步异常并照常回传就绪。
+  try {
+    window.pnRenderMermaid().then(done, done);
+  } catch (e) { done(); }
 };
 
 window.pnMermaidApply();

@@ -73,6 +73,10 @@ class ExportActionController:
             def on_pdf_ready(pdf_data):
                 self._on_pdf_generated(pdf_data, filepath)
 
+            # M4：就绪门超时等非致命降级须经小秘书可见（导出仍成功，但少图）
+            def on_export_notice(message):
+                self._secretary.show_message(message)
+
             ExportService.export_pdf(
                 content,
                 is_md,
@@ -80,6 +84,7 @@ class ExportActionController:
                 on_pdf_ready,
                 v2_export_colors(self._theme_engine),
                 theme_engine=self._theme_engine,
+                on_notice=on_export_notice,
                 **self._typography(),
             )
         except RuntimeError as e:

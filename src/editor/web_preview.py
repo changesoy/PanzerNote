@@ -25,8 +25,8 @@ from __future__ import annotations
 from abc import ABC, ABCMeta, abstractmethod
 from typing import Callable
 
-from PyQt6.QtCore import QObject, pyqtSignal
-from PyQt6.QtWidgets import QWidget
+from PyQt6.QtCore import QObject, Qt, pyqtSignal
+from PyQt6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 
 class _AdapterMeta(type(QObject), ABCMeta):  # type: ignore[misc]
@@ -90,6 +90,57 @@ class WebPreviewAdapter(QObject, ABC, metaclass=_AdapterMeta):
         """
 
 
+class _FallbackPreviewAdapter(WebPreviewAdapter):
+    """PyWinRT 绑定导入失败时的最小降级适配器（M2）。
+
+    main.py 只检测 WebView2 Runtime（注册表），不检测 webview2-* / winrt-*
+    绑定是否可用；绑定缺失/损坏时（依赖升级中断、杀软隔离等）惰性导入
+    会抛 ImportError 并从 MainWindow 构造逃逸 → 启动期崩溃。
+
+    本适配器实现全部 8 项能力签名：加载/导出一律走失败回调并显示
+    可读提示（安装指引 + 导入失败原因），保证应用可启动、失败可见。
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__()
+        # 惰性导入：INSTALL_HINT 属 webview2_runtime，而 web_preview_webview2
+        # import 本模块，模块级导入会成环
+        from .webview2_runtime import INSTALL_HINT
+
+        self._container = QWidget()
+        label = QLabel(f"{INSTALL_HINT}\n\n（组件加载失败：{reason}）", self._container)
+        label.setWordWrap(True)
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+            | Qt.TextInteractionFlag.LinksAccessibleByMouse
+        )
+        layout = QVBoxLayout(self._container)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.addWidget(label)
+
+    def widget(self) -> QWidget:
+        return self._container
+
+    def set_html(self, html: str) -> None:
+        self.load_finished.emit(False)
+
+    def run_javascript(self, script: str) -> None:
+        pass
+
+    def set_visible(self, visible: bool) -> None:
+        pass
+
+    def set_resource_root(self, root: str | None) -> None:
+        pass
+
+    def export_pdf(self, html: str, on_done: Callable[[bytes], None]) -> None:
+        on_done(b"")
+
+    def close(self) -> None:
+        pass
+
+
 def create_preview_adapter(parent: QWidget | None = None) -> WebPreviewAdapter:
     """构造预览 / 导出适配器（WebView2 单路径）。
 
@@ -97,7 +148,20 @@ def create_preview_adapter(parent: QWidget | None = None) -> WebPreviewAdapter:
     不会波及预览与导出两处调用点。
 
     实现类在此惰性导入：后端模块 import 本模块，模块级导入会成环。
+    绑定导入失败（webview2-* / winrt-* 缺失或损坏）时返回降级适配器：
+    应用照常启动，预览区显示安装指引与失败原因，导出走失败回调。
     """
-    from .web_preview_webview2 import WebView2PreviewAdapter
+    try:
+        from .web_preview_webview2 import WebView2PreviewAdapter
+    except ImportError as exc:
+        from ..utils.logger import get_logger
+
+        get_logger(__name__).error(
+            "WebView2 Python 绑定加载失败，预览转入降级模式：%s", exc
+        )
+        fallback = _FallbackPreviewAdapter(str(exc))
+        if parent is not None:
+            fallback._container.setParent(parent)
+        return fallback
 
     return WebView2PreviewAdapter(parent)

@@ -58,6 +58,10 @@ VHOST = "pnassets"
 # NavigateToString 官方文档上限 2 MB；留余量（预览模板恒内联 KaTeX 约 645 KB）
 _MAX_NAVIGATE_BYTES = 1_800_000
 
+# 导出等待 NavigationCompleted 的上限（秒）：WebView2 异常时该事件可能
+# 永不派发，无限等会让导出静默无响应、adapter/controller 与临时文件全不释放
+_EXPORT_NAV_TIMEOUT_S = 15.0
+
 # 图表等异步渲染的就绪等待上限（秒）
 _ASYNC_RENDER_TIMEOUT_S = 8.0
 _ASYNC_POLL_INTERVAL_S = 0.05
@@ -144,6 +148,11 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
         self._nav_token: object | None = None
         # close() 幂等标志：导出完成后与预览 teardown 都可能触发释放
         self._closed = False
+        # 导航归属标记（M5）：NavigationCompleted 是所有导航的完成通知（含
+        # controller 创建时的初始空白文档），只有本适配器经 _navigate 发起的
+        # 导航才 emit load_finished —— 否则消费方会在模板尚未 set_html 时
+        # 永久置位，预览静默空白
+        self._navigating = False
 
         self._ready_signal.connect(self._flush_pending)
         self._schedule(self._init_async())
@@ -403,6 +412,7 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
         # 每轮导航重置异步就绪门：图表文档要等页面回传就绪信号才打印
         self._async_ready = False
         self._await_async_render = needs_async_render(html)
+        self._navigating = True
         _log.debug("WebView2 导航：html %d 字符，资源根=%s", len(html), self._resource_root)
         self._webview.navigate_to_string(self._inject(html))
 
@@ -440,6 +450,15 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
             ok = bool(args.is_success)
         except Exception:  # noqa: BLE001
             ok = True
+        if not self._navigating:
+            # 非本适配器发起的导航（controller 创建时的初始空白文档、页面内
+            # 导航等）：只驱动导出的导航门，不 emit —— 消费方收到 ok=True 会
+            # 永久置位「模板已加载」，届时预览静默空白（M5）
+            _log.debug("WebView2 导航完成（非本适配器发起）: success=%s", ok)
+            if self._nav_event is not None:
+                self._nav_event.set()
+            return
+        self._navigating = False
         _log.debug("WebView2 导航完成: success=%s", ok)
         if self._nav_event is not None:
             self._nav_event.set()
@@ -532,7 +551,18 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
         path: str | None = None
         try:
             if self._nav_event is not None:
-                await self._nav_event.wait()
+                try:
+                    await asyncio.wait_for(
+                        self._nav_event.wait(), timeout=_EXPORT_NAV_TIMEOUT_S
+                    )
+                except asyncio.TimeoutError:
+                    # NavigationCompleted 永不派发（导出中关窗、WebView2 异常）：
+                    # 无限等会让导出既无文件也无提示，且 adapter/controller 与
+                    # %TEMP% 下的 pn_preview_*.pdf 全不释放 —— 走失败回调清理。
+                    _log.error(
+                        "PDF 导出等待导航完成超时（%.0fs）", _EXPORT_NAV_TIMEOUT_S
+                    )
+                    raise
             await self._await_page_render()
             fd, path = tempfile.mkstemp(suffix=".pdf", prefix="pn_preview_")
             os.close(fd)

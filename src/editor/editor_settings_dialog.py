@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QSpinBox, QDoubleSpinBox, QComboBox, QGroupBox, QFormLayout,
     QFontComboBox, QSlider, QScrollArea, QApplication
 )
-from PyQt6.QtCore import QObject, QEvent, Qt
+from PyQt6.QtCore import QObject, QEvent, QTimer, Qt
 from PyQt6.QtGui import QFont, QWheelEvent
 
 from ..core.config import Config
@@ -102,6 +102,75 @@ class _WheelGuard(QObject):
                 QApplication.sendEvent(self._viewport, event)
                 return True
         return super().eventFilter(obj, event)
+
+
+class _NumericRangeGuard(QObject):
+    """数值框只允许数字区域可编辑：单位（前缀/后缀，如 " 空格"/" pt"）不可点击、不可选中。
+
+    QSpinBox / QDoubleSpinBox 把 prefix + 数字 + suffix 放在同一个内部 QLineEdit 里，
+    因此点击单位文字也会把光标放进单位内。这里在光标/选区索引越出数字区间时把它收回，
+    于是点单位、拖选到单位、按 End 都不会把光标停在单位里，也无法改写单位。
+
+    收回动作必须**延迟到当前回调之后**：QLineEdit 处理鼠标按下时先发
+    cursorPositionChanged、再继续完成自身的定位逻辑，若在信号处理里同步改回，
+    会被随后的定位覆盖（实测无效）。数字区间按 prefix/cleanText 长度计算，
+    与字体、DPI 无关。
+    """
+
+    def __init__(self, spin: QSpinBox | QDoubleSpinBox) -> None:
+        super().__init__(spin)
+        self._spin = spin
+        line_edit = spin.lineEdit()
+        if line_edit is not None:
+            line_edit.cursorPositionChanged.connect(self._schedule_clamp)
+
+    def _schedule_clamp(self, _position: int) -> None:
+        QTimer.singleShot(0, self._clamp)
+
+    def _clamp(self) -> None:
+        line_edit = self._spin.lineEdit()
+        if line_edit is None:
+            return
+        start = len(self._spin.prefix())
+        end = start + len(self._spin.cleanText())
+        position = line_edit.cursorPosition()
+        if position < start:
+            target = start
+        elif position > end:
+            target = end
+        else:
+            return
+        # 仅在实际越界时移动，避免 setSelection 反复触发信号形成定时器回环
+        line_edit.setSelection(target, 0)
+
+
+class _ComboTextGuard(QObject):
+    """组合框文字只作展示：不可编辑、不可选中、不可复制。
+
+    文字要与同列控件对齐，就必须保留内部编辑框：不可编辑的 QComboBox 由样式直接
+    把文字画在编辑区左边缘，而同列的 QSpinBox / QLineEdit 内部还有文本内缩，
+    偏移量随字体/DPI/样式变化（实测 2~6.5 逻辑像素），无法用固定 padding 补偿。
+    故把组合框设为可编辑并保留内部编辑框，沿用与 QSpinBox 相同的渲染路径。
+
+    但只读编辑框仍能被双击/三击/全选选中并复制。这里在任何选区生成时立即撤销
+    （选区创建与撤销同在当轮事件处理内，不会闪现），选区无法存在，复制自然无从
+    进行；只读已保证文字无法被改写。
+    """
+
+    def __init__(self, combo: QComboBox) -> None:
+        super().__init__(combo)
+        combo.setEditable(True)
+        line_edit = combo.lineEdit()
+        self._line_edit = line_edit
+        if line_edit is None:
+            return
+        line_edit.setReadOnly(True)
+        line_edit.selectionChanged.connect(self._clear_selection)
+
+    def _clear_selection(self) -> None:
+        line_edit = self._line_edit
+        if line_edit is not None and line_edit.hasSelectedText():
+            line_edit.deselect()
 
 
 class EditorSettingsDialog(QDialog):
@@ -227,15 +296,6 @@ class EditorSettingsDialog(QDialog):
         self.wrap_mode_combo = QComboBox()
         self.wrap_mode_combo.addItem("不换行", "no_wrap")
         self.wrap_mode_combo.addItem("限制行宽", "limit_width")
-        # 对齐修正：不可编辑的 QComboBox 文本直接绘制在编辑区左边缘，而同表单的
-        # QSpinBox / QLineEdit（含可编辑的 QFontComboBox）内部还有文本内缩，
-        # 导致本行文字比其它行偏左，且偏移量随字体/DPI/样式变化（实测 2~6.5 逻辑
-        # 像素），无法用固定 padding 补偿。改为「可编辑 + 只读行编辑框」，
-        # 与 QFontComboBox 走完全相同的渲染路径，自适应对齐；只读保证不可输入。
-        self.wrap_mode_combo.setEditable(True)
-        wrap_line_edit = self.wrap_mode_combo.lineEdit()
-        if wrap_line_edit is not None:
-            wrap_line_edit.setReadOnly(True)
         editor_layout.addRow("行宽模式:", self.wrap_mode_combo)
 
         self.autosave_spin = QSpinBox()
@@ -312,6 +372,27 @@ class EditorSettingsDialog(QDialog):
         secretary_layout.addRow("尺寸占比:", size_widget)
 
         scroll_layout.addWidget(secretary_group)
+
+        # 数值框：只有数字区域可编辑，单位（" 空格"/" pt"/" 倍"/" 秒"）不可点击
+        for numeric_spin in (
+            self.indent_size_spin,
+            self.font_size_spin,
+            self.line_spacing_spin,
+            self.code_line_spacing_spin,
+            self.autosave_spin,
+            self.completion_min_chars_spin,
+        ):
+            _NumericRangeGuard(numeric_spin)
+
+        # 组合框文字只作展示：不可编辑（否则可键入不存在的字体名等非法值并写进
+        # 配置）、不可选中、不可复制。四个组合框统一在此登记，原因见 _ComboTextGuard。
+        for text_combo in (
+            self.font_family_combo,
+            self.code_font_combo,
+            self.wrap_mode_combo,
+            self.motion_level_combo,
+        ):
+            _ComboTextGuard(text_combo)
 
         # 滚轮守卫：滚动本对话框时不得误改设置
         self._wheel_guard = _WheelGuard(scroll, self)

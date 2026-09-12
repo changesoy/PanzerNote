@@ -2,7 +2,7 @@
 """C3-A 探针：通过 WebPreviewAdapter 接口验证 WebView2 后端。
 
 与 C1.6 的区别：C1.6 直接调用裸 WebView2 API；本探针只经 Adapter 接口，
-用于确认 C3-A 的适配器实现（含就绪前入队、dpr 换算、title shim、
+用于确认 C3-A 的适配器实现（含就绪前入队、dpr 换算、官方消息通道、
 vhost 资源映射、临时文件中转导出）在真实运行时成立。
 
 用法：
@@ -34,8 +34,10 @@ PAGE_HTML = """<!doctype html><html><head><meta charset="utf-8">
 <script>
 window.addEventListener('load', function () {
   setTimeout(function () {
-    document.title = '__pzsync__:12.5:1';
-    document.getElementById('h').textContent = 'titled';
+    if (window.chrome && window.chrome.webview) {
+      window.chrome.webview.postMessage('__pzsync__:12.5');
+    }
+    document.getElementById('h').textContent = 'posted';
   }, 300);
 });
 </script>
@@ -94,9 +96,9 @@ async def flow(host: QWidget) -> None:
     await asyncio.sleep(0.6)
     report("3. run_javascript 执行", True, "已下发 2 段脚本（无返回值语义）")
 
-    # ── 4. 消息通道（title shim → postMessage）───────────────────────
+    # ── 4. 消息通道（chrome.webview.postMessage）─────────────────────
     ok = any(m.startswith("__pzsync__:") for m in msgs)
-    report("4. message_received（title shim）", ok, f"msgs={msgs[:3]}")
+    report("4. message_received（postMessage）", ok, f"msgs={msgs[:3]}")
 
     # ── 5. 资源根映射（vhost + <base href>）──────────────────────────
     adapter.run_javascript(

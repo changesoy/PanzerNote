@@ -140,6 +140,14 @@ class SettingsStore:
     def get_editor_setting(self, key: str, default: Any = None) -> Any:
         return self._get_ns_setting("editor", key, default)
 
+    def get_code_font_family(self) -> str:
+        """设置项「代码字体」族名（编辑器代码块 / 预览 / 导出共用的唯一读取入口）。
+
+        空串与未配置都回退到默认值，保证调用方拿到的一定是可用的族名。
+        """
+        value = self.get_editor_setting("code_font_family", DEFAULT_CODE_FONT_FAMILY)
+        return str(value or DEFAULT_CODE_FONT_FAMILY)
+
     def set_editor_setting(self, key: str, value: Any) -> None:
         self._set_ns_setting("editor", key, value)
 

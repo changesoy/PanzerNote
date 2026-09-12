@@ -451,7 +451,7 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 **浮动复制按钮**（WebView2 单路径后）：
 
 - 代码块容器 `.code-container` 内嵌 `<button class="code-copy-btn" data-code-index="N">`，由 CSS `.code-container:hover .code-copy-btn` 控制悬停显示；单路径化后不再需要 `QTextDocument` 命中测试与 `mouseMoveEvent` 判定
-- 点击由预览页内 JS 捕获（`e.target.closest('.code-copy-btn')`），经 `document.title = '__pncopy__:N'` 回传索引；WebView2 无 `titleChanged` 信号，后端注入脚本劫持 `document.title` setter 转发到 `chrome.webview.postMessage`，Python 侧经适配器 `message_received` 信号（`markdown_preview._on_preview_title`）接收并按索引取源码执行复制，并临时把按钮文案换成 ✔ 作为反馈
+- 点击由预览页内 JS 捕获（`e.target.closest('.code-copy-btn')`），经 `window.pnPostMessage('__pncopy__:N')` 回传索引；页面与宿主之间走 WebView2 官方消息通道（`chrome.webview.postMessage` → `add_web_message_received`），Python 侧经适配器 `message_received` 信号（`markdown_preview._on_preview_message`）接收并按索引取源码执行复制，并临时把按钮文案换成 ✔ 作为反馈
 - 复制源码由 Python 侧 `self._code_blocks[index]` 提供，不依赖渲染后的 DOM；QTextBrowser 时代用于 `QTextDocument.find()` 定位的一对不可见占位标记（`⌜N⌝ / ⌞N⌟`）及 `.code-marker` 样式已随单路径化删除（A 分支仍在用，其测试以 `@a_only` 门控在 B 上跳过）
 
 **源码行号同步**：
@@ -489,8 +489,8 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 **WebView2 后端集成**：
 
 - `MarkdownPreviewWidget` 经 `create_preview_adapter()` 构造 WebView2 后端（无 `webengine_runtime` 参数、无启动锚点）
-- 加载：`set_html` → `navigate_to_string`（后端注入 `document.title` → `postMessage` shim 与资源根 `<base href>`）；资源根：`set_resource_root` → `set_virtual_host_name_to_folder_mapping`；显示控制：`controller.is_visible`
-- 加载完成：`NavigationCompleted` 事件 → 适配器 `load_finished` 信号；JS → Python 消息：`add_web_message_received` → `message_received`
+- 加载：`set_html` → `navigate_to_string`（后端按需注入资源根 `<base href>`）；资源根：`set_resource_root` → `set_virtual_host_name_to_folder_mapping`；显示控制：`controller.is_visible`
+- 加载完成：`NavigationCompleted` 事件 → 适配器 `load_finished` 信号；页面 → Python 消息：`chrome.webview.postMessage` → `add_web_message_received` → `message_received`（协议为 `<前缀>:<载荷>`，前缀见预览模板的 `window.pnPostMessage`；**不依赖 `document.title`**）
 - PDF 导出：`export_pdf` → `print_to_pdf_async`（临时文件中转后回传 bytes；`should_print_backgrounds = True` 对齐 WebEngine 的默认打印背景，否则代码块底色整片丢失）
 - 后端失败不可见即无效：Runtime 缺失或初始化异常时转入失败态，在预览区显示可读提示（`INSTALL_HINT` 或异常文案），不留空白
 
@@ -500,7 +500,7 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 - **公式注入时机**：预览模板**始终内联一次**（模板只在首屏加载，之后仅换 `#content` 内容），并在每次内容更新后重跑渲染；导出文档按 `has_math()` **按需内联**，无公式的文档不背约 645 KB。
 - **图表（Mermaid 12.0.0）**：围栏在渲染阶段经 `secure_markdown_renderer.extract_mermaid_blocks()` 转成容器 div，class 用**私有 `pn-mermaid`** 而非 mermaid 约定的 `mermaid`（库自带「文档就绪后自动渲染所有 `.mermaid`」，会与我们由 Python 控制渲染时机的模型撞车）。转换必须早于代码块处理，否则图表会占掉代码块序号（复制按钮索引）并被高亮器处理。
 - **图表资产三条加载路径**：预览**懒注入**（首次出现围栏才 `run_javascript` 注入 vendor，`_mermaid_loaded` 随整页重载失效）；HTML 导出**按需内联**（写盘文件由用户浏览器打开，不经 `NavigateToString`，保持单文件自包含）；PDF 导出**外置注入**（`NavigateToString` 对文档有 2 MB 上限，内联 5.6 MB 会以 E_INVALIDARG 失败；文档只声明 `<meta name="pn-mermaid-vendor" content="external">`，由适配器经 `add_script_to_execute_on_document_created_async` 注入）。
-- **异步就绪门**：Mermaid 渲染是异步的，`NavigationCompleted` 只代表装载完成。导出文档带 `<meta name="pn-async">`，页面渲染结束经 title shim 回传 `mermaid_render.READY_MESSAGE`（适配器 `_on_web_message` 消费，不冒泡给预览）；`_print_current` 在导航之后轮询该标志再打印（8s 超时降级打印并告警）。用轮询而非 `asyncio.Event`：消息回调不保证在事件循环线程上触发。
+- **异步就绪门**：Mermaid 渲染是异步的，`NavigationCompleted` 只代表装载完成。导出文档带 `<meta name="pn-async">`，页面渲染结束经 `chrome.webview.postMessage` 回传 `mermaid_render.READY_MESSAGE`（适配器 `_on_web_message` 消费，不冒泡给预览）；`_print_current` 在导航之后轮询该标志再打印（8s 超时降级打印并告警）。用轮询而非 `asyncio.Event`：消息回调不保证在事件循环线程上触发。
 - **打印视口**：按容器宽度计算自身宽度的图表（Mermaid 甘特图取 `parentElement.offsetWidth`）在从不进入布局的离屏容器里会失准，导出后挤在纸面左侧一小条。故 `_export_async` 打印前把视口调整为纸面内容框尺寸（`page_width - 左右边距`，1in = 96 CSS px）。
 - **资源与许可**：`data/assets/vendor/{katex,mermaid}/` 随包分发（`PanzerNote.spec` 的 `datas=[('data','data')]` 整体收集，无需额外打包改动），登记于 [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md)。
 

@@ -15,7 +15,7 @@ Mermaid 作为随包 vendor 资产放在 data/assets/vendor/mermaid/（12.0.0，
 
 异步性（与 KaTeX 的关键差异）：Mermaid 渲染返回 Promise，导航完成只保证文档
 装载、不保证 SVG 已生成。故导出文档带 <meta name="pn-async">，页面渲染结束后
-经 title shim 回传 READY_MESSAGE；PDF 导出适配器据此新增第二道门，
+经 WebView2 官方消息通道回传 READY_MESSAGE；PDF 导出适配器据此新增第二道门，
 否则图表位置会印出未渲染的源码文本。
 """
 
@@ -62,7 +62,7 @@ ASYNC_META_TAG = '<meta name="pn-async" content="mermaid">'
 # 不经过 NavigateToString，故仍内联以保持单文件自包含。
 EXTERNAL_VENDOR_META_TAG = '<meta name="pn-mermaid-vendor" content="external">'
 
-# 页面异步渲染就绪信号（经 title shim 回传）
+# 页面异步渲染就绪信号（经 chrome.webview.postMessage 回传）
 READY_MESSAGE = "__pnready__"
 
 _BOOTSTRAP_JS = r"""
@@ -109,11 +109,16 @@ window.pnRenderMermaid = function (root) {
   });
 };
 
-// 仅导出文档（带 pn-async 声明）回传就绪信号：预览页不需要，也不必改标题
+// 仅导出文档（带 pn-async 声明）回传就绪信号：预览页不需要，HTML 导出文档
+// 也没有 pn-async（它由用户浏览器打开，无宿主可回传）。
 window.pnMermaidBoot = function () {
   var done = function () {
     if (!document.querySelector('meta[name="pn-async"]')) { return; }
-    try { document.title = '__PN_READY__'; } catch (e) {}
+    try {
+      if (window.chrome && window.chrome.webview) {
+        window.chrome.webview.postMessage('__PN_READY__');
+      }
+    } catch (e) {}
   };
   window.pnRenderMermaid().then(done, done);
 };

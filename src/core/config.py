@@ -157,6 +157,10 @@ class Config:
     def get_editor_setting(self, key: str, default: Any = None) -> Any:
         return self._settings_store.get_editor_setting(key, default)
 
+    def get_code_font_family(self) -> str:
+        """设置项「代码字体」族名（编辑器 / 预览 / 导出共用的唯一读取入口）。"""
+        return self._settings_store.get_code_font_family()
+
     def set_editor_setting(self, key: str, value: Any) -> None:
         self._settings_store.set_editor_setting(key, value)
 

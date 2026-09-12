@@ -11,7 +11,7 @@
 
 与接口的对应关系（8 项能力）：
   widget()            -> 容器 QWidget（WebView2 嵌入其 HWND）
-  set_html()          -> navigate_to_string（注入消息 shim 与 <base href>）
+  set_html()          -> navigate_to_string（注入 <base href>）
   run_javascript()    -> execute_script_async（fire-and-forget）
   set_visible()       -> controller.is_visible
   set_resource_root() -> set_virtual_host_name_to_folder_mapping
@@ -26,9 +26,9 @@
   - bounds 使用**物理像素**而 Qt 用逻辑像素 → dpr 换算封装在本文件内部，
     且原点取容器自身客户区（容器是独立 HWND），上层不得感知（C1.6 目视检查
     得出的必办项）。
-  - 预览模板经 document.title 回传消息，WebView2 无 titleChanged 信号 →
-    注入 JS 劫持 title setter 转发到 chrome.webview.postMessage，
-    模板与 markdown_preview.py 无需改动。
+  - 页面 → 宿主的消息走 WebView2 官方通道：页面调用
+    ``chrome.webview.postMessage``，本后端经 add_web_message_received 转成
+    message_received 信号；协议（消息前缀）见 markdown_preview 的预览模板。
 """
 
 from __future__ import annotations
@@ -79,11 +79,15 @@ def _safe_remove(path: str | None) -> None:
 
 
 def _swallow(task: "asyncio.Task[object]") -> None:
-    """fire-and-forget 任务的安全回收：取回异常避免未检索告警。"""
+    """fire-and-forget 任务的安全回收：取回异常避免未检索告警，并留下日志。
+
+    这里不能静默丢弃：``_execute_script`` 的失败（JS 报错、脚本未执行）
+    没有别的地方能看到。
+    """
     try:
         task.result()
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("WebView2 后台任务失败: %s", exc)
 
 
 class _WebView2Host(QWidget):
@@ -164,7 +168,15 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
             self._apply_resource_root()
 
     def export_pdf(self, html: str, on_done: Callable[[bytes], None]) -> None:
+        if self._failed:
+            # 已定失败：按接口约定立即回调 b""，不让调用方空等
+            on_done(b"")
+            return
         if not self._ready:
+            # 同一实例只服务一次导出。前一次尚未补发时先把它按失败兑现，
+            # 否则会被静默覆盖、那个调用方永远收不到回调。
+            if self._pending_export is not None:
+                self._pending_export[1](b"")
             self._pending_export = (html, on_done)
             return
         self._schedule(self._export_async(html, on_done))
@@ -205,10 +217,17 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
         task.add_done_callback(_swallow)
 
     def _fail(self, message: str) -> None:
-        """转入失败态：记录日志并在预览区显示可读提示（不再是空白）。"""
+        """转入失败态：记录日志、显示可读提示，并兑掉排队中的导出回调。
+
+        导出是一次性调用，调用方靠 on_done 收尾；若失败时丢弃回调，用户点
+        导出会毫无反应（连「PDF生成失败」提示都看不到），故此处也必须回调 b""。
+        """
         self._failed = True
         _log.error("WebView2 预览不可用：%s", message.replace("\n", " "))
         self._show_hint(message)
+        pending, self._pending_export = self._pending_export, None
+        if pending is not None:
+            pending[1](b"")
 
     def _show_hint(self, message: str) -> None:
         if self._hint_label is not None:
@@ -334,13 +353,13 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
         self._webview.navigate_to_string(self._inject(html))
 
     def _inject(self, html: str) -> str:
-        """注入消息 shim（必要）与资源根 base 标签（可选）。
+        """注入资源根 base 标签（可选；未声明资源根时原样返回）。
 
         必须插在文档最前，保证先于页面自身脚本执行。
         """
-        snippet = _TITLE_SHIM
-        if self._resource_root:
-            snippet += f'<base href="https://{VHOST}/">'
+        if not self._resource_root:
+            return html
+        snippet = f'<base href="https://{VHOST}/">'
         lower = html.lower()
         idx = lower.find("<head")
         if idx != -1:
@@ -374,9 +393,20 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
 
     # ── PDF 导出 ────────────────────────────────────────────────────────
     async def _export_async(self, html: str, on_done: Callable[[bytes], None]) -> None:
-        self._size_viewport_for_print()
-        await self._provide_external_vendor(html)
-        self._navigate(html)
+        """导出全程：前置准备（视口 / 图表库 / 导航）→ 打印。
+
+        前置阶段失败也必须兑现 on_done，否则本次导出会静默卡死（打印阶段由
+        ``_print_current`` 自己兜底，这里补上前置阶段）。
+        """
+        try:
+            self._size_viewport_for_print()
+            await self._provide_external_vendor(html)
+            self._navigate(html)
+        except Exception:  # noqa: BLE001
+            _log.error("PDF 导出前置阶段失败", exc_info=True)
+            on_done(b"")
+            self.close()
+            return
         await self._print_current(on_done)
 
     def _size_viewport_for_print(self) -> None:
@@ -505,18 +535,3 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
             self._webview = None
         self._container.deleteLater()
         self.deleteLater()
-
-
-# 消息 shim：劫持 document.title 的 setter，转发到 chrome.webview.postMessage。
-# 读值仍返回真实 title，故不改变页面自身对 title 的语义。
-_TITLE_SHIM = (
-    "<script>(function(){try{"
-    "var d=Object.getOwnPropertyDescriptor(Document.prototype,'title');"
-    "if(!d)return;"
-    "Object.defineProperty(document,'title',{configurable:true,"
-    "get:function(){return d.get.call(document);},"
-    "set:function(v){d.set.call(document,v);"
-    "try{if(window.chrome&&chrome.webview)chrome.webview.postMessage(String(v));}"
-    "catch(e){}}"
-    "});}catch(e){}})();</script>"
-)

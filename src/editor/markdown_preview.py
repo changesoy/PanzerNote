@@ -70,7 +70,6 @@ _IMG_SRC_RE = re.compile(
 
 from .secure_markdown_renderer import (
     CODEBLOCK_RE as _CODEBLOCK_RE,
-    DEFAULT_CODE_FONT_FAMILY as _DEFAULT_CODE_FONT_FAMILY,
     MARKDOWN_LAYOUT_CSS as _MARKDOWN_LAYOUT_CSS,
     code_font_css_stack as _code_font_css_stack,
     extract_language_from_code_attrs as _extract_language_from_code_attrs,
@@ -257,6 +256,20 @@ section[data-fold-heading].folded {{
 {content}
 </div>
 <script>
+// ========== 预览 → Python 消息通道（WebView2 官方 postMessage） ==========
+// 协议：`<前缀>:<载荷>`；前缀由 Python 侧 _on_preview_message 消费
+// （__pzsync__ 滚动同步 / __pnopen__ 外开链接 / __pncopy__ 复制代码块）。
+// 无宿主的场合（导出文档被普通浏览器打开）静默跳过，不抛错。
+window.pnPostMessage = function (message) {{
+    try {{
+        if (window.chrome && window.chrome.webview) {{
+            window.chrome.webview.postMessage(String(message));
+            return true;
+        }}
+    }} catch (e) {{}}
+    return false;
+}};
+
 // ========== 锚点缓存：layout 变化(内容/高度/宽度)即重建 ==========
 var _nodesVersion = null;
 var _cachedNodes = null;
@@ -264,7 +277,6 @@ var _cachedNodes = null;
 // 编辑器→预览 驱动滚动时的回声锁：在此时间戳前，预览自身的 scroll 事件
 // 视为回声，不回传给编辑器，避免双向同步形成回授环。
 var _previewScrollLock = 0;
-var _previewSyncNonce = 0;
 var _pvScrollTimer = null;
 
 // 收集 [data-source-line] 锚点：{{line, top}}(相对文档顶部的绝对像素)。
@@ -403,13 +415,13 @@ function _previewTopToLine() {{
     return line;
 }}
 
-// 预览滚动时把顶部源码行经 document.title 轻量回传给 Python(无需 QWebChannel)。
+// 预览滚动时把顶部源码行经消息通道回传给 Python。
 // performance.now() 早于 _previewScrollLock 说明是编辑器驱动的回声，跳过。
 function _reportPreviewScroll() {{
     if (performance.now() < _previewScrollLock) {{ return; }}
     var line = _previewTopToLine();
     if (line == null) {{ return; }}
-    document.title = "__pzsync__:" + line.toFixed(3) + ":" + (_previewSyncNonce++);
+    window.pnPostMessage("__pzsync__:" + line.toFixed(3));
 }}
 function _schedulePreviewScrollReport() {{
     if (_pvScrollTimer) {{ return; }}
@@ -465,13 +477,13 @@ window.updateFoldVisibility = function(collapsedLinesJson) {{
 
 (function() {{
     document.addEventListener('click', function(e) {{
-        // 链接点击 → 外部浏览器打开（经 document.title 桥回传，阻止预览内部导航）
+        // 链接点击 → 外部浏览器打开（经消息通道回传，阻止预览内部导航）
         var a = e.target.closest('a');
         if (a) {{
             var href = a.getAttribute('href');
             if (href != null && href.charAt(0) !== '#') {{
                 e.preventDefault();
-                document.title = '__pnopen__:' + href;
+                window.pnPostMessage('__pnopen__:' + href);
                 return;
             }}
         }}
@@ -480,7 +492,7 @@ window.updateFoldVisibility = function(collapsedLinesJson) {{
         e.stopPropagation();
         var idx = btn.getAttribute('data-code-index');
         if (idx == null) return;
-        document.title = '__pncopy__:' + idx;
+        window.pnPostMessage('__pncopy__:' + idx);
         btn.textContent = '\\u2714';
         setTimeout(function() {{ btn.textContent = '\\ud83d\\udccb'; }}, 800);
     }});
@@ -685,8 +697,8 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self._preview_visible = True
 
         self.preview.load_finished.connect(self._on_load_finished)
-        # 预览 -> 编辑器：JS 经消息通道回传顶部源码行
-        self.preview.message_received.connect(self._on_preview_title)
+        # 预览 -> 编辑器：页面经官方消息通道回传顶部源码行
+        self.preview.message_received.connect(self._on_preview_message)
 
         # 拖动分隔条改变预览宽度后，锚点像素位置整体变化，需重新同步；
         # 同时保存编辑区/预览分栏占比
@@ -723,7 +735,9 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         """
         if not self._html_template_loaded:
             return
-        vars_map = _preview_css_vars(self._theme_engine, self._code_font_family())
+        vars_map = _preview_css_vars(
+            self._theme_engine, self.config.get_code_font_family()
+        )
         self.preview.run_javascript(_css_vars_update_js(vars_map))
 
     def _is_dark_theme(self) -> bool:
@@ -745,13 +759,6 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             return  # vendor 缺失：不置位，资产补齐后同一次会话内仍会尝试
         self._mermaid_loaded = True
         self.preview.run_javascript(payload)
-
-    def _code_font_family(self) -> str:
-        """当前设置的代码字体族名（缺省/未初始化时回退默认值）"""
-        value = self.config.get_editor_setting(
-            "code_font_family", _DEFAULT_CODE_FONT_FAMILY
-        )
-        return str(value or _DEFAULT_CODE_FONT_FAMILY)
 
     def refresh_code_font_setting(self) -> None:
         """「代码字体」设置变更后应用新 CSS（--code-font）。
@@ -884,7 +891,7 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             self.preview.run_javascript(js)
         else:
             css_vars = _build_preview_css_vars(
-                self._theme_engine, self._code_font_family()
+                self._theme_engine, self.config.get_code_font_family()
             )
             template = PREVIEW_HTML_TEMPLATE
             try:
@@ -1479,16 +1486,19 @@ a {{
 
     # ──────────── 预览 -> 编辑器 反向同步 ────────────
 
-    def _on_preview_title(self, title: str):
-        """JS 经 document.title 回传消息，据此滚动编辑器、执行复制或打开链接。"""
-        if not title:
+    def _on_preview_message(self, message: str):
+        """页面经 WebView2 官方消息通道回传，据此滚动编辑器、复制或打开链接。
+
+        协议：``<前缀>:<载荷>``，前缀见预览模板里的 window.pnPostMessage。
+        """
+        if not message:
             return
-        if title.startswith("__pnopen__:"):
-            self._open_external_link(title[len("__pnopen__:"):])
+        if message.startswith("__pnopen__:"):
+            self._open_external_link(message[len("__pnopen__:"):])
             return
-        if title.startswith("__pncopy__:"):
+        if message.startswith("__pncopy__:"):
             try:
-                idx = int(title.split(":")[1])
+                idx = int(message.split(":")[1])
                 if 0 <= idx < len(self._code_blocks):
                     cb = QApplication.clipboard()
                     if cb is not None:
@@ -1496,9 +1506,9 @@ a {{
             except (ValueError, IndexError):
                 pass
             return
-        if not title.startswith("__pzsync__:"):
+        if not message.startswith("__pzsync__:"):
             return
-        parts = title.split(":")
+        parts = message.split(":")
         if len(parts) < 2:
             return
         try:

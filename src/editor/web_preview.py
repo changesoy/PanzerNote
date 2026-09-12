@@ -43,7 +43,7 @@ class WebPreviewAdapter(QObject, ABC, metaclass=_AdapterMeta):
     # 能力 6：加载完成（WebEngine loadFinished / WebView2 NavigationCompleted）
     load_finished = pyqtSignal(bool)
 
-    # 能力 8：JS -> Python 消息通道（替代 document.title hack）
+    # 能力 8：页面 -> Python 消息通道（WebView2 官方 postMessage）
     message_received = pyqtSignal(str)
 
     @abstractmethod

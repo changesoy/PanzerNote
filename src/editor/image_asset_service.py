@@ -4,10 +4,10 @@
 职责：把图片二进制写入「文档同级 assets/ 目录」，返回可插入 Markdown 的相对路径。
 
 关键设计：
-- 落盘目录固定为文档同级的 assets/：预览层 _resolve_local_images() 以文档目录为
-  base_path 做包含性校验，超出文档目录树的相对路径无法被预览解析。
-- 文件名强制 ASCII 安全：markdown-it 会把中文路径 percent-encode，含空格的图片语法
-  直接解析失败，而展示侧不做 percent-decode —— 因此落盘名只保留 [A-Za-z0-9-]，
+- 落盘目录固定为文档同级的 assets/：预览以后端资源根（= 当前文档目录）解析相对
+  路径，落在文档目录树之外的相对路径无法被预览解析。
+- 文件名强制 ASCII 安全：markdown-it 对含空格的图片语法直接解析失败，中文路径会被
+  percent-encode 成不可读的 src —— 因此落盘名只保留 [A-Za-z0-9-]，
   其余（含中文/空格）替换为下划线；原名无有效字符时回落为 img_时间戳。
 - 写入统一经 FileGuard.safe_write_bytes（原子写 + 大小上限），不做旁路 IO。
 - 仅对超过阈值的大图做优化：PNG 无损重存、JPEG 近无损重存（quality="keep"），

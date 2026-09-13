@@ -63,12 +63,6 @@ from .highlight_themes import highlight_code_html
 #  正则 / 常量
 # ════════════════════════════════════════════════════════
 
-# 匹配 <img src="..."> 标签中的 src 属性
-_IMG_SRC_RE = re.compile(
-    r'(<img\s[^>]*?)src="([^"]*)"',
-    re.IGNORECASE,
-)
-
 from .secure_markdown_renderer import (
     CODEBLOCK_RE as _CODEBLOCK_RE,
     MARKDOWN_LAYOUT_CSS as _MARKDOWN_LAYOUT_CSS,
@@ -889,8 +883,6 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         else:
             html_content = self._process_code_blocks(html_content)
 
-        html_content = self._resolve_local_images(html_content)
-
         # 包裹折叠 section（编辑器的折叠状态同步到预览；产物仅依赖 text）
         html_content = self._wrap_fold_sections(html_content, text)
 
@@ -1002,6 +994,9 @@ a {{
 {html_content}
 </body>
 </html>"""
+            # 文档目录即资源根：预览 HTML 中的相对图片路径（assets/xxx.ext）由
+            # 后端映射到 https://<vhost>/ 解析。不得改写成 file:// ——
+            # NavigateToString 文档以 https 为基址，Chromium 会拒绝 file:// 子资源。
             self.preview.set_resource_root(self._base_path or None)
             self.preview.set_html(full_html)
 
@@ -1107,46 +1102,6 @@ a {{
                 exc_info=True,
             )
             return self._render_markdown(text)
-
-    # ──────────── 本地图片路径解析 ────────────
-
-    def _resolve_local_images(self, html: str) -> str:
-        """将 HTML 中的相对图片路径转换为 file:// 绝对路径
-
-        处理 <img src="./img.png"> 和 <img src="img.png"> 等形式。
-        绝对路径、http(s):// 链接不受影响。
-
-        v1.5.4 新增
-        """
-        if not self._base_path:
-            return html
-
-        def _resolve_src(m):
-            prefix = m.group(1)
-            src = m.group(2)
-
-            if src.startswith(('http://', 'https://', 'file://', 'data:')):
-                return m.group(0)
-
-            if os.path.isabs(src):
-                return m.group(0)
-
-            abs_path = os.path.normpath(os.path.join(self._base_path, src))
-            try:
-                real_base = os.path.realpath(self._base_path)
-                real_abs = os.path.realpath(abs_path)
-                if not (real_abs == real_base or real_abs.startswith(real_base + os.sep)):
-                    return m.group(0)
-            except (OSError, ValueError):
-                return m.group(0)
-
-            if os.path.exists(abs_path):
-                file_url = QUrl.fromLocalFile(abs_path).toString()
-                return f'{prefix}src="{file_url}"'
-
-            return m.group(0)
-
-        return _IMG_SRC_RE.sub(_resolve_src, html)
 
     # ──────────── 折叠 section 包裹 ────────────
 
@@ -1340,7 +1295,6 @@ a {{
             return result
 
         html_content = _CODEBLOCK_RE.sub(_replace_and_count, html_content)
-        html_content = self._resolve_local_images(html_content)
         html_content = self._wrap_fold_sections(html_content, text)
         self._push_to_preview(html_content)
 

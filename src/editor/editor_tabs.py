@@ -40,7 +40,7 @@ from .find_replace import FindReplaceBar
 from .save_task_manager import SaveTaskManager, SaveState
 from .temp_session_manager import TempSessionManager
 from .eol_utils import detect_eol_from_bytes
-from .image_reference_scanner import find_missing_local_images
+from .image_reference_scanner import find_missing_local_images, rewrite_local_refs
 from .asset_migration_service import (
     MODE_COPY,
     MODE_MOVE,
@@ -2115,6 +2115,12 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 )
                 # 副本已落盘 → 迁移其引用的图片资源（COPY，源笔记的图不动）
                 self._apply_asset_migration(save_as_info.get("migration"))
+                # 目标同名冲突已改名 → 只改写这份副本（标签仍指向原文件，不动缓冲区）
+                self._rewrite_asset_refs(
+                    save_as_info.get("migration"),
+                    save_as_info["filepath"],
+                    save_as_info.get("encoding"),
+                )
                 # 恢复标题（去除 SAVING 阶段追加的 ⏳ 后缀）
                 self.setTabText(index, base_title)
                 if tab_id in self._pending_close_tab_ids:
@@ -2599,6 +2605,84 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 "有 %d 个图片资源未能迁移（源文件保留）", len(result.failed)
             )
 
+    @staticmethod
+    def _decode_document_bytes(
+        raw: bytes, encoding: Optional[str]
+    ) -> Optional[Tuple[str, str]]:
+        """解码文档字节：优先已知编码，未知时按打开文档的同一顺序兜底。"""
+        candidates: List[str] = []
+        for name in ([encoding] if encoding else []) + ["utf-8", "gbk", "utf-16"]:
+            if name and name.lower() not in [item.lower() for item in candidates]:
+                candidates.append(name)
+        for candidate in candidates:
+            try:
+                return raw.decode(candidate), candidate
+            except (UnicodeDecodeError, LookupError):
+                continue
+        return None
+
+    def _rewrite_asset_refs(
+        self,
+        plan: Optional[AssetMigrationPlan],
+        doc_path: str,
+        encoding: Optional[str] = None,
+        *,
+        shared_doc=None,
+    ) -> None:
+        """冲突改名后，把这一篇文档里的引用改写到新文件名（E6c1b2）。
+
+        只动 `doc_path` 这一篇：Move = 已搬到目标的 `.md`，Copy / Save As = 新写出的
+        副本，源文档逐字不动。读写走字节级（解码 → 只替换目标串区间 → 原编码写回），
+        BOM / 行尾 / 未改动内容都逐字节保留。
+        """
+        renames = plan.renames() if plan is not None else {}
+        if not renames:
+            return
+        if shared_doc is not None and shared_doc.dirty:
+            # 缓冲区与磁盘不一致（保存未落地）：改写任何一侧都可能丢用户改动。
+            # 交给 E6b 缺失检测兜底，不在这里赌。
+            get_logger(__name__).warning(
+                "文档尚有未保存改动，跳过图片引用改写: %s", doc_path
+            )
+            return
+
+        guard = self.config.get_file_guard()
+        try:
+            raw = guard.safe_read_bytes(
+                doc_path, context=FileAccessContext.USER_DOCUMENT_READ
+            )
+        except Exception as exc:  # noqa: BLE001
+            get_logger(__name__).warning("读取文档以改写图片引用失败: %s", exc)
+            return
+
+        decoded = self._decode_document_bytes(raw, encoding)
+        if decoded is None:
+            get_logger(__name__).warning("文档编码无法识别，跳过图片引用改写: %s", doc_path)
+            return
+        text, used_encoding = decoded
+
+        updated, count = rewrite_local_refs(
+            text, os.path.dirname(os.path.abspath(doc_path)), renames
+        )
+        if not count:
+            return
+
+        try:
+            guard.safe_write_bytes(
+                doc_path,
+                updated.encode(used_encoding),
+                context=FileAccessContext.USER_DOCUMENT_SAVE,
+            )
+        except Exception as exc:  # noqa: BLE001
+            get_logger(__name__).warning("改写文档图片引用失败: %s", exc)
+            return
+
+        if shared_doc is not None:
+            # 缓冲区必须与磁盘一致，否则标签里的引用仍是旧文件名（D21）。
+            # 编辑器内部一律用 LF 表示，故按 LF 归一化后回写 Document。
+            from .eol_utils import normalize_eol
+            shared_doc.set_content(normalize_eol(updated, "\n"))
+
     def _warn_asset_conflict(self, title: str, conflicts: List[str]) -> None:
         shown = "、".join(os.path.basename(path) for path in conflicts[:5])
         more = f" 等 {len(conflicts)} 个" if len(conflicts) > 5 else ""
@@ -2722,6 +2806,13 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             # .md 已落位后再迁移资源：迁移本身有 copy → verify 保底（源不丢），
             # 万一失败只是新文档断链，不会让原笔记丢图。
             self._apply_asset_migration(migration)
+            # 目标同名冲突已改名 → 改写这份文档的引用，并同步编辑器缓冲区
+            self._rewrite_asset_refs(
+                migration,
+                new_path,
+                shared_doc.encoding if shared_doc is not None else None,
+                shared_doc=shared_doc,
+            )
             return True
         except Exception as e:
             get_logger(__name__).error("移动文件失败: %s", e)
@@ -2779,6 +2870,12 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             # 副本已落位后再迁移资源；Copy 语义下源文档仍引用同一张图，
             # 独占判定因此天然得出 COPY（不会把源笔记的图搬走）。
             self._apply_asset_migration(migration)
+            # 目标同名冲突已改名 → 只改写这份副本，源文档与打开的标签都不动
+            self._rewrite_asset_refs(
+                migration,
+                new_path,
+                shared_doc.encoding if shared_doc is not None else None,
+            )
             return True
         except Exception as e:
             get_logger(__name__).error("复制文件失败: %s", e)

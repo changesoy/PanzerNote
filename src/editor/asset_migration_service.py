@@ -12,7 +12,8 @@
 - 执行必须保底安全：`copy target → verify sha256 → delete source`；
   任一步失败都不丢原资源，也不让状态比迁移前更差。
 
-调用顺序由接线方保证：**先 plan() 预检（冲突可整体中止）→ 搬 .md → 再 apply()**。
+调用顺序由接线方保证：**先 plan() 预检（不可解冲突可整体中止）→ 搬 .md → 再
+apply()**；有改名项（`plan.renames()`）时，最后按 span 改写目标文档里的引用。
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ from ..core.config import Config
 from ..utils.logger import get_logger
 from .image_asset_ledger import ImageAssetLedger
 from .image_reference_scanner import (
+    canonical_path_key,
     iter_markdown_files,
     resolve_document_refs,
     resolve_refs_in_text,
@@ -41,9 +43,8 @@ MODE_COPY = "copy"
 _CLEANABLE_DIRNAMES = frozenset({"PanzerNote_assets", "assets"})
 _HASH_CHUNK = 1024 * 1024
 
-
-def _key(path: str) -> str:
-    return os.path.normcase(os.path.normpath(os.path.abspath(path)))
+# canonical 路径键与引用解析共用同一实现：口径一致才谈得上「同一路径」
+_key = canonical_path_key
 
 
 def _sha256_of(path: str) -> str:
@@ -72,23 +73,44 @@ def _is_within(path: str, root: str) -> bool:
     return path_key == root_key or path_key.startswith(root_key + os.sep)
 
 
+def _allocate_free_name(dest_abs: str, *, limit: int = 999) -> Optional[str]:
+    """为目标目录里的同名冲突挑一个空闲名：`stem_1.ext`、`stem_2.ext`…
+
+    只给**这一份新副本**改名，目标目录里已存在的同名文件保持原样不动。
+    分配不出空闲名（极端情况）返回 None，由调用方按冲突整体中止。
+    """
+    directory = os.path.dirname(dest_abs)
+    stem, suffix = os.path.splitext(os.path.basename(dest_abs))
+    for index in range(1, limit + 1):
+        candidate = os.path.join(directory, f"{stem}_{index}{suffix}")
+        if not os.path.exists(candidate):
+            return candidate
+    return None
+
+
 @dataclass(frozen=True)
 class AssetMigrationItem:
     """单项资源迁移决策。
 
     `action` 决定源文件是否删除；`copy_needed` 决定是否需要真正复制
-    （目标已存在同内容文件时为 False，直接复用）。
+    （目标已存在同内容文件时为 False，直接复用）。`renamed_from` 非空表示目标
+    同名冲突已改名为 `dest_abs`，调用方必须据此改写目标文档里的引用。
     """
 
     source_abs: str
     dest_abs: str
     action: str
     copy_needed: bool
+    renamed_from: Optional[str] = None
 
 
 @dataclass
 class AssetMigrationPlan:
-    """迁移预检结果。`conflicts` 非空时调用方必须整体中止，不动任何文件。"""
+    """迁移预检结果。`conflicts` 非空时调用方必须整体中止，不动任何文件。
+
+    同名但内容不同不再进 `conflicts`（E6c1b2 起改为改名 + 改写引用），只有连空闲
+    名都分配不出来这种极端情况才判为冲突。
+    """
 
     items: List[AssetMigrationItem] = field(default_factory=list)
     conflicts: List[str] = field(default_factory=list)
@@ -97,6 +119,14 @@ class AssetMigrationPlan:
     @property
     def ok(self) -> bool:
         return not self.conflicts
+
+    def renames(self) -> Dict[str, str]:
+        """{原目标绝对路径: 改名后的目标绝对路径}；无改名时为空字典。"""
+        return {
+            item.renamed_from: item.dest_abs
+            for item in self.items
+            if item.renamed_from
+        }
 
 
 @dataclass
@@ -174,7 +204,7 @@ class AssetMigrationService:
         *,
         markdown_text: Optional[str] = None,
     ) -> AssetMigrationPlan:
-        """给出逐项 MOVE / COPY 决策；发现目标同名冲突时记入 conflicts。
+        """给出逐项 MOVE / COPY 决策；目标同名冲突会改名为空闲名并记入 item。
 
         `markdown_text` 传入编辑器里的**当前内容**时以它为准——文档有未保存改动
         时磁盘内容不是真相（保存是异步的，预检读盘会漏掉刚插入的引用）。
@@ -213,12 +243,19 @@ class AssetMigrationService:
                 continue
 
             copy_needed = True
+            renamed_from: Optional[str] = None
             if os.path.exists(dest_abs):
-                if not _same_content(asset, dest_abs):
-                    # 同名但内容不同：a 批整体中止，交给 E6c1b 改名 + 改写引用
-                    plan.conflicts.append(asset)
-                    continue
-                copy_needed = False  # 同名同 hash：多个物理副本、同一内容，直接复用
+                if _same_content(asset, dest_abs):
+                    copy_needed = False  # 同名同 hash：多个物理副本、同一内容，直接复用
+                else:
+                    # 同名不同内容：绝不覆盖目标目录里的现有文件，给这一份挑个空闲名
+                    # （x_1.png / x_2.png…），由调用方把新文档里的引用改写到新名字。
+                    free_name = _allocate_free_name(dest_abs)
+                    if free_name is None:
+                        plan.conflicts.append(asset)
+                        continue
+                    renamed_from = dest_abs
+                    dest_abs = free_name
 
             exclusive = not self._is_referenced_elsewhere(
                 asset, source_md, dest_md, exclude
@@ -229,6 +266,7 @@ class AssetMigrationService:
                     dest_abs=dest_abs,
                     action=MODE_MOVE if exclusive else MODE_COPY,
                     copy_needed=copy_needed,
+                    renamed_from=renamed_from,
                 )
             )
         return plan

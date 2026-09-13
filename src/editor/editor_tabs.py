@@ -47,6 +47,8 @@ from .asset_migration_service import (
     AssetMigrationPlan,
     AssetMigrationService,
 )
+from .asset_recovery_dialog import AssetRecoveryDialog
+from .asset_recovery_service import AssetRecoveryService
 
 # ════════════════════════════════════════════════════════
 #  另存为对话框
@@ -321,6 +323,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     document_closed = pyqtSignal(str)
     # E6b：文档引用的本地图片缺失（filepath, 缺失资源的规范化绝对路径列表）
     missing_images_detected = pyqtSignal(str, list)
+    # E6c2：断链恢复执行完成（filepath, 已恢复并删源数, 已复制恢复数, 仍未恢复数）
+    asset_recovery_finished = pyqtSignal(str, int, int, int)
 
     def __init__(
         self,
@@ -3075,6 +3079,62 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         editor = self.current_editor()
         if editor:
             editor.insert_image_from_file()
+
+    # === 图片恢复代理（E6c2） ===
+
+    def recover_missing_images(self) -> bool:
+        """恢复当前文档断链的图片。
+
+        流程：预检（ledger 线索 + 可证明范围独占判定）→ 对话框确认 → 执行。
+        执行沿用迁移服务的 `copy → verify → delete` 保底，失败不丢源文件。
+        """
+        widget = self.currentWidget()
+        if widget is None:
+            return False
+        shared_doc = getattr(widget, "shared_doc", None)
+        filepath = shared_doc.filepath if shared_doc is not None else None
+        editor = self._get_editor_from_widget(widget)
+        if editor is None or not filepath or not self._is_markdown_file(filepath):
+            QMessageBox.information(
+                self, "恢复缺失的图片", "仅已保存的 Markdown 文档支持图片恢复。"
+            )
+            return False
+
+        # 预检读编辑器当前内容：保存是异步的，刚插入的引用此刻可能还没落盘
+        if shared_doc is not None and shared_doc.dirty:
+            self._save_file(widget, filepath, shared_doc.encoding)
+            if not self._await_save_settled(shared_doc):
+                QMessageBox.warning(self, "无法恢复", "文档正在保存，请稍后再试。")
+                return False
+
+        service = AssetRecoveryService(self.config)
+        try:
+            plan = service.plan(filepath, editor.toPlainText())
+        except Exception as exc:  # noqa: BLE001
+            get_logger(__name__).warning("图片恢复预检失败: %s", exc)
+            return False
+        if not plan.items:
+            QMessageBox.information(
+                self, "恢复缺失的图片", "当前文档没有缺失的图片资源。"
+            )
+            return False
+
+        dialog = AssetRecoveryDialog(plan, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return False
+
+        try:
+            result = service.apply(plan)
+        except Exception as exc:  # noqa: BLE001
+            get_logger(__name__).error("图片恢复执行失败: %s", exc)
+            return False
+
+        # 汇总仍缺失的项：本就判为需人工 + 执行时失败 / 目标被占用的
+        remaining = len(plan.needs_user) + result.failed + result.skipped
+        self.asset_recovery_finished.emit(
+            filepath, result.moved, result.copied, remaining
+        )
+        return True
 
     # === 大小写转换代理 ===
 

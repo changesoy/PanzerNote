@@ -68,6 +68,10 @@ class EditActionController:
         """插入图片（落盘到文档同级 PanzerNote_assets/ 后插入相对路径）。"""
         self._editor_tabs.insert_image_from_file()
 
+    def recover_missing_images(self) -> None:
+        """恢复断链图片（E6c2：外部移动后按 ledger 线索 + 可证明范围判定）。"""
+        self._editor_tabs.recover_missing_images()
+
     # === 行操作 ===
 
     def delete_current_line(self) -> None:

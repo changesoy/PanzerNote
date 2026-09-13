@@ -91,6 +91,7 @@ _DEFAULT_SHORTCUTS = {
     "edit.goto_line": ("转到行", "Ctrl+G", "编辑"),
     "edit.toggle_case": ("切换大小写", "Ctrl+Shift+U", "编辑"),
     "edit.insert_image": ("插入图片", "Ctrl+Shift+I", "编辑"),
+    "edit.recover_images": ("恢复缺失的图片", "", "编辑"),
     "search.find_in_files": ("跨文件搜索", "", "搜索"),
     "view.editor": ("切换到记事本", "Ctrl+1", "视图"),
     "view.construction": ("切换到建造", "Ctrl+2", "视图"),

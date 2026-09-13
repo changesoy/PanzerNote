@@ -47,7 +47,8 @@ _HASH_CHUNK = 1024 * 1024
 _key = canonical_path_key
 
 
-def _sha256_of(path: str) -> str:
+def sha256_of(path: str) -> str:
+    """文件内容指纹（分块读，避免大图整块进内存）。"""
     digest = hashlib.sha256()
     with open(path, "rb") as handle:
         for block in iter(lambda: handle.read(_HASH_CHUNK), b""):
@@ -60,7 +61,7 @@ def _same_content(left: str, right: str) -> bool:
     try:
         if os.path.getsize(left) != os.path.getsize(right):
             return False
-        return _sha256_of(left) == _sha256_of(right)
+        return sha256_of(left) == sha256_of(right)
     except OSError:
         return False
 
@@ -257,7 +258,7 @@ class AssetMigrationService:
                     renamed_from = dest_abs
                     dest_abs = free_name
 
-            exclusive = not self._is_referenced_elsewhere(
+            exclusive = not self.is_referenced_elsewhere(
                 asset, source_md, dest_md, exclude
             )
             plan.items.append(
@@ -271,20 +272,27 @@ class AssetMigrationService:
             )
         return plan
 
-    def _is_referenced_elsewhere(
+    def is_referenced_elsewhere(
         self,
         asset_abs: str,
         source_md: str,
         dest_md: str,
-        exclude: Set[str],
+        exclude: Optional[Set[str]] = None,
     ) -> bool:
+        """可证明范围内是否还有别的文档引用该路径（排除 `exclude` 中的文档）。
+
+        范围口径见 4.5 第 1 条：资产在 workspace 内 → 扫整个 workspace + 已登记
+        external files；在 workspace 外 → 扫 `source_md` / `dest_md` 所在目录 +
+        external files。恢复链路复用同一口径（传入候选资产与期望落位路径）。
+        """
+        exclude_docs = {_key(doc) for doc in (exclude or set())}
         key = self._index_key(asset_abs, source_md, dest_md)
         index = self._indexes.get(key)
         if index is None:
             index = _ReferenceIndex(
                 roots=self._scope_roots(asset_abs, source_md, dest_md),
                 external_files=self._external_files(),
-                exclude_docs=exclude,
+                exclude_docs=exclude_docs,
             )
             self._indexes[key] = index
         return index.is_referenced_elsewhere(asset_abs)
@@ -317,7 +325,7 @@ class AssetMigrationService:
         if not plan.items:
             return result
 
-        ledger = self._open_ledger()
+        ledger = self.open_ledger()
         for item in plan.items:
             created_dest = False
             try:
@@ -375,7 +383,8 @@ class AssetMigrationService:
 
     # ---------- ledger ----------
 
-    def _open_ledger(self) -> Optional[ImageAssetLedger]:
+    def open_ledger(self) -> Optional[ImageAssetLedger]:
+        """打开并加载 ledger；不可用时返回 None（调用方跳过回写，不阻断文件操作）。"""
         try:
             ledger = ImageAssetLedger(
                 self._config.get_path_resolver(), self._config.get_file_guard()

@@ -302,6 +302,8 @@ class MainWindow(QMainWindow):
         )
         # E6b：文档引用的本地图片缺失 → 非打断提示
         tabs.missing_images_detected.connect(self._on_missing_images_detected)
+        # E6c2：断链恢复执行结果 → 非打断提示
+        tabs.asset_recovery_finished.connect(self._on_asset_recovery_finished)
 
     def _init_menubar(self):
         """初始化菜单栏"""
@@ -1052,6 +1054,10 @@ class MainWindow(QMainWindow):
         """插入图片"""
         self.edit_actions.insert_image()
 
+    def _recover_missing_images(self):
+        """恢复缺失的图片（E6c2：外部移动后的断链恢复）"""
+        self.edit_actions.recover_missing_images()
+
     # === 行操作 ===
 
     def _delete_current_line(self):
@@ -1332,6 +1338,23 @@ class MainWindow(QMainWindow):
         status_bar = self.statusBar()
         if status_bar is not None:
             status_bar.showMessage("⚠ " + message, 6000)
+
+    def _on_asset_recovery_finished(
+        self, filepath: str, moved: int, copied: int, remaining: int
+    ) -> None:
+        """E6c2：断链恢复执行结果 → 非打断提示（小秘书气泡）。"""
+        recovered = moved + copied
+        if not recovered and not remaining:
+            return
+        name = os.path.basename(filepath) if filepath else ""
+        prefix = f"{name}：" if name else ""
+        if recovered and remaining:
+            message = f"{prefix}已恢复 {recovered} 个图片，仍有 {remaining} 个缺失"
+        elif recovered:
+            message = f"{prefix}已恢复 {recovered} 个图片资源"
+        else:
+            message = f"{prefix}仍有 {remaining} 个图片资源缺失"
+        self.secretary.show_message(message)
 
     def _on_tab_count_changed(self, tabs: EditorTabWidget, count: int):
         """标签页数量变化

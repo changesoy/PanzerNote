@@ -62,6 +62,12 @@ class EditActionController:
         """替换"""
         self._editor_tabs.show_replace_dialog()
 
+    # === 插入 ===
+
+    def insert_image(self) -> None:
+        """插入图片（落盘到文档同级 assets/ 后插入相对路径）。"""
+        self._editor_tabs.insert_image_from_file()
+
     # === 行操作 ===
 
     def delete_current_line(self) -> None:

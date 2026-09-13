@@ -1041,6 +1041,12 @@ class MainWindow(QMainWindow):
         """替换"""
         self.edit_actions.replace()
 
+    # === 插入操作 ===
+
+    def _insert_image(self):
+        """插入图片"""
+        self.edit_actions.insert_image()
+
     # === 行操作 ===
 
     def _delete_current_line(self):

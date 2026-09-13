@@ -93,6 +93,8 @@ class MenuBuilder:
             self._add_action(line_menu, "复制当前行到剪贴板", QKeySequence("Ctrl+Shift+C"), mw._copy_line, "edit.copy_line", "编辑")
             self._add_action(line_menu, "粘贴为新行", QKeySequence("Ctrl+Shift+V"), mw._paste_line, "edit.paste_line", "编辑")
 
+        self._add_action(menu, "插入图片...", QKeySequence("Ctrl+Shift+I"), mw._insert_image, "edit.insert_image", "编辑")
+        menu.addSeparator()
         self._add_action(menu, "转到行...", QKeySequence("Ctrl+G"), mw._goto_line, "edit.goto_line", "编辑")
         menu.addSeparator()
         self._add_action(menu, "添加/移除书签", QKeySequence("Ctrl+F2"), mw._toggle_bookmark, "edit.toggle_bookmark", "编辑")

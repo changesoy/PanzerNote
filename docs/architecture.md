@@ -441,18 +441,20 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 
 **渲染路径与样式单一来源（Wave 1.5）**：
 
-- 主渲染路径为 `markdown_preview.py`（markdown-it-py，含源码行号注入 / 异步高亮 / 本地图片解析），渲染显示唯一路径为 WebView2（后端经 `web_preview.create_preview_adapter()` 取得；Qt WebEngine 后端与 QTextBrowser 回退均已删除）；`secure_markdown_renderer.py` 为统一安全渲染与 HTML/PDF 导出入口（`render_markdown_to_safe_html` / `build_export_html_document`），兼作 `strip_dangerous_html` 清洗来源，非遗留渲染器。
+- 主渲染路径为 `markdown_preview.py`（markdown-it-py，含源码行号注入 / 异步高亮 / 相对图片交由后端资源根解析），渲染显示唯一路径为 WebView2（后端经 `web_preview.create_preview_adapter()` 取得；Qt WebEngine 后端与 QTextBrowser 回退均已删除）；`secure_markdown_renderer.py` 为统一安全渲染与 HTML/PDF 导出入口（`render_markdown_to_safe_html` / `build_export_html_document`），兼作 `strip_dangerous_html` 清洗来源，非遗留渲染器。
 - 预览模板 `PREVIEW_HTML_TEMPLATE` 与导出文档共用 `secure_markdown_renderer.MARKDOWN_LAYOUT_CSS` 内容排版（单一来源），颜色经 CSS 变量由各端从主题 token 注入；文档外壳（body）与预览交互样式（TOC / 代码块容器 / 复制按钮 / 折叠 / 滚动条）保留各端局部。
 - fenced code 的识别与语言提取同样是单一来源：`secure_markdown_renderer.CODEBLOCK_RE` 与 `extract_language_from_code_attrs`（认 `language-` 与 `lang-` 两种 class 前缀），预览侧 `markdown_preview` 以 `_CODEBLOCK_RE` / `_extract_language_from_code_attrs` 导入复用，避免两处各留一份正则。
 - 导出渲染的代码高亮经 `render_markdown_to_safe_html(content, highlight)` 注入回调（`ExportService._code_highlighter` → `highlight_code_html`），与预览同源；导出配色固定解析亮色变体（`v2_export_variant_id`），`render_content` / `export_html` / `export_pdf` 的 `theme_engine` 为**必填**，不提供「无主题引擎则退化为纯文本代码块」的降级路径。
+- **导出本地图片与预览同源、按后端分流**：渲染产物里的本地图片是相对路径，导出链路必须显式声明解析基准，否则导出结果缺图。PDF 走 WebView2 导航，经 `ExportService.export_pdf(resource_root=…)` → 适配器 `set_resource_root(文档目录)` 注入 base href；HTML 导出按「单文件自包含、换机器可打开」的既定语义，用 `ExportService._embed_local_images` 把本地相对图片读成 base64 data URI 内嵌（读取前做 percent-decode 还原），外链、协议相对、非图片扩展名与缺失文件一律保持原样。两条链路的资源根均由 `ExportActionController._document_dir()` 取自当前标签的 `shared_doc.filepath`（未保存文档为空串）。
 
 **渲染管线**：
 
 ```
 编辑器文本 → markdown 库渲染 HTML → _process_code_blocks()（Pygments 内联样式高亮 + 浅蓝容器 + Unicode 标记）
-           → _resolve_local_images()（相对路径 → file:// 绝对路径）
            → PREVIEW_HTML_TEMPLATE 包裹 → Web Preview Adapter（WebView2）显示
 ```
+
+相对图片（如 `PanzerNote_assets/x.png`）**原样保留相对形态**，由后端资源根（`set_resource_root`，取当前文档目录）经 vhost 映射 + `<base href>` 解析。**不得改写成 `file://` 绝对路径**：预览文档经 `NavigateToString` 加载、基址为 `https://<vhost>/`，Chromium 会拒绝加载 `file://` 子资源（真机验证 `naturalWidth=0`）。
 
 **异步渲染管线**（Feature Flag `async_highlight` 控制）：
 

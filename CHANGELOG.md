@@ -2,6 +2,29 @@
 
 本文件记录 PanzerNote 各版本的变更。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
 
+## Unreleased
+
+**新增：Markdown 图片工作流（行为变化）**
+
+- **插图落盘**：新增「插入图片」编辑菜单项、命令面板项与 `Ctrl+Shift+I`；剪贴板截图（含从文件管理器复制的图片文件）与拖入的图片文件直接落盘，Markdown 里写入标准相对路径 `![](PanzerNote_assets/xxx.png)`。相对路径 + 同级资源目录意味着整目录搬移不会断链，也不影响在 Typora / VS Code 等编辑器里打开
+- **落盘规则**：文件名 ASCII 化（`img_20260913_192630.png` 形式）并自动去重；超过 2 MB 的图片用 Pillow 就地优化（PNG 无损、JPEG 近无损且移除 EXIF），仅在优化后确实更小时才采用；alt 文本做 CommonMark 结构字符转义，文件名含方括号也不会把图片退化成普通文本
+- **程序内移动 / 另存为 / 复制文档时自动搬运图片**：按 Markdown 的真实引用判定归属——仅当前文档使用 → MOVE，其他文档也在用 → COPY，不因为改了这篇而弄坏别篇；目标同名但内容不同时给新副本挑空闲名（`x_1.png`）并**定点改写**目标文档里的引用，绝不覆盖目标目录现有文件；迁移走 `copy → verify → delete`，中途失败不丢源文件，旧资源目录搬空后清理空目录
+- **移动前的在途保存**：Move / Copy 前先等 Document 级保存落地（超时则拒绝本次操作），避免保存任务持旧路径把文件重新写出来（幽灵文件）
+- **断链检测**：打开文档或建立预览时用 Python 侧只读扫描 Markdown 引用（行内 / 引用式 / collapsed / 快捷引用式均计入；剔除围栏代码块与行内代码里的示例；URL decode 后按规范路径比较；`../` 跨目录计入；带 scheme / 协议相对 / 根路径不算本地引用），缺失时以小秘书气泡 + 状态栏**非打断**提示，不弹对话框、不与渲染循环绑定
+- **外部移动后的恢复**：「恢复缺失的图片」命令（编辑菜单 / 命令面板）先预检、再弹恢复对话框由用户确认：经隐藏索引取旧位置线索 → 逐条复核存在性并**实际重算 sha256** 确认内容身份 → 在**可证明范围**内扫描真实 Markdown 引用判定是否独占 → 独占走 MOVE、仍被引用走 COPY；证据不足 / 内容已变 / 目标被占用则**不猜**，留给用户
+- **隐藏索引（managed-asset ledger）**：`{数据目录}/data/config/image_assets.json` 记录 PanzerNote 自己管理过的图片的最后已知位置与内容指纹，为移动判定与断链恢复提供线索。它**只是线索**——每次使用前都重新校验真实文件与 hash；写失败不阻断正常插图，损坏则降级为空索引，且完全不存引用关系（引用一律实时扫描真实 Markdown）
+
+**兼容性说明**
+
+- 无用户数据格式变更：笔记文件、设置与存档 schema 均不变；新增的 `image_assets.json` 可删除、可重建
+- 资源目录沿用既有 `PanzerNote_assets/` 约定：旧笔记里原有的 `assets/` 继续正常工作，不自动迁移、不静默重写用户文件
+- 无新增运行时依赖（图片优化用的 Pillow 已是核心依赖）
+
+**内部清理（无行为变化）**
+
+- 导出本地图片的路径解析复用 `image_reference_scanner.resolve_local_ref`，删除 `export_service` 内重复的 scheme 判断与 percent-decode 实现，统一"什么算本地相对引用"的口径
+- 补齐 `main_window` / `image_reference_scanner` / `export_service` 的类型标注（`Dict[str, List[str]]`、`set[str]`、`Optional[FileGuard]`），修正错误文案与注释中的多余空格
+
 ## v2.3.0
 
 **Markdown 预览与 PDF 导出改用 WebView2（行为变化）**

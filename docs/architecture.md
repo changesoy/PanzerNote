@@ -121,6 +121,12 @@ PanzerNote/
 │   │   ├── web_preview_webview2.py # WebView2 后端实现（PyWinRT + WebView2 Runtime）
 │   │   ├── webview2_runtime.py     # WebView2 Runtime 可用性检测（只读注册表 + 安装指引）
 │   │   ├── markdown_preview.py     # Markdown 分屏预览（源码行号同步 + 代码块高亮 + 本地图片）
+│   │   ├── image_asset_service.py  # 图片落盘（PanzerNote_assets/ + ASCII 安全名 + 大图优化）
+│   │   ├── image_asset_ledger.py   # 托管图片恢复索引（data/config/image_assets.json，只作线索）
+│   │   ├── image_reference_scanner.py # 图片引用扫描 / 缺失检测 / 冲突改名定点改写
+│   │   ├── asset_migration_service.py # 文档移动 / 复制时的图片迁移（独占 Move / 共享 Copy）
+│   │   ├── asset_recovery_service.py  # 外部移动断链恢复（ledger + 引用扫描 + hash 校验）
+│   │   ├── asset_recovery_dialog.py   # 断链恢复确认对话框
 │   │   ├── minimap.py              # 代码缩略图（块级缓存增量失效）
 │   │   ├── find_replace.py         # 查找替换栏
 │   │   ├── search_service.py       # 搜索服务（QTextDocument.find 权威光标 + 从后向前替换）
@@ -871,6 +877,26 @@ src/__init__.py (__version__ = "2.3.0")
 - **高亮**：两种高亮器（Markdown / Pygments）均实现 `set_dark_mode`，主题切换不经过 `set_file_type`（避免重建时摘除共享高亮）；关闭最后 View 前 `_detach_shared_from_widget` + release，杜绝悬垂引用（C++ deleted 崩溃）
 - **lazy 高亮 Document 级协作**（Wave 4 E2）：`LazyHighlightManager` 由 per-View 改为 Document 级——同 Document 共享一个 coordinator，可视区高亮范围取各 View 的并集 `visibleRanges(Document) = range(View A) ∪ range(View B)`；滚动事件按 View 上报、coordinator 聚合调度，与 Document 级共享 highlighter 协作；仅大文件（≥1 万行）且 `large_file_mode` 激活时启用（E3/E4，flag 默认 False，运行时按需激活，无全局残留）
 - **未保存聚合**：`get_unsaved_tab_infos` 返回含 `document_id`，`MainWindow.closeEvent` 按 document_id 跨面板去重（同一共享文件只列一次）；`save_all_for_close` 以 Document 侧 dirty 为准
+
+### 4.17 图片资源工作流（E1–E6）
+
+**落盘与引用**（`editor/image_asset_service.py` / `editor/image_reference_scanner.py`）：
+
+- 图片统一落盘到笔记同级的 `PanzerNote_assets/`，文件名 ASCII 安全（markdown-it 对含空格的图片语法直接解析失败，中文路径会被 percent-encode 成不可读 src），写入经 `FileGuard.safe_write_bytes`；仅 >2 MB 的 PNG/JPEG 做重存优化（PNG 无损 / JPEG 近无损 `quality="keep"`），且仅在结果更小时采用。
+- 引用扫描（`image_reference_scanner.py`，纯函数、只读）覆盖行内 / 完整引用式 / collapsed / 快捷引用式四种语法，剔除围栏代码块与行内代码里的示例；URL decode → 规范化后按 **canonical path** 比较，`../` 跨目录计入，带 scheme / 协议相对 / 根路径不算本地相对引用。同模块另提供引用**位置**（`iter_image_ref_spans`）与定点改写（`rewrite_local_refs`），供同名冲突改名后只替换目标串区间、其余逐字保留。
+
+**归属判定与迁移**（`editor/asset_migration_service.py`）：
+
+- 规则是「**确认独占 → Move；确认共享 → Copy**」，不是永远 Copy / 永远 Move。独占判定必须落在**可证明范围**内：workspace 内资产扫整个 workspace + 已登记 external files；workspace 外资产扫源 / 目标目录 + external files。典型反例（用户在 Explorer 里复制 `note.md`、旧目录原笔记仍引用同一张图）因此不会被误判为独占。
+- 执行顺序由调用方保证：先 `plan()` 预检（不可解冲突整体中止、不动任何文件）→ 搬 `.md` → 再 `apply()`；执行保底 `copy → verify sha256 → delete` + 空资源目录清理 + ledger 回写，中途失败不丢源文件。
+- 目标同名冲突（同名但 sha256 不同）**绝不覆盖**目标现有文件，给新副本挑空闲名（`x_1.png`…）并定点改写新文档的引用；同名同 hash 直接复用（多个物理副本、同一内容）。
+
+**恢复索引与断链恢复**（`editor/image_asset_ledger.py` / `asset_recovery_service.py` / `asset_recovery_dialog.py`）：
+
+- ledger 落在 `{base_path}/data/config/image_assets.json`，只记「最后已知线索」（名称 / 最后已知绝对路径 / sha256 / 尺寸 / 来源），**完全不存引用关系**；可删除、可重建、损坏即降级为空，`last_known_abs` 使用前一律重新 `exists` + 重算 hash。
+- 外部移动恢复：文档解析出的期望绝对路径缺失时，按文件名取 ledger 候选 → 逐条复核存在性与**实际重算** sha256 → 同名多候选按内容身份判断（内容一致 = 多物理副本、不构成歧义；指纹不同才是真歧义）→ 在可证明范围内扫描该候选是否仍被别的 Markdown 引用 → 独占则 MOVE、仍被引用则 COPY、证据不足 / 内容已变 / 目标被占用**一律不猜**。
+- 恢复落位即文档期望路径，**不需要改写 Markdown**；执行复用 `AssetMigrationService.apply`，执行前再复核目标位置。入口为「编辑 → 恢复缺失的图片...」，结果经 `asset_recovery_finished` 信号由 `MainWindow` 以小秘书气泡非打断汇报。
+- 缺失检测（E6b）在文档打开 / 资源根变化时触发只读扫描，经 `missing_images_detected` 由 `MainWindow` 汇总为非打断提示；小秘书正忙时暂存、气泡消失（`message_hidden`）后补发，不与渲染循环绑定。
 
 ---
 

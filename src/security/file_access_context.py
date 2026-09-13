@@ -12,6 +12,7 @@ from enum import Enum
 class FileAccessContext(Enum):
     USER_DOCUMENT_READ = "user_document_read"
     USER_DOCUMENT_SAVE = "user_document_save"
+    DOCUMENT_ASSET = "document_asset"
     TEMP_AUTOSAVE = "temp_autosave"
     INTERNAL_CONFIG = "internal_config"
     INTERNAL_SAVEGAME = "internal_savegame"

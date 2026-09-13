@@ -994,7 +994,7 @@ a {{
 {html_content}
 </body>
 </html>"""
-            # 文档目录即资源根：预览 HTML 中的相对图片路径（assets/xxx.ext）由
+            # 文档目录即资源根：预览 HTML 中的相对图片路径（PanzerNote_assets/xxx.ext）由
             # 后端映射到 https://<vhost>/ 解析。不得改写成 file:// ——
             # NavigateToString 文档以 https 为基址，Chromium 会拒绝 file:// 子资源。
             self.preview.set_resource_root(self._base_path or None)

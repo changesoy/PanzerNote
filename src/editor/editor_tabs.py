@@ -2784,7 +2784,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     # === 插入图片代理 ===
 
     def insert_image_from_file(self):
-        """插入图片：委托当前编辑器写入 assets/ 并插入相对路径。"""
+        """插入图片：委托当前编辑器写入 PanzerNote_assets/ 并插入相对路径。"""
         editor = self.current_editor()
         if editor:
             editor.insert_image_from_file()

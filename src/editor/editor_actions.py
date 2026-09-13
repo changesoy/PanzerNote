@@ -312,7 +312,7 @@ class EditorActionsMixin:
     # ═══════════════════ 插入图片 ═══════════════════
 
     def insert_image_from_file(self) -> None:
-        """选择本地图片，落盘到文档同级 assets/ 后插入 Markdown 图片语法。
+        """选择本地图片，落盘到文档同级 PanzerNote_assets/ 后插入 Markdown 图片语法。
 
         落盘与安全写入统一委托 ImageAssetService（经 FileGuard 原子写）。
         """
@@ -328,7 +328,7 @@ class EditorActionsMixin:
         self.insert_images_from_paths([source_path])
 
     def insert_images_from_paths(self, paths: list[str]) -> None:
-        """把本地图片文件按序落盘到文档同级 assets/ 并插入 Markdown 图片语法。
+        """把本地图片文件按序落盘到文档同级 PanzerNote_assets/ 并插入 Markdown 图片语法。
 
         单个文件失败只告警并跳过，不阻断其余文件（拖入多图时保持其余可用）。
         """
@@ -390,7 +390,7 @@ class EditorActionsMixin:
         self.ensureCursorVisible()
 
     def insert_image_from_mime(self, source: Optional[QMimeData]) -> bool:
-        """剪贴板来源的 mime 含图像时，落盘到 assets/ 并插入相对路径。
+        """剪贴板来源的 mime 含图像时，落盘到 PanzerNote_assets/ 并插入相对路径。
 
         仅 Markdown 文档处理剪贴板图片；其余情况返回 False，交由默认文本粘贴。
         未保存文档无落盘基准目录，提示后中止（不静默失败）。

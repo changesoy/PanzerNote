@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """文档图片资源落盘服务（Markdown 图片工作流 E1）。
 
-职责：把图片二进制写入「文档同级 assets/ 目录」，返回可插入 Markdown 的相对路径。
+职责：把图片二进制写入「文档同级 PanzerNote_assets/ 目录」，返回可插入 Markdown 的相对路径。
 
 关键设计：
-- 落盘目录固定为文档同级的 assets/：预览以后端资源根（= 当前文档目录）解析相对
+- 落盘目录固定为文档同级的 PanzerNote_assets/：预览以后端资源根（= 当前文档目录）解析相对
   路径，落在文档目录树之外的相对路径无法被预览解析。
 - 文件名强制 ASCII 安全：markdown-it 对含空格的图片语法直接解析失败，中文路径会被
   percent-encode 成不可读的 src —— 因此落盘名只保留 [A-Za-z0-9-]，
@@ -31,7 +31,7 @@ from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-ASSETS_DIRNAME = "assets"
+ASSETS_DIRNAME = "PanzerNote_assets"
 
 # 支持的图片扩展名（小写）
 SUPPORTED_EXTENSIONS = frozenset(
@@ -62,7 +62,7 @@ class ImageAssetResult:
 
 
 class ImageAssetService:
-    """把图片写入文档同级 assets/ 目录并返回相对路径。"""
+    """把图片写入文档同级 PanzerNote_assets/ 目录并返回相对路径。"""
 
     def __init__(
         self,
@@ -90,7 +90,7 @@ class ImageAssetService:
         *,
         extension: Optional[str] = None,
     ) -> ImageAssetResult:
-        """把图片写入文档同级 assets/，返回绝对路径与相对路径。
+        """把图片写入文档同级 PanzerNote_assets/，返回绝对路径与相对路径。
 
         Args:
             document_path: 当前文档路径；为空表示文档尚未保存（拒绝）。
@@ -102,7 +102,7 @@ class ImageAssetService:
             ImageAssetError: 扩展名不支持、文档未保存、数据为空或写入失败。
         """
         if not document_path:
-            raise ImageAssetError("文档尚未保存，无法确定 assets 目录")
+            raise ImageAssetError("文档尚未保存，无法确定 资源目录")
         if not data:
             raise ImageAssetError("图片数据为空")
 
@@ -113,7 +113,7 @@ class ImageAssetService:
         filename = self._allocate_filename(assets_dir, _sanitize_stem(original_name), ext)
         target = os.path.join(assets_dir, filename)
 
-        # 纵深防御：目标必须落在 assets 目录内（文件名已 ASCII 化，此处为兜底）
+        # 纵深防御：目标必须落在 资源目录内（文件名已 ASCII 化，此处为兜底）
         if os.path.dirname(os.path.abspath(target)) != os.path.abspath(assets_dir):
             raise ImageAssetError("目标路径越界")
 

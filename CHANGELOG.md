@@ -2,7 +2,7 @@
 
 本文件记录 PanzerNote 各版本的变更。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/) 规范。
 
-## Unreleased
+## v2.4.0
 
 **新增：Markdown 图片工作流（行为变化）**
 

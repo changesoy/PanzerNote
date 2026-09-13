@@ -187,6 +187,9 @@ class MainWindow(QMainWindow):
         self._init_statusbar()
         self._init_timers()
         self._register_command_palette()
+        # E6b：缺失图片提示的暂存（必须早于 _restore_state——会话恢复就在其中
+        # 打开文档并触发缺失检测）。
+        self._pending_missing_images: Dict[str, list] = {}
         self._restore_state()
         self._connect_signals()
         self._apply_theme()
@@ -274,6 +277,8 @@ class MainWindow(QMainWindow):
         self.file_tree.tree_changed.connect(
             lambda: self._plugin_event_bus.emit("file_tree.changed")
         )
+        # E6b：小秘书气泡消失后再补发此前让位的缺失图片提示
+        self.secretary.message_hidden.connect(self._flush_missing_images)
         self._connect_editor_tabs_signals(self.editor_tabs)
 
     def _connect_editor_tabs_signals(self, tabs: EditorTabWidget):
@@ -295,6 +300,8 @@ class MainWindow(QMainWindow):
         tabs.cursor_position_changed.connect(
             lambda: self._plugin_event_bus.emit("cursor.changed")
         )
+        # E6b：文档引用的本地图片缺失 → 非打断提示
+        tabs.missing_images_detected.connect(self._on_missing_images_detected)
 
     def _init_menubar(self):
         """初始化菜单栏"""
@@ -589,15 +596,13 @@ class MainWindow(QMainWindow):
         bauxite = reward["bauxite"]
 
         QTimer.singleShot(2000, lambda: self.secretary.show_message(
-            f"离线{time_str}，获得资源！\n燃料+{fuel} 弹药+{ammo}\n钢材+{steel} 铝材+{bauxite}",
-            5000
+            f"离线{time_str}，获得资源！\n燃料+{fuel} 弹药+{ammo}\n钢材+{steel} 铝材+{bauxite}"
         ))
 
     def _check_daily_checkin(self):
         if self.config.check_daily_checkin():
             QTimer.singleShot(3000, lambda: self.secretary.show_message(
-                "每日签到成功！\n燃料+100 弹药+100\n钢材+100 铝材+100",
-                5000
+                "每日签到成功！\n燃料+100 弹药+100\n钢材+100 铝材+100"
             ))
             self.resource_bar.refresh()
 
@@ -1290,6 +1295,43 @@ class MainWindow(QMainWindow):
         """防抖到期后执行保存通知"""
         self.resource_bar.refresh()
         self.secretary.show_message("文件已保存！")
+
+    def _on_missing_images_detected(self, filepath: str, missing: list):
+        """E6b：文档引用的本地图片缺失 → 非打断提示。
+
+        小秘书正忙（有气泡在显示、或启动问候已排期）时先暂存，等它闲下来
+        （气泡消失）再汇总补发；空闲则立即提示。只提示、不猜、不自动改动文件
+        ——真正的恢复留待 E6c2（需 ledger + 引用扫描）。
+        """
+        if not missing:
+            return
+        self._pending_missing_images[filepath] = list(missing)
+        self._flush_missing_images()
+
+    def _flush_missing_images(self) -> None:
+        """小秘书空闲时把暂存的缺失图片提示汇总为一条发出，忙则继续等。
+
+        由两处驱动：新检测到的缺失（立即尝试）、小秘书气泡消失信号（重试）。
+        """
+        if not self._pending_missing_images or self.secretary.is_busy():
+            return
+        pending = self._pending_missing_images
+        self._pending_missing_images = {}
+        self._show_missing_images(pending)
+
+    def _show_missing_images(self, notices: Dict[str, list]):
+        """把缺失图片清单汇总成一条非打断提示（小秘书气泡 + 状态栏）。"""
+        total = sum(len(paths) for paths in notices.values())
+        if len(notices) == 1:
+            names = "、".join(os.path.basename(p) for p in next(iter(notices.values())))
+            message = f"有 {total} 个图片资源不存在：{names}"
+        else:
+            message = f"{len(notices)} 个文档共有 {total} 个图片资源不存在"
+        # 状态栏容易被后续消息覆盖、位置也在窗口最底部，故以小秘书气泡为主通道
+        self.secretary.show_message("⚠ " + message)
+        status_bar = self.statusBar()
+        if status_bar is not None:
+            status_bar.showMessage("⚠ " + message, 6000)
 
     def _on_tab_count_changed(self, tabs: EditorTabWidget, count: int):
         """标签页数量变化

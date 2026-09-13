@@ -40,6 +40,7 @@ from .find_replace import FindReplaceBar
 from .save_task_manager import SaveTaskManager, SaveState
 from .temp_session_manager import TempSessionManager
 from .eol_utils import detect_eol_from_bytes
+from .image_reference_scanner import find_missing_local_images
 
 
 # ════════════════════════════════════════════════════════
@@ -313,6 +314,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     # Batch 4：文档打开/关闭事件（filepath；未命名文档不触发）
     document_opened = pyqtSignal(str)
     document_closed = pyqtSignal(str)
+    # E6b：文档引用的本地图片缺失（filepath, 缺失资源的规范化绝对路径列表）
+    missing_images_detected = pyqtSignal(str, list)
 
     def __init__(
         self,
@@ -778,6 +781,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self._update_tab_tooltip(index)
         # Batch 4：文档打开事件（仅带路径文档）
         self.document_opened.emit(filepath)
+        if is_md:
+            self._notify_missing_images(widget, filepath)
 
         # 恢复书签
         saved_bookmarks = self.config.get_bookmarks(filepath)
@@ -880,6 +885,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         # Batch 4：跨面板共享视图打开同一文档也视为 document.opened
         if shared_doc.filepath:
             self.document_opened.emit(shared_doc.filepath)
+            if is_md:
+                self._notify_missing_images(widget, shared_doc.filepath)
         return int(index)
 
     def save_current(self) -> Tuple[bool, int]:
@@ -1692,19 +1699,40 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         stripped = self._strip_tab_suffix(title)
         self.setTabText(index, name + title[len(stripped):])
 
-    @staticmethod
-    def _on_view_path_changed(widget, path: str) -> None:
+    def _notify_missing_images(self, widget, filepath: str) -> None:
+        """E6b：扫描文档引用的本地图片，缺失则发出信号（提示形态由接收方决定）。
+
+        只读检测，不与渲染循环绑定；触发点为文档打开与资源根（base_path）变化。
+        检测失败不得影响打开 / 渲染，故异常仅记 debug 日志。
+        """
+        if not filepath or not self._is_markdown_file(filepath):
+            return
+        editor = self._get_editor_from_widget(widget)
+        if editor is None:
+            return
+        base_dir = os.path.dirname(os.path.abspath(filepath))
+        try:
+            missing = find_missing_local_images(base_dir, editor.toPlainText())
+        except Exception as exc:
+            get_logger(__name__).debug("图片引用缺失检测失败: %s", exc)
+            return
+        if missing:
+            self.missing_images_detected.emit(filepath, missing)
+
+    def _on_view_path_changed(self, widget, path: str) -> None:
         """Document.pathChanged → 本 View 预览基准跟随（规格 2.8）。
 
         D3b：路径 authority 在 Document——pathChanged 由 bind_path 广播给所有
         View 时无需再回写状态（路径读点全部走 Document）。
-        仅保留预览 widget 的 base_path / invalidate 副作用。
+        保留预览 widget 的 base_path / invalidate 副作用；
+        E6b：资源根变化后按新基准复核图片引用缺失。
         """
         if not isinstance(widget, MarkdownPreviewWidget):
             return
         base = os.path.dirname(os.path.abspath(path)) if path else "."
         widget.set_base_path(base)
         widget.invalidate_preview()  # 下次激活/内容变化时以新基准重渲染
+        self._notify_missing_images(widget, path)
 
     @staticmethod
     def _close_md_preview(widget) -> None:

@@ -47,6 +47,19 @@ def _encode_png(image: QImage) -> bytes:
     return data
 
 
+# alt 文本中会破坏 ![...](...) 结构的字符，插入前需反斜杠转义
+_ALT_ESCAPES = str.maketrans({ch: "\\" + ch for ch in "\\[]`"})
+
+
+def _escape_markdown_alt(alt: str) -> str:
+    """转义 alt 中的结构字符，保证插入的图片语法始终解析为标准图片。
+
+    原始文件名可含 `[` `]`（Windows 允许），不转义会使 ![a]b](path) 退化为
+    纯文本或普通链接；反斜杠转义是 CommonMark 规定的标准做法。
+    """
+    return alt.translate(_ALT_ESCAPES)
+
+
 class EditorActionsMixin:
     """编辑器辅助操作 Mixin
 
@@ -367,11 +380,11 @@ class EditorActionsMixin:
         return document_path
 
     def _insert_markdown_image(self, alt: str, relative_path: str) -> None:
-        """在当前光标插入 Markdown 图片语法。"""
+        """在当前光标插入 Markdown 图片语法（alt 经结构字符转义）。"""
         cursor = self.textCursor()
         cursor.beginEditBlock()
         with self.programmatic_modify():
-            cursor.insertText(f"![{alt}]({relative_path})")
+            cursor.insertText(f"![{_escape_markdown_alt(alt)}]({relative_path})")
         cursor.endEditBlock()
         self.setTextCursor(cursor)
         self.ensureCursorVisible()

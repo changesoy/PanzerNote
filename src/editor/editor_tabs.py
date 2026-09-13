@@ -19,14 +19,14 @@ from PyQt6.QtWidgets import (
     QInputDialog, QLabel, QDialog, QHBoxLayout, QComboBox,
     QPushButton, QLineEdit, QApplication, QToolButton
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QMimeData, QPoint
+from PyQt6.QtCore import Qt, pyqtSignal, QMimeData, QPoint, QEventLoop, QTimer
 from PyQt6.QtGui import QColor, QDrag, QAction, QImage, QPainter, QPixmap
 
 from ..core.config import Config
 from ..core import workspace_entries
 from ..core.document_registry import DocumentRegistry
 from ..core.document_view_binding import DocumentViewBinding
-from ..core.shared_document import ViewState
+from ..core.shared_document import SaveStatus, ViewState
 from ..utils.logger import get_logger
 from ..utils.error_handler import ErrorHandler, ErrorCategory
 from ..utils.feature_flags import is_enabled
@@ -962,6 +962,20 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
         # D3b：is_new 语义 = filepath is None；编号/副本判定读 Document
         is_new = shared_doc is None or shared_doc.filepath is None
+
+        # 副本另存为：副本引用的图片资源要一并落到目标目录（COPY 语义）。
+        # 预检放在写盘之前——此时 .md 尚未落位，冲突仍可整体中止；
+        # Copy 语义不排除源文档，因此源笔记的图不会被搬走。
+        migration: Optional[AssetMigrationPlan] = None
+        if not is_new and shared_doc is not None and shared_doc.filepath:
+            migration = self._plan_asset_migration(shared_doc.filepath, filepath, MODE_COPY)
+            if migration is not None and not migration.ok:
+                self._warn_asset_conflict("另存为", migration.conflicts)
+                self._document_registry.cancel_reservation(
+                    shared_doc.document_id, filepath
+                )
+                return False, 0
+
         success, chars = self._save_file(
             widget, filepath, encoding, is_copy=not is_new
         )
@@ -976,6 +990,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                                        if is_new else None,
                     # 已有文件另存为 = 副本保存：当前标签保持指向原文件
                     "is_copy": not is_new,
+                    # 副本落盘成功后才执行（CLEAN 回调），失败不迁移
+                    "migration": migration,
                 }
 
         return success, chars
@@ -2097,6 +2113,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 self._document_registry.cancel_reservation(
                     shared_doc.document_id, save_as_info["filepath"]
                 )
+                # 副本已落盘 → 迁移其引用的图片资源（COPY，源笔记的图不动）
+                self._apply_asset_migration(save_as_info.get("migration"))
                 # 恢复标题（去除 SAVING 阶段追加的 ⏳ 后缀）
                 self.setTabText(index, base_title)
                 if tab_id in self._pending_close_tab_ids:
@@ -2597,6 +2615,38 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             os.path.abspath(os.path.dirname(filepath))
         )
 
+    def _await_save_settled(self, shared_doc, timeout_ms: int = 5000) -> bool:
+        """等待该 Document 的在途保存落地；返回是否已无在途保存。
+
+        移动 / 复制前必须等：在途保存任务持有的是**旧路径**，文件被移走后它会把
+        旧路径重新写出来（幽灵文件 + 新旧位置内容错位）。判定用 Document 级保存
+        状态，可一并覆盖分屏中另一面板正在保存同一文档的情形。
+        """
+        if shared_doc is None or shared_doc.save_status != SaveStatus.SAVING:
+            return True
+
+        loop = QEventLoop()
+        timer = QTimer()
+        timer.setSingleShot(True)
+        timer.timeout.connect(loop.quit)
+
+        def _check(_state: str) -> None:
+            if shared_doc.save_status != SaveStatus.SAVING:
+                loop.quit()
+
+        shared_doc.saveStateChanged.connect(_check)
+        timer.start(timeout_ms)
+        try:
+            if shared_doc.save_status == SaveStatus.SAVING:
+                loop.exec()
+        finally:
+            timer.stop()
+            try:
+                shared_doc.saveStateChanged.disconnect(_check)
+            except TypeError:
+                pass
+        return bool(shared_doc.save_status != SaveStatus.SAVING)
+
     def move_file_to_folder(self, filepath: str, dest_folder: str) -> bool:
         """将文件移动到目标文件夹，更新对应标签页（含图片资源迁移）"""
         if not os.path.isfile(filepath) or not os.path.isdir(dest_folder):
@@ -2634,6 +2684,12 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                     if shared_doc.dirty:
                         self._save_file(widget, filepath, shared_doc.encoding)
                     break
+
+            # 在途保存落地前不得移动文件：保存任务持有旧路径，移动后会把旧路径
+            # 重新写出来（幽灵文件 + 新旧位置内容错位）。
+            if not self._await_save_settled(shared_doc):
+                QMessageBox.warning(self, "无法移动", "文档正在保存，请稍后再试。")
+                return False
 
             # 3.5.8：共享 Document 移动前检查目标路径未被其它 Document 占用
             # （否则移动后两个 Document 指向同一路径，编辑/保存错乱）
@@ -2697,14 +2753,22 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         migration: Optional[AssetMigrationPlan] = None
         try:
             # 若标签打开且已修改，先保存再复制，保证副本包含最新内容
+            shared_doc = None
             for i in range(self.count()):
                 widget = self.widget(i)
                 # D3b：路径读 Document
                 w_doc = getattr(widget, "shared_doc", None)
                 if w_doc is not None and w_doc.filepath == filepath:
+                    shared_doc = w_doc
                     if w_doc.dirty:
                         self._save_file(widget, filepath, w_doc.encoding)
                     break
+
+            # 在途保存落地前不得复制：保存任务持有旧路径，源文件内容随后才更新，
+            # 副本会拿到保存前的旧内容。
+            if not self._await_save_settled(shared_doc):
+                QMessageBox.warning(self, "无法复制", "文档正在保存，请稍后再试。")
+                return False
 
             migration = self._plan_asset_migration(filepath, new_path, MODE_COPY)
             if migration is not None and not migration.ok:

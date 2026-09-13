@@ -15,8 +15,7 @@
 import base64
 import os
 import re
-import urllib.parse
-from typing import Callable
+from typing import Callable, Optional
 
 from ..core.settings_store import (
     DEFAULT_CODE_FONT_FAMILY,
@@ -24,10 +23,12 @@ from ..core.settings_store import (
     DEFAULT_LINE_SPACING,
 )
 from ..security.file_access_context import FileAccessContext
+from ..security.file_guard import FileGuard
 from ..themes.theme_engine import ThemeEngine
 from ..themes.theme_v2.consumer import v2_export_variant_id
 from ..utils.logger import get_logger
 from .highlight_themes import highlight_code_html
+from .image_reference_scanner import resolve_local_ref
 from .secure_markdown_renderer import (
     CodeHighlighter,
     render_markdown_to_safe_html,
@@ -50,9 +51,6 @@ _IMAGE_MIME_BY_EXT = {
     ".bmp": "image/bmp",
     ".svg": "image/svg+xml",
 }
-
-# 带 scheme（http/https/file/data/...）的绝对引用不算本地相对资源
-_URL_SCHEME_RE = re.compile(r"^[a-z][a-z0-9+.-]*:", re.IGNORECASE)
 
 
 class ExportService:
@@ -203,7 +201,9 @@ class ExportService:
         return adapter.widget()
 
 
-def _embed_local_images(body_html: str, resource_root: str, file_guard) -> str:
+def _embed_local_images(
+    body_html: str, resource_root: str, file_guard: Optional[FileGuard]
+) -> str:
     """把 body 里的本地相对图片内嵌为 data URI（外链 / 读取失败保持原样）。
 
     HTML 导出按设计是单文件自包含，而渲染产物里的图片是相对路径 —— 导出到文档
@@ -223,16 +223,17 @@ def _embed_local_images(body_html: str, resource_root: str, file_guard) -> str:
     return _IMG_SRC_RE.sub(_replace, body_html)
 
 
-def _to_data_uri(src: str, resource_root: str, file_guard) -> "str | None":
-    """本地相对图片 → data URI；非本地 / 不支持的格式 / 读取失败返回 None。"""
-    if not src or src.startswith("//") or _URL_SCHEME_RE.match(src):
+def _to_data_uri(
+    src: str, resource_root: str, file_guard: FileGuard
+) -> Optional[str]:
+    """本地相对图片 → data URI；非本地 / 不支持的格式 / 读取失败返回 None。
+
+    路径解析与引用扫描共用 `resolve_local_ref`（同一口径：去 fragment/query →
+    percent-decode → 排除 scheme / 根路径），避免两处实现漂移。
+    """
+    target = resolve_local_ref(resource_root, src)
+    if target is None:
         return None
-    # 渲染器会对非 ASCII 与空格做 percent-encode，先还原成真实相对路径
-    relative = urllib.parse.unquote(src.split("#", 1)[0].split("?", 1)[0])
-    relative = relative.replace("/", os.sep)
-    if os.path.isabs(relative):
-        return None
-    target = os.path.normpath(os.path.join(resource_root, relative))
     mime = _IMAGE_MIME_BY_EXT.get(os.path.splitext(target)[1].lower())
     if mime is None or not os.path.isfile(target):
         return None

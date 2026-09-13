@@ -102,7 +102,7 @@ class ImageAssetService:
             ImageAssetError: 扩展名不支持、文档未保存、数据为空或写入失败。
         """
         if not document_path:
-            raise ImageAssetError("文档尚未保存，无法确定 资源目录")
+            raise ImageAssetError("文档尚未保存，无法确定资源目录")
         if not data:
             raise ImageAssetError("图片数据为空")
 
@@ -113,7 +113,7 @@ class ImageAssetService:
         filename = self._allocate_filename(assets_dir, _sanitize_stem(original_name), ext)
         target = os.path.join(assets_dir, filename)
 
-        # 纵深防御：目标必须落在 资源目录内（文件名已 ASCII 化，此处为兜底）
+        # 纵深防御：目标必须落在资源目录内（文件名已 ASCII 化，此处为兜底）
         if os.path.dirname(os.path.abspath(target)) != os.path.abspath(assets_dir):
             raise ImageAssetError("目标路径越界")
 

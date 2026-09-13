@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer, QEvent, QPoint, QRect, QEasingCurve
 from PyQt6.QtGui import QIcon, QCloseEvent, QAction
-from typing import Any, Callable, Dict, Optional, Tuple, cast
+from typing import Any, Callable, Dict, List, Optional, Tuple, cast
 
 from . import __version__
 from .core.document_registry import DocumentRegistry
@@ -189,7 +189,7 @@ class MainWindow(QMainWindow):
         self._register_command_palette()
         # E6b：缺失图片提示的暂存（必须早于 _restore_state——会话恢复就在其中
         # 打开文档并触发缺失检测）。
-        self._pending_missing_images: Dict[str, list] = {}
+        self._pending_missing_images: Dict[str, List[str]] = {}
         self._restore_state()
         self._connect_signals()
         self._apply_theme()
@@ -1302,7 +1302,7 @@ class MainWindow(QMainWindow):
         self.resource_bar.refresh()
         self.secretary.show_message("文件已保存！")
 
-    def _on_missing_images_detected(self, filepath: str, missing: list):
+    def _on_missing_images_detected(self, filepath: str, missing: List[str]):
         """E6b：文档引用的本地图片缺失 → 非打断提示。
 
         小秘书正忙（有气泡在显示、或启动问候已排期）时先暂存，等它闲下来
@@ -1325,7 +1325,7 @@ class MainWindow(QMainWindow):
         self._pending_missing_images = {}
         self._show_missing_images(pending)
 
-    def _show_missing_images(self, notices: Dict[str, list]):
+    def _show_missing_images(self, notices: Dict[str, List[str]]):
         """把缺失图片清单汇总成一条非打断提示（小秘书气泡 + 状态栏）。"""
         total = sum(len(paths) for paths in notices.values())
         if len(notices) == 1:

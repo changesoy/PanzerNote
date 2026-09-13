@@ -26,7 +26,7 @@ import os
 import re
 import urllib.parse
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Set, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 # 行内图片 ![alt](dest "title")：alt 允许反斜杠转义（插入图片会对 ] 等做转义），
 # dest 支持 <...> 包裹（含空格时使用）与裸形式。
@@ -307,7 +307,7 @@ def iter_image_ref_spans(markdown_text: str) -> List[ImageRefSpan]:
     """
     regions = _code_regions(markdown_text)
     spans: List[ImageRefSpan] = []
-    used_labels: Set[str] = set()
+    used_labels: set[str] = set()
 
     for match in _INLINE_IMAGE_RE.finditer(markdown_text):
         if _inside_regions(match.start(), regions):

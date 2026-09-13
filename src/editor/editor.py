@@ -839,13 +839,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         QPlainTextEdit 默认对无文本的图像 mime 可能判否，导致 paste() 不触发
         insertFromMimeData；此处仅对 Markdown 文档的图像放行，其余沿用默认判断。
         """
-        shared = self._shared_doc
-        if (
-            source is not None
-            and source.hasImage()
-            and shared is not None
-            and shared.is_markdown
-        ):
+        if source is not None and source.hasImage() and self._is_markdown_document():
             return True
         return super().canInsertFromMimeData(source)
 

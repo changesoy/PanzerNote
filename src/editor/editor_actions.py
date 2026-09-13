@@ -342,17 +342,29 @@ class EditorActionsMixin:
             alt = os.path.splitext(original_name)[0]
             self._insert_markdown_image(alt, result.relative_path)
 
-    def _image_insert_document_path(self) -> Optional[str]:
-        """插入图片前置校验：返回可落盘的文档路径；不满足时提示并返回 None。"""
+    def _is_markdown_document(self) -> bool:
+        """当前共享文档是否为 Markdown（不弹窗，供插入/粘贴/拖放前置判断复用）。"""
+        shared = getattr(self, "shared_doc", None)
+        return shared is not None and bool(getattr(shared, "is_markdown", False))
+
+    def _markdown_document_path(self) -> Optional[str]:
+        """Markdown 共享文档的路径；非 Markdown 或文档未保存时返回 None（不弹窗）。"""
         shared = getattr(self, "shared_doc", None)
         if shared is None or not getattr(shared, "is_markdown", False):
+            return None
+        filepath = getattr(shared, "filepath", None)
+        return str(filepath) if filepath else None
+
+    def _image_insert_document_path(self) -> Optional[str]:
+        """插入图片前置校验：返回可落盘的文档路径；不满足时提示并返回 None。"""
+        if not self._is_markdown_document():
             QMessageBox.information(self, "插入图片", "仅 Markdown 文档支持插入图片。")
             return None
-        filepath = shared.filepath
-        if not filepath:
+        document_path = self._markdown_document_path()
+        if document_path is None:
             QMessageBox.information(self, "插入图片", "请先保存文档，再插入图片。")
             return None
-        return str(filepath)
+        return document_path
 
     def _insert_markdown_image(self, alt: str, relative_path: str) -> None:
         """在当前光标插入 Markdown 图片语法。"""
@@ -376,12 +388,11 @@ class EditorActionsMixin:
         """
         if source is None or not source.hasImage():
             return False
-        shared = getattr(self, "shared_doc", None)
-        if shared is None or not getattr(shared, "is_markdown", False):
+        if not self._is_markdown_document():
             return False
 
-        document_path = shared.filepath
-        if not document_path:
+        document_path = self._markdown_document_path()
+        if document_path is None:
             QMessageBox.information(self, "插入图片", "请先保存文档，再粘贴图片。")
             return True
 

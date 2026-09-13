@@ -301,17 +301,9 @@ class EditorActionsMixin:
     def insert_image_from_file(self) -> None:
         """选择本地图片，落盘到文档同级 assets/ 后插入 Markdown 图片语法。
 
-        仅 Markdown 文档启用；未保存文档需先保存（否则无落盘基准目录）。
         落盘与安全写入统一委托 ImageAssetService（经 FileGuard 原子写）。
         """
-        shared = getattr(self, "shared_doc", None)
-        if shared is None or not getattr(shared, "is_markdown", False):
-            QMessageBox.information(self, "插入图片", "仅 Markdown 文档支持插入图片。")
-            return
-
-        document_path = shared.filepath
-        if not document_path:
-            QMessageBox.information(self, "插入图片", "请先保存文档，再插入图片。")
+        if self._image_insert_document_path() is None:
             return
 
         source_path, _ = QFileDialog.getOpenFileName(
@@ -320,24 +312,47 @@ class EditorActionsMixin:
         if not source_path:
             return
 
-        file_guard = self.config.get_file_guard()
-        original_name = os.path.basename(source_path)
-        try:
-            data = file_guard.safe_read_bytes(
-                source_path, context=FileAccessContext.USER_DOCUMENT_READ
-            )
-            result = ImageAssetService(file_guard).save_image(
-                document_path, data, original_name
-            )
-        except ImageAssetError as exc:
-            QMessageBox.warning(self, "插入图片", str(exc))
-            return
-        except Exception as exc:
-            QMessageBox.warning(self, "插入图片", f"插入图片失败: {exc}")
+        self.insert_images_from_paths([source_path])
+
+    def insert_images_from_paths(self, paths: list[str]) -> None:
+        """把本地图片文件按序落盘到文档同级 assets/ 并插入 Markdown 图片语法。
+
+        单个文件失败只告警并跳过，不阻断其余文件（拖入多图时保持其余可用）。
+        """
+        document_path = self._image_insert_document_path()
+        if document_path is None:
             return
 
-        alt = os.path.splitext(original_name)[0]
-        self._insert_markdown_image(alt, result.relative_path)
+        file_guard = self.config.get_file_guard()
+        service = ImageAssetService(file_guard)
+        for source_path in paths:
+            original_name = os.path.basename(source_path)
+            try:
+                data = file_guard.safe_read_bytes(
+                    source_path, context=FileAccessContext.USER_DOCUMENT_READ
+                )
+                result = service.save_image(document_path, data, original_name)
+            except ImageAssetError as exc:
+                QMessageBox.warning(self, "插入图片", str(exc))
+                continue
+            except Exception as exc:
+                QMessageBox.warning(self, "插入图片", f"插入图片失败: {exc}")
+                continue
+
+            alt = os.path.splitext(original_name)[0]
+            self._insert_markdown_image(alt, result.relative_path)
+
+    def _image_insert_document_path(self) -> Optional[str]:
+        """插入图片前置校验：返回可落盘的文档路径；不满足时提示并返回 None。"""
+        shared = getattr(self, "shared_doc", None)
+        if shared is None or not getattr(shared, "is_markdown", False):
+            QMessageBox.information(self, "插入图片", "仅 Markdown 文档支持插入图片。")
+            return None
+        filepath = shared.filepath
+        if not filepath:
+            QMessageBox.information(self, "插入图片", "请先保存文档，再插入图片。")
+            return None
+        return str(filepath)
 
     def _insert_markdown_image(self, alt: str, relative_path: str) -> None:
         """在当前光标插入 Markdown 图片语法。"""

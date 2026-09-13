@@ -34,6 +34,7 @@ from ..core.config import Config
 from ..core.shared_document import SharedDocument
 from .syntax_highlighter import get_highlighter_for_file
 from .editor_actions import EditorActionsMixin
+from .image_asset_service import ImageAssetService
 from .auto_pair_handler import AutoPairHandlerMixin
 from .virtual_scroll import (
     LazyHighlightManager, DocumentLazyHighlightCoordinator, LARGE_FILE_THRESHOLD,
@@ -854,6 +855,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
     # 会吞掉从文件树/资源管理器拖入的文件，导致「拖文件到编辑区打开」失效。
     # 仅拦截"本地文件"URL 拖放并 event.ignore() 冒泡给 MainWindow 打开文件；
     # 文本/纯链接拖放（如浏览器拖 URL 粘贴）保留默认行为。
+    # 例外（E4）：拖入内容**全部**为受支持的图片时，由编辑器接管为「落盘 + 插入」。
 
     @staticmethod
     def _has_local_file_urls(mime) -> bool:
@@ -861,19 +863,48 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             return False
         return any(url.isLocalFile() for url in mime.urls())
 
+    @staticmethod
+    def _dragged_image_paths(mime) -> list:
+        """拖入内容全部为受支持的本地图片文件时返回路径列表，否则返回空列表。
+
+        任一 URL 非本地文件、或存在非图片扩展名时不接管（交回「打开文件」冒泡）。
+        """
+        if not mime.hasUrls():
+            return []
+        paths = []
+        for url in mime.urls():
+            if not url.isLocalFile():
+                return []
+            path = url.toLocalFile()
+            if not ImageAssetService.is_supported_image(path):
+                return []
+            paths.append(path)
+        return paths
+
     def dragEnterEvent(self, event):
+        if self._dragged_image_paths(event.mimeData()):
+            event.acceptProposedAction()
+            return
         if self._has_local_file_urls(event.mimeData()):
             event.ignore()
             return
         super().dragEnterEvent(event)
 
     def dragMoveEvent(self, event):
+        if self._dragged_image_paths(event.mimeData()):
+            event.acceptProposedAction()
+            return
         if self._has_local_file_urls(event.mimeData()):
             event.ignore()
             return
         super().dragMoveEvent(event)
 
     def dropEvent(self, event):
+        image_paths = self._dragged_image_paths(event.mimeData())
+        if image_paths:
+            event.acceptProposedAction()
+            self.insert_images_from_paths(image_paths)
+            return
         if self._has_local_file_urls(event.mimeData()):
             event.ignore()
             return

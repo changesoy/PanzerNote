@@ -823,11 +823,30 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         return None
 
     def insertFromMimeData(self, source):
+        # 剪贴板含图像且为 Markdown 文档时走图片落盘分支，其余保持默认文本粘贴
+        if self.insert_image_from_mime(source):
+            return
         self._is_pasting = True
         try:
             super().insertFromMimeData(source)
         finally:
             self._is_pasting = False
+
+    def canInsertFromMimeData(self, source) -> bool:
+        """放行「仅含图像」的剪贴板内容，使其能进入图片落盘分支。
+
+        QPlainTextEdit 默认对无文本的图像 mime 可能判否，导致 paste() 不触发
+        insertFromMimeData；此处仅对 Markdown 文档的图像放行，其余沿用默认判断。
+        """
+        shared = self._shared_doc
+        if (
+            source is not None
+            and source.hasImage()
+            and shared is not None
+            and shared.is_markdown
+        ):
+            return True
+        return super().canInsertFromMimeData(source)
 
     # === 拖放：本地文件 URL 放行给窗口级打开（3.5.7） ===
     #

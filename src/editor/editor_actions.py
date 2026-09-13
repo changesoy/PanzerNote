@@ -12,7 +12,8 @@ import xml.dom.minidom as minidom
 from contextlib import contextmanager
 from typing import Generator, Optional
 
-from PyQt6.QtGui import QTextCursor
+from PyQt6.QtCore import QBuffer, QIODevice, QMimeData
+from PyQt6.QtGui import QImage, QPixmap, QTextCursor
 from PyQt6.QtWidgets import QFileDialog, QMessageBox
 
 from ..security.file_access_context import FileAccessContext
@@ -24,6 +25,26 @@ from .image_asset_service import SUPPORTED_EXTENSIONS, ImageAssetError, ImageAss
 _IMAGE_FILE_FILTER = "图片 (" + " ".join(
     f"*{ext}" for ext in sorted(SUPPORTED_EXTENSIONS)
 ) + ")"
+
+
+def _to_qimage(image_data: object) -> Optional[QImage]:
+    """把 mime 的 imageData 归一化为 QImage（可能是 QImage 或 QPixmap）。"""
+    if isinstance(image_data, QPixmap):
+        return image_data.toImage()
+    if isinstance(image_data, QImage):
+        return image_data
+    return None
+
+
+def _encode_png(image: QImage) -> bytes:
+    """把 QImage 编码为 PNG 字节（剪贴板截图统一以 PNG 落盘）。"""
+    buffer = QBuffer()
+    buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+    if not image.save(buffer, "PNG"):
+        raise ImageAssetError("剪贴板图像编码失败")
+    data = buffer.data().data()
+    buffer.close()
+    return data
 
 
 class EditorActionsMixin:
@@ -327,6 +348,45 @@ class EditorActionsMixin:
         cursor.endEditBlock()
         self.setTextCursor(cursor)
         self.ensureCursorVisible()
+
+    def insert_image_from_mime(self, source: Optional[QMimeData]) -> bool:
+        """剪贴板来源的 mime 含图像时，落盘到 assets/ 并插入相对路径。
+
+        仅 Markdown 文档处理剪贴板图片；其余情况返回 False，交由默认文本粘贴。
+        未保存文档无落盘基准目录，提示后中止（不静默失败）。
+
+        Returns:
+            True 表示已按图片处理（调用方不应再走默认粘贴）；
+            False 表示未处理，应回退默认行为。
+        """
+        if source is None or not source.hasImage():
+            return False
+        shared = getattr(self, "shared_doc", None)
+        if shared is None or not getattr(shared, "is_markdown", False):
+            return False
+
+        document_path = shared.filepath
+        if not document_path:
+            QMessageBox.information(self, "插入图片", "请先保存文档，再粘贴图片。")
+            return True
+
+        image = _to_qimage(source.imageData())
+        if image is None or image.isNull():
+            return False
+
+        try:
+            png_bytes = _encode_png(image)
+            file_guard = self.config.get_file_guard()
+            result = ImageAssetService(file_guard).save_image(
+                document_path, png_bytes, extension=".png"
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "插入图片", f"粘贴图片失败: {exc}")
+            return True
+
+        # 剪贴板无原始文件名，alt 留空
+        self._insert_markdown_image("", result.relative_path)
+        return True
 
     # ═══════════════════ 文档格式化 ═══════════════════
 

@@ -355,6 +355,25 @@ class EditorActionsMixin:
             alt = os.path.splitext(original_name)[0]
             self._insert_markdown_image(alt, result.relative_path)
 
+    @staticmethod
+    def _local_image_paths(mime: Optional[QMimeData]) -> list[str]:
+        """mime 中「全部为受支持的本地图片文件」时返回路径列表，否则返回空列表。
+
+        供拖入（E4）与剪贴板粘贴（E3）共用：任一 URL 非本地文件、或存在非图片
+        扩展名时返回空列表，调用方据此回退默认行为（拖放=冒泡打开、粘贴=纯文本）。
+        """
+        if mime is None or not mime.hasUrls():
+            return []
+        paths = []
+        for url in mime.urls():
+            if not url.isLocalFile():
+                return []
+            path = url.toLocalFile()
+            if not ImageAssetService.is_supported_image(path):
+                return []
+            paths.append(path)
+        return paths
+
     def _is_markdown_document(self) -> bool:
         """当前共享文档是否为 Markdown（不弹窗，供插入/粘贴/拖放前置判断复用）。"""
         shared = getattr(self, "shared_doc", None)
@@ -392,16 +411,27 @@ class EditorActionsMixin:
     def insert_image_from_mime(self, source: Optional[QMimeData]) -> bool:
         """剪贴板来源的 mime 含图像时，落盘到 PanzerNote_assets/ 并插入相对路径。
 
-        仅 Markdown 文档处理剪贴板图片；其余情况返回 False，交由默认文本粘贴。
+        支持两种剪贴板形态：图像数据（截图/位图）与图片文件 URL（文件管理器
+        复制文件）。仅 Markdown 文档处理；其余情况返回 False，交由默认文本粘贴。
         未保存文档无落盘基准目录，提示后中止（不静默失败）。
 
         Returns:
             True 表示已按图片处理（调用方不应再走默认粘贴）；
             False 表示未处理，应回退默认行为。
         """
-        if source is None or not source.hasImage():
+        if source is None:
             return False
         if not self._is_markdown_document():
+            return False
+
+        # 文件管理器复制的图片文件：剪贴板是 text/uri-list、没有图像数据，
+        # 默认粘贴只会把文件路径当纯文本写进正文；此处与拖入（E4）保持一致。
+        image_paths = self._local_image_paths(source)
+        if image_paths:
+            self.insert_images_from_paths(image_paths)
+            return True
+
+        if not source.hasImage():
             return False
 
         document_path = self._markdown_document_path()

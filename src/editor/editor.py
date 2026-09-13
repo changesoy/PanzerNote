@@ -34,7 +34,6 @@ from ..core.config import Config
 from ..core.shared_document import SharedDocument
 from .syntax_highlighter import get_highlighter_for_file
 from .editor_actions import EditorActionsMixin
-from .image_asset_service import ImageAssetService
 from .auto_pair_handler import AutoPairHandlerMixin
 from .virtual_scroll import (
     LazyHighlightManager, DocumentLazyHighlightCoordinator, LARGE_FILE_THRESHOLD,
@@ -834,13 +833,14 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             self._is_pasting = False
 
     def canInsertFromMimeData(self, source) -> bool:
-        """放行「仅含图像」的剪贴板内容，使其能进入图片落盘分支。
+        """放行「仅含图像」或「仅含图片文件」的剪贴板内容，使其能进入图片落盘分支。
 
         QPlainTextEdit 默认对无文本的图像 mime 可能判否，导致 paste() 不触发
-        insertFromMimeData；此处仅对 Markdown 文档的图像放行，其余沿用默认判断。
+        insertFromMimeData；此处仅对 Markdown 文档放行，其余沿用默认判断。
         """
-        if source is not None and source.hasImage() and self._is_markdown_document():
-            return True
+        if source is not None and self._is_markdown_document():
+            if source.hasImage() or self._local_image_paths(source):
+                return True
         return super().canInsertFromMimeData(source)
 
     # === 拖放：本地文件 URL 放行给窗口级打开（3.5.7） ===
@@ -857,26 +857,8 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             return False
         return any(url.isLocalFile() for url in mime.urls())
 
-    @staticmethod
-    def _dragged_image_paths(mime) -> list:
-        """拖入内容全部为受支持的本地图片文件时返回路径列表，否则返回空列表。
-
-        任一 URL 非本地文件、或存在非图片扩展名时不接管（交回「打开文件」冒泡）。
-        """
-        if not mime.hasUrls():
-            return []
-        paths = []
-        for url in mime.urls():
-            if not url.isLocalFile():
-                return []
-            path = url.toLocalFile()
-            if not ImageAssetService.is_supported_image(path):
-                return []
-            paths.append(path)
-        return paths
-
     def dragEnterEvent(self, event):
-        if self._dragged_image_paths(event.mimeData()):
+        if self._local_image_paths(event.mimeData()):
             event.acceptProposedAction()
             return
         if self._has_local_file_urls(event.mimeData()):
@@ -885,7 +867,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         super().dragEnterEvent(event)
 
     def dragMoveEvent(self, event):
-        if self._dragged_image_paths(event.mimeData()):
+        if self._local_image_paths(event.mimeData()):
             event.acceptProposedAction()
             return
         if self._has_local_file_urls(event.mimeData()):
@@ -894,7 +876,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         super().dragMoveEvent(event)
 
     def dropEvent(self, event):
-        image_paths = self._dragged_image_paths(event.mimeData())
+        image_paths = self._local_image_paths(event.mimeData())
         if image_paths:
             event.acceptProposedAction()
             self.insert_images_from_paths(image_paths)

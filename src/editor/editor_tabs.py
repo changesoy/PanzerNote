@@ -2590,9 +2590,20 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             f"{shown}{more}\n\n请先处理同名文件后重试。",
         )
 
+    @staticmethod
+    def _is_same_folder(filepath: str, dest_folder: str) -> bool:
+        """目标文件夹是否就是文件自身所在目录（拖到自身目录 = 原地不动）。"""
+        return os.path.normcase(os.path.abspath(dest_folder)) == os.path.normcase(
+            os.path.abspath(os.path.dirname(filepath))
+        )
+
     def move_file_to_folder(self, filepath: str, dest_folder: str) -> bool:
         """将文件移动到目标文件夹，更新对应标签页（含图片资源迁移）"""
         if not os.path.isfile(filepath) or not os.path.isdir(dest_folder):
+            return False
+        # 目标是文件自己所在的文件夹：原地不动。否则会弹「文件已存在，是否覆盖？」
+        # 这种自问自答；copy_file_to_folder 更会走到 shutil 的 SameFileError。
+        if self._is_same_folder(filepath, dest_folder):
             return False
 
         filename = os.path.basename(filepath)
@@ -2664,6 +2675,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     def copy_file_to_folder(self, filepath: str, dest_folder: str) -> bool:
         """将文件复制到目标文件夹（标签已打开且已修改则先保存再复制，不改动原标签）"""
         if not os.path.isfile(filepath) or not os.path.isdir(dest_folder):
+            return False
+        # 复制到文件自己所在的文件夹没有意义，且 shutil.copy2 会抛 SameFileError。
+        if self._is_same_folder(filepath, dest_folder):
             return False
 
         filename = os.path.basename(filepath)

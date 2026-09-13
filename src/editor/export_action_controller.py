@@ -52,6 +52,19 @@ class ExportActionController:
             "code_line_spacing": config.get_code_line_spacing(),
         }
 
+    def _document_dir(self) -> str:
+        """当前文档所在目录（导出时作相对资源根解析本地图片）。
+
+        未保存 / 未 attach 的文档返回空串：此时没有可解析的相对图片基准，
+        由 ExportService 按「不声明资源根」处理。
+        """
+        widget = self._editor_tabs.currentWidget()
+        shared = getattr(widget, "shared_doc", None)
+        filepath = getattr(shared, "filepath", None)
+        if not isinstance(filepath, str) or not filepath:
+            return ""
+        return os.path.dirname(os.path.abspath(filepath))
+
     def export_pdf(self) -> None:
         """导出当前文档为 PDF（经 WebView2 print_to_pdf_async 异步生成）。"""
         from .export_service import ExportService
@@ -85,6 +98,7 @@ class ExportActionController:
                 v2_export_colors(self._theme_engine),
                 theme_engine=self._theme_engine,
                 on_notice=on_export_notice,
+                resource_root=self._document_dir(),
                 **self._typography(),
             )
         except RuntimeError as e:
@@ -137,6 +151,7 @@ class ExportActionController:
                 v2_export_colors(self._theme_engine),
                 file_guard=self._editor_tabs.config.get_file_guard(),
                 theme_engine=self._theme_engine,
+                resource_root=self._document_dir(),
                 **self._typography(),
             )
             self._secretary.show_message(

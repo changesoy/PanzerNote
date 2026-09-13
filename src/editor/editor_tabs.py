@@ -41,7 +41,12 @@ from .save_task_manager import SaveTaskManager, SaveState
 from .temp_session_manager import TempSessionManager
 from .eol_utils import detect_eol_from_bytes
 from .image_reference_scanner import find_missing_local_images
-
+from .asset_migration_service import (
+    MODE_COPY,
+    MODE_MOVE,
+    AssetMigrationPlan,
+    AssetMigrationService,
+)
 
 # ════════════════════════════════════════════════════════
 #  另存为对话框
@@ -2528,8 +2533,65 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
     # === 文件移动（供标签拖拽使用） ===
 
+    def _document_text(self, filepath: str) -> Optional[str]:
+        """已打开文档的**编辑器当前内容**（未打开返回 None，回落到磁盘）。
+
+        预检必须看到用户眼里的内容：保存是异步的，刚插入的引用此刻可能还没落盘。
+        """
+        for i in range(self.count()):
+            widget = self.widget(i)
+            w_doc = getattr(widget, "shared_doc", None)
+            if w_doc is None or w_doc.filepath != filepath:
+                continue
+            editor = self._get_editor_from_widget(widget)
+            if editor is None:
+                return None
+            return editor.toPlainText()
+        return None
+
+    def _plan_asset_migration(
+        self, source_md: str, dest_md: str, mode: str
+    ) -> Optional[AssetMigrationPlan]:
+        """E6c1a：资源迁移预检；服务不可用时返回 None（不阻断文档移动本身）。"""
+        if not self._is_markdown_file(source_md):
+            return None
+        try:
+            return AssetMigrationService(self.config).plan(
+                source_md, dest_md, mode,
+                markdown_text=self._document_text(source_md),
+            )
+        except Exception as exc:  # noqa: BLE001
+            get_logger(__name__).warning("图片资源迁移预检失败，按不迁移处理: %s", exc)
+            return None
+
+    def _apply_asset_migration(self, plan: Optional[AssetMigrationPlan]) -> None:
+        """执行资源迁移：`copy → verify → delete`；失败只记日志，源文件不丢。
+
+        迁移失败的引用会变成断链，由 E6b 的缺失检测在下次打开 / 基准变化时提示。
+        """
+        if plan is None or not plan.ok or not plan.items:
+            return
+        try:
+            result = AssetMigrationService(self.config).apply(plan)
+        except Exception as exc:  # noqa: BLE001
+            get_logger(__name__).error("图片资源迁移执行失败: %s", exc)
+            return
+        if result.failed:
+            get_logger(__name__).warning(
+                "有 %d 个图片资源未能迁移（源文件保留）", len(result.failed)
+            )
+
+    def _warn_asset_conflict(self, title: str, conflicts: List[str]) -> None:
+        shown = "、".join(os.path.basename(path) for path in conflicts[:5])
+        more = f" 等 {len(conflicts)} 个" if len(conflicts) > 5 else ""
+        QMessageBox.warning(
+            self, title,
+            "目标目录已有同名但内容不同的图片，本次未做任何改动：\n\n"
+            f"{shown}{more}\n\n请先处理同名文件后重试。",
+        )
+
     def move_file_to_folder(self, filepath: str, dest_folder: str) -> bool:
-        """将文件移动到目标文件夹，更新对应标签页"""
+        """将文件移动到目标文件夹，更新对应标签页（含图片资源迁移）"""
         if not os.path.isfile(filepath) or not os.path.isdir(dest_folder):
             return False
 
@@ -2545,6 +2607,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             if msg != QMessageBox.StandardButton.Yes:
                 return False
 
+        # 资源预检放在「先保存」之后、`.md` 落位之前：预检读的是磁盘内容，
+        # 若文档有未保存的改动，必须先落盘才能看到最新引用；冲突则整体中止。
+        migration: Optional[AssetMigrationPlan] = None
         try:
             # 先保存再移动（3.5.8 R2：共享 Document 以 Document 侧 dirty 为准）
             shared_doc = None
@@ -2570,6 +2635,11 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 )
                 return False
 
+            migration = self._plan_asset_migration(filepath, new_path, MODE_MOVE)
+            if migration is not None and not migration.ok:
+                self._warn_asset_conflict("无法移动", migration.conflicts)
+                return False
+
             shutil.move(filepath, new_path)
 
             # 更新标签页信息（3.5.8：共享 Document 由 registry re-key + bind_path
@@ -2582,6 +2652,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                     self._document_registry.move_path(w_doc, new_path)
                     break
 
+            # .md 已落位后再迁移资源：迁移本身有 copy → verify 保底（源不丢），
+            # 万一失败只是新文档断链，不会让原笔记丢图。
+            self._apply_asset_migration(migration)
             return True
         except Exception as e:
             get_logger(__name__).error("移动文件失败: %s", e)
@@ -2605,6 +2678,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             if msg != QMessageBox.StandardButton.Yes:
                 return False
 
+        # 资源预检放在「先保存」之后、副本落位之前：预检读磁盘内容，
+        # 未保存的改动必须先落盘才能被看到；冲突则整体中止。
+        migration: Optional[AssetMigrationPlan] = None
         try:
             # 若标签打开且已修改，先保存再复制，保证副本包含最新内容
             for i in range(self.count()):
@@ -2616,7 +2692,15 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                         self._save_file(widget, filepath, w_doc.encoding)
                     break
 
+            migration = self._plan_asset_migration(filepath, new_path, MODE_COPY)
+            if migration is not None and not migration.ok:
+                self._warn_asset_conflict("无法复制", migration.conflicts)
+                return False
+
             shutil.copy2(filepath, new_path)
+            # 副本已落位后再迁移资源；Copy 语义下源文档仍引用同一张图，
+            # 独占判定因此天然得出 COPY（不会把源笔记的图搬走）。
+            self._apply_asset_migration(migration)
             return True
         except Exception as e:
             get_logger(__name__).error("复制文件失败: %s", e)

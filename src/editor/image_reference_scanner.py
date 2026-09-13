@@ -61,6 +61,11 @@ _INLINE_CODE_RE = re.compile(r"(?P<ticks>`+)(?P<body>[^\n]*?)(?P=ticks)")
 
 _ESCAPE_RE = re.compile(r"\\(.)")
 
+# 扫描代价控制（4.5 第 5 条）：只读、限单文件大小、限文件数量、跳过隐藏目录
+SCAN_MAX_BYTES = 1 * 1024 * 1024
+SCAN_MAX_FILES = 5000
+_MARKDOWN_EXTS = (".md", ".markdown")
+
 
 def _normalize_label(label: str) -> str:
     """引用标签归一化：折叠空白 + 忽略大小写（CommonMark 语义）。"""
@@ -167,3 +172,54 @@ def find_missing_local_images(base_dir: str, markdown_text: str) -> List[str]:
         if not os.path.isfile(resolved):
             missing.append(resolved)
     return missing
+
+
+def iter_markdown_files(root_dir: str, *, max_files: int = SCAN_MAX_FILES) -> List[str]:
+    """递归列出 root_dir 下的 Markdown 文件（跳过隐藏目录，限数量）。"""
+    files: List[str] = []
+    if not root_dir or not os.path.isdir(root_dir):
+        return files
+    for current, dirnames, filenames in os.walk(root_dir):
+        dirnames[:] = [name for name in dirnames if not name.startswith(".")]
+        for filename in filenames:
+            if not filename.lower().endswith(_MARKDOWN_EXTS):
+                continue
+            files.append(os.path.join(current, filename))
+            if len(files) >= max_files:
+                return files
+    return files
+
+
+def resolve_refs_in_text(base_dir: str, markdown_text: str) -> List[str]:
+    """由 Markdown 文本解析出的**本地相对资源** canonical 绝对路径（去重、保序）。"""
+    resolved: List[str] = []
+    seen: set[str] = set()
+    for url in extract_local_image_refs(markdown_text):
+        path = resolve_local_ref(base_dir, url)
+        if path is None or path in seen:
+            continue
+        seen.add(path)
+        resolved.append(path)
+    return resolved
+
+
+def resolve_document_refs(
+    markdown_path: str, *, max_bytes: int = SCAN_MAX_BYTES
+) -> List[str]:
+    """返回某篇 Markdown 引用的**本地相对资源** canonical 绝对路径（去重、保序）。
+
+    只读、限大小；文件读不了或超限一律返回空（扫描代价控制，4.5 第 5 条）。
+    供共享判定使用：调用方按 canonical path 比较，不依赖 ledger。
+
+    注意：文档在编辑器里有未保存改动时，磁盘内容不是真相——那种情况下调用方
+    应改用 `resolve_refs_in_text(dirname, editor.toPlainText())`。
+    """
+    try:
+        if os.path.getsize(markdown_path) > max_bytes:
+            return []
+        with open(markdown_path, "r", encoding="utf-8", errors="replace") as handle:
+            text = handle.read()
+    except OSError:
+        return []
+
+    return resolve_refs_in_text(os.path.dirname(os.path.abspath(markdown_path)), text)

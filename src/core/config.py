@@ -374,6 +374,9 @@ class Config:
     def get_path_validator(self) -> PathValidator:
         return self._path_validator
 
+    def get_path_resolver(self) -> PathResolver:
+        return self._path_resolver
+
     def get_file_guard(self) -> FileGuard:
         return self._file_guard
 

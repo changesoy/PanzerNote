@@ -38,6 +38,11 @@ ORIGIN_FILE = "file"
 ORIGIN_DROP = "drop"
 
 
+def _location_key(absolute_path: str) -> str:
+    """位置比较键：规范化 + 大小写归一（Windows 路径不区分大小写）。"""
+    return os.path.normcase(os.path.normpath(absolute_path))
+
+
 @dataclass(frozen=True)
 class ImageAssetRecord:
     """一条托管图片的最后已知线索。"""
@@ -161,10 +166,58 @@ class ImageAssetLedger:
     def find_by_hash(self, sha256: str) -> List[ImageAssetRecord]:
         return [r for r in self._assets if r.sha256 == sha256]
 
+    def find_by_location(self, absolute_path: str) -> List[ImageAssetRecord]:
+        """按「最后已知位置」取候选。
+
+        迁移回写用：位置是**唯一键**（应用自己知道文件从 A 搬到 B），
+        不需要靠 hash 猜是哪一条记录。
+        """
+        target = _location_key(absolute_path)
+        return [
+            r for r in self._assets if _location_key(r.last_known_abs) == target
+        ]
+
     # ---------- 变更 ----------
 
     def add(self, record: ImageAssetRecord) -> None:
         self._assets.append(record)
+
+    def update_location(
+        self, asset_id: str, absolute_path: str, name: Optional[str] = None
+    ) -> bool:
+        """迁移后更新某条记录的最后已知位置；`id / added_at / origin` 不变。
+
+        记录是 frozen dataclass：重建一条同身份记录替换原记录。
+        未命中返回 False（调用方跳过，不新建记录）。
+        """
+        for index, record in enumerate(self._assets):
+            if record.id != asset_id:
+                continue
+            self._assets[index] = ImageAssetRecord(
+                id=record.id,
+                name=name or record.name,
+                last_known_abs=absolute_path,
+                sha256=record.sha256,
+                size=record.size,
+                added_at=record.added_at,
+                origin=record.origin,
+            )
+            return True
+        return False
+
+    def add_copy(self, record: ImageAssetRecord, absolute_path: str) -> ImageAssetRecord:
+        """为同一内容的**新物理副本**补一条记录（Copy 语义：源记录保持有效）。"""
+        duplicate = ImageAssetRecord(
+            id=uuid.uuid4().hex,
+            name=os.path.basename(absolute_path),
+            last_known_abs=absolute_path,
+            sha256=record.sha256,
+            size=record.size,
+            added_at=datetime.now().astimezone().isoformat(timespec="seconds"),
+            origin=record.origin,
+        )
+        self._assets.append(duplicate)
+        return duplicate
 
     def remove(self, asset_id: str) -> None:
         self._assets = [r for r in self._assets if r.id != asset_id]

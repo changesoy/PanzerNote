@@ -104,6 +104,20 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         'Swift': ['}'], 'Kotlin': ['}'],
     }
 
+    # Markdown 列表前缀（阶段 2 F1）：任务 / 无序 / 有序，含前导缩进。
+    # 顺序重要——任务列表须先于无序列表匹配（`- [ ]` 也会命中无序分支）。
+    # prefix 捕获到标记末尾（不含尾随空白），续写时统一补一个空格；
+    # 有序列表序号原文保留（不递增），渲染时 markdown-it 自动按序编号；
+    # 引用块捕获完整嵌套标记（如 `> > `），空引用行回车取消标记。
+    _MD_LIST_PREFIX_RE = re.compile(
+        r"^(?P<indent>[ \t]*)(?P<prefix>"
+        r"[-*+]\s+\[[ xX]\]"        # 任务列表：- [ ] / - [x] / - [X]
+        r"|[-*+](?:[ \t]+|$)"       # 无序列表：- / * / +（后跟空白或行尾）
+        r"|\d{1,9}\.(?:[ \t]+|$)"   # 有序列表：1. / 12.（后跟空白或行尾）
+        r"|(?:>(?:[ \t]+|$))+"      # 引用块：> / > >（允许嵌套）
+        r")"
+    )
+
     # 不显示缩略图的文件类型
     _NO_MINIMAP_TYPES = {'纯文本', 'Markdown'}
 
@@ -774,13 +788,18 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             cursor = self.textCursor()
             if cursor.hasSelection():
                 self._indent_selection(cursor, indent=True)
+            elif self._file_type == 'Markdown' and self._table_tab_next():
+                pass  # 表格内：跳到下一单元格（阶段 2 G3）
             else:
                 cursor.insertText(get_indent_unit(self.config))
             return
 
-        # Shift+Tab: 减少缩进
+        # Shift+Tab: 减少缩进（表格内则跳到上一单元格，阶段 2 G3）
         if key == Qt.Key.Key_Backtab:
             cursor = self.textCursor()
+            if not cursor.hasSelection() and self._file_type == 'Markdown' \
+                    and self._table_tab_next(backwards=True):
+                return
             self._indent_selection(cursor, indent=False)
             return
 
@@ -887,7 +906,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         super().dropEvent(event)
 
     def _handle_enter(self):
-        """处理回车键 - 自动缩进、Python 关键词 dedent"""
+        """处理回车键 - 自动缩进、Python 关键词 dedent、Markdown 列表续写"""
         cursor = self.textCursor()
         block = cursor.block()
         text = block.text()
@@ -899,6 +918,10 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
                 indent += char
             else:
                 break
+
+        # Markdown 列表续写优先（阶段 2 F1）；非列表行回落通用缩进逻辑
+        if self._file_type == 'Markdown' and self._handle_markdown_list_enter(cursor, text):
+            return
 
         # 检查是否需要增加缩进
         stripped = text.rstrip()
@@ -925,6 +948,30 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         cursor.endEditBlock()
         self.setTextCursor(cursor)
         self.ensureCursorVisible()
+
+    def _handle_markdown_list_enter(self, cursor, text: str) -> bool:
+        """Markdown 列表/引用块回车续写（阶段 2 F1/G1）。
+
+        当前行是任务 / 无序 / 有序 / 引用块项时，换行保留同一前缀（含前导缩进
+        与嵌套标记，有序列表序号原文不变）；空项回车取消标记（新行只留前导缩进）。
+        非列表行返回 False，由调用方继续通用缩进逻辑。
+        """
+        m = self._MD_LIST_PREFIX_RE.match(text)
+        if not m:
+            return False
+        rest = text[m.end():]
+        if rest.strip():
+            new_prefix = m.group("indent") + m.group("prefix").rstrip() + " "
+        else:
+            # 空列表项：只保留前导缩进，取消列表标记
+            new_prefix = m.group("indent")
+        cursor.beginEditBlock()
+        cursor.insertBlock()
+        cursor.insertText(new_prefix)
+        cursor.endEditBlock()
+        self.setTextCursor(cursor)
+        self.ensureCursorVisible()
+        return True
 
     def _handle_closing_brace(self):
         """处理输入 } 时自动减少缩进"""

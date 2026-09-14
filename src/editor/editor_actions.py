@@ -8,9 +8,11 @@
 
 import json
 import os
+import re
+import unicodedata
 import xml.dom.minidom as minidom
 from contextlib import contextmanager
-from typing import Generator, Optional
+from typing import Callable, Generator, Optional
 
 from PyQt6.QtCore import QBuffer, QIODevice, QMimeData
 from PyQt6.QtGui import QImage, QPixmap, QTextCursor
@@ -308,6 +310,363 @@ class EditorActionsMixin:
             cursor.setPosition(block.position())
             self.setTextCursor(cursor)
             self.centerCursor()
+
+    # ═══════════════════ 任务列表（阶段 2 F2） ═══════════════════
+
+    _TASK_ROW_RE = re.compile(r"^(\s*[-*+]\s+)\[([ xX])\](.*)$")
+    _TASK_BULLET_RE = re.compile(r"^(\s*[-*+]\s+)(?!\[)(.*)$")
+
+    def toggle_task_checkbox(self) -> None:
+        """切换当前行任务列表勾选状态（[ ] ⇄ [x]）。
+
+        已有勾选框：空 ⇄ x（原为大写 X 时恢复为 x，避免无意义的大小写翻转）。
+        普通列表项（- 内容）：补一个未勾选框 `- [ ] 内容`。
+        非列表行 / 空列表项：不做任何事。
+        """
+        cursor = self.textCursor()
+        line = cursor.block().text()
+
+        m = self._TASK_ROW_RE.match(line)
+        if m:
+            new_line = f"{m.group(1)}[{' ' if m.group(2) != ' ' else 'x'}]{m.group(3)}"
+        else:
+            m = self._TASK_BULLET_RE.match(line)
+            if not m or not m.group(2).strip():
+                return
+            new_line = f"{m.group(1)}[ ] {m.group(2)}"
+
+        with self.programmatic_modify():
+            row_cursor = self.textCursor()
+            row_cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
+            row_cursor.movePosition(
+                QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor
+            )
+            row_cursor.insertText(new_line)
+
+    # ═══════════════════ Markdown 表格（阶段 2 F3） ═══════════════════
+
+    def _table_rows_at_cursor(self) -> Optional[list[str]]:
+        """返回光标所在 Markdown 表格的各行文本（含分隔行）。
+
+        表格 = 光标块向上/向下连续的以 `|` 开头（允许前导空白）的行；
+        遇到空行或非表格行即停。光标不在表格内时返回 None。
+        """
+        doc = self.document()
+        block = self.textCursor().block()
+        if not block.text().lstrip().startswith("|"):
+            return None
+
+        rows: list[str] = []
+        b = block
+        while b.isValid() and b.text().lstrip().startswith("|"):
+            rows.append(b.text())
+            b = b.previous()
+        rows.reverse()
+        b = block.next()
+        while b.isValid() and b.text().lstrip().startswith("|"):
+            rows.append(b.text())
+            b = b.next()
+        return rows
+
+    @staticmethod
+    def _table_cells(row: str) -> list[str]:
+        """拆分表格行为单元格（去掉首尾定界符；转义 `\\|` 暂不支持，见 docstring）。"""
+        return row.strip().strip("|").split("|")
+
+    @staticmethod
+    def _table_render_row(cells: list[str]) -> str:
+        return "|" + "|".join(cells) + "|"
+
+    def _table_current_cell_index(self, row: str) -> int:
+        """光标在当前行第几个单元格（0 起），行尾 clamp 到最后一个单元格。"""
+        pos = self.textCursor().positionInBlock()
+        delimiters = row.count("|", 0, pos)
+        if row.lstrip().startswith("|"):
+            delimiters -= 1
+        cells = self._table_cells(row)
+        return max(0, min(delimiters, len(cells) - 1))
+
+    def _table_edit(self, rebuild: Callable[[list[str]], list[str]]) -> None:
+        """表格编辑公共骨架：定位表格 → 逐行重建 → 替换原文本。"""
+        rows = self._table_rows_at_cursor()
+        if rows is None:
+            return
+        cursor = self.textCursor()
+        start_block = cursor.block()
+        while start_block.previous().isValid() and \
+                start_block.previous().text().lstrip().startswith("|"):
+            start_block = start_block.previous()
+
+        with self.programmatic_modify():
+            sel = self.textCursor()
+            sel.setPosition(start_block.position())
+            end = self.document().findBlockByNumber(
+                start_block.blockNumber() + len(rows) - 1
+            )
+            sel.setPosition(end.position() + end.length() - 1,
+                            QTextCursor.MoveMode.KeepAnchor)
+            sel.insertText("\n".join(rebuild(rows)))
+
+    def table_insert_row_below(self) -> None:
+        """在光标行下方插入空行；若当前是表头则插到分隔行之后。"""
+        def rebuild(rows: list[str]) -> list[str]:
+            cols = len(self._table_cells(rows[0]))
+            empty = self._table_render_row(["  "] * cols)
+            # 表头行 → 空行插到分隔行之后，否则插到当前行之后
+            idx = self._cursor_row_index(rows)
+            if idx == 0 and len(rows) > 1 and self._is_table_separator(rows[1]):
+                idx = 1
+            out = list(rows)
+            out.insert(idx + 1, empty)
+            return out
+        self._table_edit(rebuild)
+
+    def table_insert_row_above(self) -> None:
+        """在光标行上方插入空行；表头行上方不插（表格不允许顶到表头之上）。"""
+        def rebuild(rows: list[str]) -> list[str]:
+            cols = len(self._table_cells(rows[0]))
+            empty = self._table_render_row(["  "] * cols)
+            current_text = self.textCursor().block().text()
+            idx = rows.index(current_text) if current_text in rows else 0
+            if idx == 0:
+                return rows  # 表头上方不插
+            out = list(rows)
+            out.insert(idx, empty)
+            return out
+        self._table_edit(rebuild)
+
+    def table_delete_row(self) -> None:
+        """删除光标所在行；表头与分隔行不可删。"""
+        def rebuild(rows: list[str]) -> list[str]:
+            current_text = self.textCursor().block().text()
+            idx = rows.index(current_text) if current_text in rows else -1
+            if idx <= (1 if len(rows) > 1 and self._is_table_separator(rows[1]) else 0):
+                return rows  # 表头 / 分隔行不可删
+            out = list(rows)
+            del out[idx]
+            return out
+        self._table_edit(rebuild)
+
+    def table_insert_column_left(self) -> None:
+        """在光标所在单元格左侧插入一列（含分隔行补齐）。"""
+        def rebuild(rows: list[str]) -> list[str]:
+            idx = self._table_current_cell_index(rows[self._cursor_row_index(rows)])
+            out = []
+            for row in rows:
+                cells = self._table_cells(row)
+                if self._is_table_separator(row):
+                    cells.insert(idx, " --- ")
+                else:
+                    cells.insert(idx, "  ")
+                out.append(self._table_render_row(cells))
+            return out
+        self._table_edit(rebuild)
+
+    def table_insert_column_right(self) -> None:
+        """在光标所在单元格右侧插入一列（含分隔行补齐）。"""
+        def rebuild(rows: list[str]) -> list[str]:
+            idx = self._table_current_cell_index(rows[self._cursor_row_index(rows)])
+            out = []
+            for row in rows:
+                cells = self._table_cells(row)
+                if self._is_table_separator(row):
+                    cells.insert(idx + 1, " --- ")
+                else:
+                    cells.insert(idx + 1, "  ")
+                out.append(self._table_render_row(cells))
+            return out
+        self._table_edit(rebuild)
+
+    def table_delete_column(self) -> None:
+        """删除光标所在列（含分隔行对应段）；仅一列时不可删。"""
+        def rebuild(rows: list[str]) -> list[str]:
+            idx = self._table_current_cell_index(rows[self._cursor_row_index(rows)])
+            if len(self._table_cells(rows[0])) <= 1:
+                return rows
+            out = []
+            for row in rows:
+                cells = self._table_cells(row)
+                if idx < len(cells):
+                    del cells[idx]
+                out.append(self._table_render_row(cells))
+            return out
+        self._table_edit(rebuild)
+
+    def _cursor_row_index(self, rows: list[str]) -> int:
+        current_text = self.textCursor().block().text()
+        return rows.index(current_text) if current_text in rows else 0
+
+    @staticmethod
+    def _is_table_separator(row: str) -> bool:
+        cells = row.strip().strip("|").split("|")
+        return bool(cells) and all(
+            re.fullmatch(r"\s*:?-{1,}:?\s*", c) for c in cells
+        )
+
+    # ═══════════════════ 行内格式（阶段 2 G2） ═══════════════════
+
+    def _wrap_inline(self, prefix: str, suffix: str,
+                     link: bool = False) -> None:
+        """选中包裹骨架：有选中 → 包裹后光标移到尾部；无选中 → 插入骨架。
+
+        link=True 时插入 `[文本]()` 并把光标移到括号内，直接输入 URL。
+        """
+        cursor = self.textCursor()
+        selected = cursor.selectedText()
+        with self.programmatic_modify():
+            if link:
+                cursor.insertText(f"[{selected}]()")
+                cursor.movePosition(QTextCursor.MoveOperation.Left)
+            else:
+                cursor.insertText(f"{prefix}{selected}{suffix}")
+            self.setTextCursor(cursor)
+
+    def format_bold(self) -> None:
+        self._wrap_inline("**", "**")
+
+    def format_italic(self) -> None:
+        self._wrap_inline("*", "*")
+
+    def format_inline_code(self) -> None:
+        self._wrap_inline("`", "`")
+
+    def format_link(self) -> None:
+        self._wrap_inline("", "", link=True)
+
+    # ═══════════════════ 标题级别（阶段 2 G5） ═══════════════════
+
+    _HEADING_RE = re.compile(r"^(#{1,6})(\s|$)")
+
+    def set_heading_level(self, level: int) -> None:
+        """把当前行设为 level 级标题（0 = 清除标题标记）。
+
+        已是目标级别则清除（二次按同键 = 取消）；替换既有 `#` 前缀。
+        """
+        cursor = self.textCursor()
+        line = cursor.block().text()
+        m = self._HEADING_RE.match(line)
+        stripped = line[m.end():] if m else line
+        if m and len(m.group(1)) == level:
+            new_line = stripped
+        else:
+            hashes = "#" * level + " " if level else ""
+            new_line = f"{hashes}{stripped}"
+        with self.programmatic_modify():
+            row_cursor = self.textCursor()
+            row_cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
+            row_cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock,
+                                    QTextCursor.MoveMode.KeepAnchor)
+            row_cursor.insertText(new_line)
+
+    def _table_cell_cursor(self, row_no: int, row_text: str, col: int) -> bool:
+        """把光标定位到指定行的第 col 个单元格内容起点（跳过前导空白）。"""
+        pipes = [i for i, ch in enumerate(row_text) if ch == "|"]
+        lead = 1 if row_text.lstrip().startswith("|") else 0
+        p = col + lead
+        if p >= len(pipes):
+            return False
+        block = self.document().findBlockByNumber(row_no)
+        if not block.isValid():
+            return False
+        pos = block.position() + pipes[p] + 1
+        doc = self.document()
+        end = block.position() + block.length() - 1
+        while pos < end and doc.characterAt(pos) == " ":
+            pos += 1
+        cursor = self.textCursor()
+        cursor.setPosition(pos)
+        self.setTextCursor(cursor)
+        return True
+
+    def _table_append_row(self, rows: list[str]) -> tuple[int, str]:
+        """表尾追加空行（列数取表头），返回 (行号, 新行文本)。"""
+        cols = len(self._table_cells(rows[0]))
+        new_row = self._table_render_row(["  "] * cols)
+        self._table_edit(lambda rs: rs + [new_row])
+        return len(rows), new_row
+
+    def _table_tab_next(self, backwards: bool = False) -> bool:
+        """表格内 Tab 导航（阶段 2 G3）。
+
+        跳到下一个 / 上一个可编辑单元格（自动跳过分隔行）；正向越过最后一格
+        时在表尾新建一行并落到其首格；反向越过表头返回 False（回落减缩进）。
+        返回是否处理了按键。
+        """
+        rows = self._table_rows_at_cursor()
+        if not rows:
+            return False
+        block = self.textCursor().block()
+        row_idx = rows.index(block.text())
+        col_idx = self._table_current_cell_index(block.text())
+        start_no = block.blockNumber() - row_idx
+
+        editable_cells = [
+            (r, c)
+            for r, row in enumerate(rows)
+            if not self._is_table_separator(row)
+            for c in range(len(self._table_cells(row)))
+        ]
+        cur = (row_idx, col_idx)
+        idx = editable_cells.index(cur) if cur in editable_cells else -1
+
+        if backwards:
+            if idx <= 0:
+                return False
+            r, c = editable_cells[idx - 1]
+            return self._table_cell_cursor(start_no + r, rows[r], c)
+
+        target = idx + 1
+        if 0 <= target < len(editable_cells):
+            r, c = editable_cells[target]
+            return self._table_cell_cursor(start_no + r, rows[r], c)
+
+        if idx == -1:
+            # 光标在分隔行等位置：跳到其后最近的单元格
+            nxt = [x for x in editable_cells if x > cur]
+            if not nxt:
+                return False
+            r, c = nxt[0]
+            return self._table_cell_cursor(start_no + r, rows[r], c)
+
+        # 已在最后一格：表尾新建一行并落到首格
+        r, new_row = self._table_append_row(rows)
+        return self._table_cell_cursor(start_no + r, new_row, 0)
+
+    # ═══════════════════ 表格对齐（阶段 2 G4） ═══════════════════
+
+    @staticmethod
+    def _display_width(text: str) -> int:
+        """按终端显示宽计算（East Asian Wide/Fullwidth 记 2），保证中文对齐。"""
+        return sum(
+            2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+            for ch in text
+        )
+
+    def table_format_align(self) -> None:
+        """按最宽单元格对齐管道符；分隔行按列宽生成 `---`。"""
+        def rebuild(rows: list[str]) -> list[str]:
+            grid = [self._table_cells(row) for row in rows]
+            ncols = max(len(cells) for cells in grid)
+            widths = [3] * ncols
+            for r_i, row in enumerate(rows):
+                if self._is_table_separator(row):
+                    continue
+                for c, cell in enumerate(grid[r_i]):
+                    widths[c] = max(widths[c], self._display_width(cell.strip()))
+
+            out = []
+            for r_i, row in enumerate(rows):
+                if self._is_table_separator(row):
+                    cells = [" " + "-" * widths[c] + " " for c in range(ncols)]
+                else:
+                    cells = []
+                    for c in range(ncols):
+                        cell = grid[r_i][c].strip() if c < len(grid[r_i]) else ""
+                        pad = widths[c] - self._display_width(cell)
+                        cells.append(f" {cell}{' ' * (pad + 1)}")
+                out.append(self._table_render_row(cells))
+            return out
+        self._table_edit(rebuild)
 
     # ═══════════════════ 插入图片 ═══════════════════
 

@@ -1092,6 +1092,47 @@ class MainWindow(QMainWindow):
     def _to_titlecase(self):
         self.edit_actions.to_titlecase()
 
+    # === Markdown 编辑（阶段 2：任务列表 / 表格） ===
+
+    def _toggle_task_checkbox(self):
+        self.edit_actions.toggle_task_checkbox()
+
+    def _table_insert_row_above(self):
+        self.edit_actions.table_insert_row_above()
+
+    def _table_insert_row_below(self):
+        self.edit_actions.table_insert_row_below()
+
+    def _table_delete_row(self):
+        self.edit_actions.table_delete_row()
+
+    def _table_insert_column_left(self):
+        self.edit_actions.table_insert_column_left()
+
+    def _table_insert_column_right(self):
+        self.edit_actions.table_insert_column_right()
+
+    def _table_delete_column(self):
+        self.edit_actions.table_delete_column()
+
+    def _table_format_align(self):
+        self.edit_actions.table_format_align()
+
+    def _format_bold(self):
+        self.edit_actions.format_bold()
+
+    def _format_italic(self):
+        self.edit_actions.format_italic()
+
+    def _format_inline_code(self):
+        self.edit_actions.format_inline_code()
+
+    def _format_link(self):
+        self.edit_actions.format_link()
+
+    def _set_heading_level(self, level: int):
+        self.edit_actions.set_heading_level(level)
+
     # === 书签与折叠 ===
 
     def _toggle_bookmark(self):

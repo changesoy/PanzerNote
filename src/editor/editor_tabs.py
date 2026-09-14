@@ -3158,6 +3158,75 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if editor:
             editor.to_titlecase()
 
+    # === Markdown 编辑代理（阶段 2：任务列表 / 表格） ===
+
+    def toggle_task_checkbox(self):
+        editor = self.current_editor()
+        if editor:
+            editor.toggle_task_checkbox()
+
+    def table_insert_row_above(self):
+        editor = self.current_editor()
+        if editor:
+            editor.table_insert_row_above()
+
+    def table_insert_row_below(self):
+        editor = self.current_editor()
+        if editor:
+            editor.table_insert_row_below()
+
+    def table_delete_row(self):
+        editor = self.current_editor()
+        if editor:
+            editor.table_delete_row()
+
+    def table_insert_column_left(self):
+        editor = self.current_editor()
+        if editor:
+            editor.table_insert_column_left()
+
+    def table_insert_column_right(self):
+        editor = self.current_editor()
+        if editor:
+            editor.table_insert_column_right()
+
+    def table_delete_column(self):
+        editor = self.current_editor()
+        if editor:
+            editor.table_delete_column()
+
+    def table_format_align(self):
+        editor = self.current_editor()
+        if editor:
+            editor.table_format_align()
+
+    # === 行内格式 / 标题代理（阶段 2 G2/G5） ===
+
+    def format_bold(self):
+        editor = self.current_editor()
+        if editor:
+            editor.format_bold()
+
+    def format_italic(self):
+        editor = self.current_editor()
+        if editor:
+            editor.format_italic()
+
+    def format_inline_code(self):
+        editor = self.current_editor()
+        if editor:
+            editor.format_inline_code()
+
+    def format_link(self):
+        editor = self.current_editor()
+        if editor:
+            editor.format_link()
+
+    def set_heading_level(self, level: int):
+        editor = self.current_editor()
+        if editor:
+            editor.set_heading_level(level)
+
     # === 转到行 ===
 
     def goto_line(self, line_number: int):

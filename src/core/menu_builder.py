@@ -110,6 +110,34 @@ class MenuBuilder:
             self._add_action(case_menu, "首字母大写", None, mw._to_titlecase)
             self._add_action(case_menu, "切换大小写", QKeySequence("Ctrl+Shift+U"), mw._toggle_case, "edit.toggle_case", "编辑")
 
+        md_menu = menu.addMenu("Markdown 编辑")
+        if md_menu is not None:
+            self._add_action(md_menu, "切换任务勾选", QKeySequence("Ctrl+Shift+T"), mw._toggle_task_checkbox, "edit.toggle_task", "编辑")
+            inline_menu = md_menu.addMenu("行内格式")
+            if inline_menu is not None:
+                self._add_action(inline_menu, "加粗", QKeySequence("Ctrl+Alt+B"), mw._format_bold, "edit.format_bold", "编辑")
+                self._add_action(inline_menu, "斜体", QKeySequence("Ctrl+Alt+I"), mw._format_italic, "edit.format_italic", "编辑")
+                self._add_action(inline_menu, "行内代码", QKeySequence("Ctrl+Alt+`"), mw._format_inline_code, "edit.format_code", "编辑")
+                self._add_action(inline_menu, "插入链接", QKeySequence("Ctrl+Alt+K"), mw._format_link, "edit.format_link", "编辑")
+            heading_menu = md_menu.addMenu("标题")
+            if heading_menu is not None:
+                for lvl in range(1, 7):
+                    self._add_action(
+                        heading_menu, f"标题 {lvl}", QKeySequence(f"Ctrl+Alt+{lvl}"),
+                        lambda checked=False, l=lvl: mw._set_heading_level(l),
+                        f"edit.heading_{lvl}", "编辑",
+                    )
+                self._add_action(heading_menu, "清除标题", QKeySequence("Ctrl+Alt+0"), lambda: mw._set_heading_level(0), "edit.heading_clear", "编辑")
+            table_menu = md_menu.addMenu("表格")
+            if table_menu is not None:
+                self._add_action(table_menu, "在上方插入行", None, mw._table_insert_row_above, "edit.table_insert_row_above", "编辑")
+                self._add_action(table_menu, "在下方插入行", None, mw._table_insert_row_below, "edit.table_insert_row_below", "编辑")
+                self._add_action(table_menu, "删除当前行", None, mw._table_delete_row, "edit.table_delete_row", "编辑")
+                self._add_action(table_menu, "在左侧插入列", None, mw._table_insert_column_left, "edit.table_insert_column_left", "编辑")
+                self._add_action(table_menu, "在右侧插入列", None, mw._table_insert_column_right, "edit.table_insert_column_right", "编辑")
+                self._add_action(table_menu, "删除当前列", None, mw._table_delete_column, "edit.table_delete_column", "编辑")
+                self._add_action(table_menu, "格式化对齐", None, mw._table_format_align, "edit.table_format_align", "编辑")
+
     def _build_game_menu(self, menubar: QMenuBar, mw: Any) -> None:
         menu = menubar.addMenu("游戏")
         if menu is None:

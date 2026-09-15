@@ -306,7 +306,7 @@ h6 { font-size: 1em; color: var(--text-muted); }
 /* ========== 段落 / 文本 ========== */
 p { margin: 8px 0; }
 strong { font-weight: 700; }
-em { font-style: italic; }
+em { font-style: italic; padding-right: 0.15em; }
 
 /* ========== 代码字体与行距（--code-font / --code-line-spacing 由预览/导出各自注入） ========== */
 pre, pre code {

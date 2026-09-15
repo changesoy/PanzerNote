@@ -506,26 +506,56 @@ class EditorActionsMixin:
     # ═══════════════════ 行内格式（阶段 2 G2） ═══════════════════
 
     def _wrap_inline(self, prefix: str, suffix: str,
-                     link: bool = False) -> None:
-        """选中包裹骨架：有选中 → 包裹后光标移到尾部；无选中 → 插入骨架。
+                     link: bool = False,
+                     strip_guard: Optional[Callable[[str], bool]] = None) -> None:
+        """行内格式 toggle：选中且已被该标记包裹 → 剥掉标记；否则包裹。
 
-        link=True 时插入 `[文本]()` 并把光标移到括号内，直接输入 URL。
+        无选中 → 插入 `标记标记` 骨架，光标落在标记之间直接输入内容。
+        link=True 时插入 `[文本]()` 并把光标移到括号内；选中 `[文本](url)`
+        整体时还原为 `文本`。strip_guard 用于排除会误剥的相邻标记
+        （如斜体不应剥掉 `**` 粗体的半个标记）。
         """
         cursor = self.textCursor()
         selected = cursor.selectedText()
         with self.programmatic_modify():
             if link:
-                cursor.insertText(f"[{selected}]()")
-                cursor.movePosition(QTextCursor.MoveOperation.Left)
+                m = re.fullmatch(r"\[([^\]]*)\]\([^)]*\)", selected)
+                if m is not None:
+                    cursor.insertText(m.group(1))
+                else:
+                    cursor.insertText(f"[{selected}]()")
+                    cursor.movePosition(QTextCursor.MoveOperation.Left)
             else:
-                cursor.insertText(f"{prefix}{selected}{suffix}")
+                stripped = (
+                    selected
+                    and len(selected) >= len(prefix) + len(suffix)
+                    and selected.startswith(prefix)
+                    and selected.endswith(suffix)
+                    and (strip_guard is None or strip_guard(selected))
+                )
+                if stripped:
+                    cursor.insertText(
+                        selected[len(prefix):len(selected) - len(suffix)])
+                else:
+                    cursor.insertText(f"{prefix}{selected}{suffix}")
+                    if not selected:
+                        # 无选中：光标移到标记之间，直接输入内容
+                        cursor.movePosition(QTextCursor.MoveOperation.Left,
+                                            QTextCursor.MoveMode.MoveAnchor,
+                                            len(suffix))
             self.setTextCursor(cursor)
 
     def format_bold(self) -> None:
         self._wrap_inline("**", "**")
 
     def format_italic(self) -> None:
-        self._wrap_inline("*", "*")
+        # 斜体剥壳须排除 `**` 开头/结尾：`**粗体**` 按斜体应转粗斜体而非剥成 `*粗体*`；
+        # 粗斜体 `***x***` 例外——剥一层斜体恰好还原为 `**x**`
+        def guard(s: str) -> bool:
+            if s.startswith("***") and s.endswith("***"):
+                return True
+            return not s.startswith("**") and not s.endswith("**")
+        self._wrap_inline("*", "*", strip_guard=guard)
 
     def format_inline_code(self) -> None:
         self._wrap_inline("`", "`")
@@ -568,7 +598,8 @@ class EditorActionsMixin:
         block = self.document().findBlockByNumber(row_no)
         if not block.isValid():
             return False
-        pos = block.position() + pipes[p] + 1
+        # 单元格内容位于 pipes[p-1] 与 pipes[p] 之间；无前导管道的首格从行首起
+        pos = block.position() + (pipes[p - 1] + 1 if p > 0 else 0)
         doc = self.document()
         end = block.position() + block.length() - 1
         while pos < end and doc.characterAt(pos) == " ":

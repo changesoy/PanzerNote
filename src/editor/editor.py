@@ -107,13 +107,14 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
     # Markdown 列表前缀（阶段 2 F1）：任务 / 无序 / 有序，含前导缩进。
     # 顺序重要——任务列表须先于无序列表匹配（`- [ ]` 也会命中无序分支）。
     # prefix 捕获到标记末尾（不含尾随空白），续写时统一补一个空格；
-    # 有序列表序号原文保留（不递增），渲染时 markdown-it 自动按序编号；
-    # 引用块捕获完整嵌套标记（如 `> > `），空引用行回车取消标记。
+    # 有序列表序号递增（1. → 2.），与 Typora 等主流编辑器一致，
+    # 保证源码序号与渲染结果一致；引用块捕获完整嵌套标记（如 `> > `），
+    # 空引用行回车取消标记。
     _MD_LIST_PREFIX_RE = re.compile(
         r"^(?P<indent>[ \t]*)(?P<prefix>"
         r"[-*+]\s+\[[ xX]\]"        # 任务列表：- [ ] / - [x] / - [X]
         r"|[-*+](?:[ \t]+|$)"       # 无序列表：- / * / +（后跟空白或行尾）
-        r"|\d{1,9}\.(?:[ \t]+|$)"   # 有序列表：1. / 12.（后跟空白或行尾）
+        r"|(?P<num>\d{1,9})\.(?:[ \t]+|$)"  # 有序列表：1. / 12.（后跟空白或行尾）
         r"|(?:>(?:[ \t]+|$))+"      # 引用块：> / > >（允许嵌套）
         r")"
     )
@@ -953,7 +954,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         """Markdown 列表/引用块回车续写（阶段 2 F1/G1）。
 
         当前行是任务 / 无序 / 有序 / 引用块项时，换行保留同一前缀（含前导缩进
-        与嵌套标记，有序列表序号原文不变）；空项回车取消标记（新行只留前导缩进）。
+        与嵌套标记，有序列表序号递增）；空项回车取消标记（新行只留前导缩进）。
         非列表行返回 False，由调用方继续通用缩进逻辑。
         """
         m = self._MD_LIST_PREFIX_RE.match(text)
@@ -961,7 +962,11 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             return False
         rest = text[m.end():]
         if rest.strip():
-            new_prefix = m.group("indent") + m.group("prefix").rstrip() + " "
+            prefix = m.group("prefix").rstrip()
+            if m.group("num") is not None:
+                # 有序列表：序号递增（1. → 2.），源码与渲染序号保持一致
+                prefix = f"{int(m.group('num')) + 1}."
+            new_prefix = m.group("indent") + prefix + " "
         else:
             # 空列表项：只保留前导缩进，取消列表标记
             new_prefix = m.group("indent")

@@ -112,7 +112,7 @@ class MenuBuilder:
 
         md_menu = menu.addMenu("Markdown 编辑")
         if md_menu is not None:
-            self._add_action(md_menu, "切换任务勾选", QKeySequence("Ctrl+Shift+T"), mw._toggle_task_checkbox, "edit.toggle_task", "编辑")
+            self._add_action(md_menu, "切换任务勾选", QKeySequence("Ctrl+Alt+T"), mw._toggle_task_checkbox, "edit.toggle_task", "编辑")
             inline_menu = md_menu.addMenu("行内格式")
             if inline_menu is not None:
                 self._add_action(inline_menu, "加粗", QKeySequence("Ctrl+Alt+B"), mw._format_bold, "edit.format_bold", "编辑")

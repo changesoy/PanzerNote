@@ -96,7 +96,7 @@ PanzerNote/
 │   ├── editor/                     # ── 编辑器模块 ──
 │   │   ├── editor.py               # 核心编辑器（行号、缩略图、语法高亮、自动缩进、虚拟滚动）
 │   │   ├── editor_tabs.py          # 多标签管理（打开/保存/关闭/编码检测/拖拽迁移/共享 Document View 生命周期）
-│   │   ├── editor_actions.py       # 行操作/大小写转换/JSON/XML 格式化（Mixin）
+│   │   ├── editor_actions.py       # 行操作/大小写转换/JSON/XML 格式化/Markdown 编辑辅助（Mixin）
 │   │   ├── auto_pair_handler.py    # 括号/引号自动配对（Mixin，frozenset 快速过滤）
 │   │   ├── bracket_matcher.py      # 括号匹配高亮（纯函数，扫描配对位置，支持中英文括号）
 │   │   ├── indentation.py          # 缩进统一入口（缩进宽度/缩进文本，禁止硬编码）
@@ -137,7 +137,7 @@ PanzerNote/
 │   │   ├── export_service.py       # 导出服务（HTML/PDF 统一安全管线）
 │   │   ├── file_open_service.py    # 文件打开安全入口（来源校验/路径白名单/二进制检测）
 │   │   ├── file_action_controller.py # 文件动作编排（打开对话框/外部文件注册/最近文件过滤）
-│   │   ├── edit_action_controller.py # 编辑动作编排（撤销/剪贴板/查找/行操作/大小写/书签/折叠，22 个方法）
+│   │   ├── edit_action_controller.py # 编辑动作编排（撤销/剪贴板/查找/行操作/大小写/书签/折叠/Markdown 编辑，37 个方法）
 │   │   ├── export_action_controller.py # 导出动作编排（PDF/HTML，均经 FileGuard 安全写入）
 │   │   ├── settings_action_controller.py # 设置动作编排（对话框应用/导出/导入/保存/重置，show 与 apply 共享）
 │   │   ├── editor_settings_dialog.py # 记事本设置对话框
@@ -318,7 +318,7 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 | `ui/main_window_ui.py`                 | `MainWindowUIBuilder`：顶层 widget 创建与布局（17 个组件经 `BuiltUI` 返回），不连接业务信号                                                                                                                                                                      |
 | `ui/view_coordinator.py`               | `ViewCoordinator`：视图/分屏/面板切换编排；`_current_view`/`_split_tabs` 状态；分屏状态持久化（3.5.2）、方向切换（3.5.6）、`close_split` 统一未保存确认（3.5.7）、空分屏自动关闭与布局重置（3.5.9）；依赖全构造注入，回调（信号连接/菜单同步）由 MainWindow 注入 |
 | `ui/selection_clear_filter.py`         | `SelectionClearFilter`：应用级事件过滤器，点击列表外空白清除选中高亮                                                                                                                                                                                             |
-| `editor/edit_action_controller.py`     | `EditActionController`：22 个编辑动作（撤销/剪贴板/查找/行操作/大小写/书签/折叠）                                                                                                                                                                                |
+| `editor/edit_action_controller.py`     | `EditActionController`：37 个编辑动作（撤销/剪贴板/查找/行操作/大小写/书签/折叠/Markdown 编辑辅助）                                                                                                                                                              |
 | `editor/export_action_controller.py`   | `ExportActionController`：PDF/HTML 导出（均经 FileGuard 安全写入，含 PDF 回调 `_on_pdf_generated`）                                                                                                                                                              |     |
 | `editor/settings_action_controller.py` | `SettingsActionController`：设置动作编排（对话框应用/导出/导入/保存/重置，show 与 apply 共享 `_apply_editor_dict`）                                                                                                                                              |
 | `editor/web_preview.py`                | Web 预览适配器接口（8 项能力：加载完成 / JS 执行 / 双向消息 / 资源根目录 / PDF 导出 / 显示控制）；`create_preview_adapter()` 恒返回 WebView2 后端                                                                                                                |
@@ -367,7 +367,7 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 | 模块                              | 职责                                                                                            |
 | --------------------------------- | ----------------------------------------------------------------------------------------------- |
 | `editor/editor.py`                | 核心编辑器（行号、缩略图、语法高亮、自动缩进、虚拟滚动、粘贴检测）                              |
-| `editor/editor_actions.py`        | 行操作、大小写转换、JSON/XML 格式化（Mixin）                                                    |
+| `editor/editor_actions.py`        | 行操作、大小写转换、JSON/XML 格式化、Markdown 编辑辅助（Mixin）                                 |
 | `editor/auto_pair_handler.py`     | 括号/引号自动配对（Mixin，frozenset O(1) 过滤）                                                 |
 | `editor/bracket_matcher.py`       | 括号匹配高亮（纯函数，扫描配对位置，支持中英文括号）                                            |
 | `editor/indentation.py`           | 缩进统一入口（缩进宽度/缩进文本，禁止硬编码）                                                   |
@@ -384,18 +384,19 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 
 主要功能块：
 
-| 功能区       | 说明                                                                                                    |
-| ------------ | ------------------------------------------------------------------------------------------------------- |
-| **行号**     | `LineNumberArea` 子控件，重写 `paintEvent` 绘制行号，动态计算宽度                                       |
-| **缩略图**   | 内嵌 `MinimapWidget`，通过 `_update_child_geometries()` 管理几何位置                                    |
-| **语法高亮** | 调用 `get_highlighter_for_file()` 工厂函数，支持 Pygments 和内置 Markdown                               |
-| **自动缩进** | `_handle_enter()` 保持缩进 + 检测 `:`/`{` 等触发额外缩进                                                |
-| **虚拟滚动** | `VirtualScrollManager` 管理大文件延迟语法高亮                                                           |
-| **行操作**   | `EditorActionsMixin`：删除行 / 复制行 / 上下移动行，通过 `beginEditBlock/endEditBlock` 保证 undo 原子性 |
-| **大小写**   | `EditorActionsMixin`：`toggle_case` / `to_uppercase` / `to_lowercase` / `to_titlecase`                  |
-| **格式化**   | `EditorActionsMixin`：JSON (`json.dumps`) 和 XML (`minidom.toprettyxml`) 格式化                         |
-| **括号配对** | `AutoPairHandlerMixin`：`keyPressEvent` + `inputMethodEvent` 双路径处理英文和中文 IME 输入              |
-| **右键菜单** | 全中文化菜单，包含大小写子菜单和格式化选项                                                              |
+| 功能区                | 说明                                                                                                                                                                                                                                                                                                                                                                                                             |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **行号**              | `LineNumberArea` 子控件，重写 `paintEvent` 绘制行号，动态计算宽度                                                                                                                                                                                                                                                                                                                                                |
+| **缩略图**            | 内嵌 `MinimapWidget`，通过 `_update_child_geometries()` 管理几何位置                                                                                                                                                                                                                                                                                                                                             |
+| **语法高亮**          | 调用 `get_highlighter_for_file()` 工厂函数，支持 Pygments 和内置 Markdown                                                                                                                                                                                                                                                                                                                                        |
+| **自动缩进**          | `_handle_enter()`：Markdown 列表/引用续写优先（`_handle_markdown_list_enter`），非列表行回落通用缩进 + 检测 `:`/`{` 等触发额外缩进                                                                                                                                                                                                                                                                               |
+| **虚拟滚动**          | `VirtualScrollManager` 管理大文件延迟语法高亮                                                                                                                                                                                                                                                                                                                                                                    |
+| **行操作**            | `EditorActionsMixin`：删除行 / 复制行 / 上下移动行，通过 `beginEditBlock/endEditBlock` 保证 undo 原子性                                                                                                                                                                                                                                                                                                          |
+| **大小写**            | `EditorActionsMixin`：`toggle_case` / `to_uppercase` / `to_lowercase` / `to_titlecase`                                                                                                                                                                                                                                                                                                                           |
+| **格式化**            | `EditorActionsMixin`：JSON (`json.dumps`) 和 XML (`minidom.toprettyxml`) 格式化                                                                                                                                                                                                                                                                                                                                  |
+| **Markdown 编辑辅助** | `EditorActionsMixin`（仅 Markdown 文件生效）：列表 / 引用块回车续写（`_MD_LIST_PREFIX_RE`，有序序号递增）、任务勾选切换（`toggle_task_checkbox`）、表格编辑（行/列增删 + `_table_tab_next` Tab 导航 + `_table_format_align` 对齐，中文按 East Asian 显示宽）、行内格式 toggle（`_wrap_inline`，斜体剥壳排除 `**`）、标题级别（`set_heading_level`）；Tab / Backtab 在 `_handle_key_press` 中先于缩进分派表格导航 |
+| **括号配对**          | `AutoPairHandlerMixin`：`keyPressEvent` + `inputMethodEvent` 双路径处理英文和中文 IME 输入                                                                                                                                                                                                                                                                                                                       |
+| **右键菜单**          | 全中文化菜单，包含大小写子菜单和格式化选项                                                                                                                                                                                                                                                                                                                                                                       |
 
 **括号配对的复杂性**：
 
@@ -1035,15 +1036,16 @@ DraggableTabBar.mouseMoveEvent (鼠标离开标签栏)
 
 ## 8. 快捷键总览
 
-| 分类   | 快捷键                                   | 功能                             |
-| ------ | ---------------------------------------- | -------------------------------- |
-| 文件   | `Ctrl+N/O/S/Shift+S/W`                   | 新建/打开/保存/另存为/关闭标签   |
-| 编辑   | `Ctrl+Z/Y/X/C/V/A`                       | 撤销/重做/剪切/复制/粘贴/全选    |
-| 查找   | `Ctrl+F/H/G`, `F3/Shift+F3`              | 查找/替换/转到行/下一个/上一个   |
-| 行操作 | `Ctrl+Shift+K`, `Alt+↑↓`, `Ctrl+Shift+D` | 删除行/移动行/复制行             |
-| 大小写 | `Ctrl+Shift+U`                           | 切换大小写                       |
-| 视图   | `Ctrl+B/M/Shift+P`, `F11`, `Ctrl+±0`     | 文件树/缩略图/命令面板/全屏/缩放 |
-| 导航   | `Ctrl+1/2/3/4`                           | 记事本/建造/车库/图鉴            |
+| 分类     | 快捷键                                              | 功能                                              |
+| -------- | --------------------------------------------------- | ------------------------------------------------- |
+| 文件     | `Ctrl+N/O/S/Shift+S/W`                              | 新建/打开/保存/另存为/关闭标签                    |
+| 编辑     | `Ctrl+Z/Y/X/C/V/A`                                  | 撤销/重做/剪切/复制/粘贴/全选                     |
+| 查找     | `Ctrl+F/H/G`, `F3/Shift+F3`                         | 查找/替换/转到行/下一个/上一个                    |
+| 行操作   | `Ctrl+Shift+K`, `Alt+↑↓`, `Ctrl+Shift+D`            | 删除行/移动行/复制行                              |
+| 大小写   | `Ctrl+Shift+U`                                      | 切换大小写                                        |
+| Markdown | ``Ctrl+Alt+B/I/`/K``, `Ctrl+Alt+T`, `Ctrl+Alt+0..6` | 加粗/斜体/行内代码/链接、任务勾选、标题级别与清除 |
+| 视图     | `Ctrl+B/M/Shift+P`, `F11`, `Ctrl+±0`                | 文件树/缩略图/命令面板/全屏/缩放                  |
+| 导航     | `Ctrl+1/2/3/4`                                      | 记事本/建造/车库/图鉴                             |
 
 ---
 

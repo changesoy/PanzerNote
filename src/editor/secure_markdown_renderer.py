@@ -26,6 +26,7 @@ from ..core.settings_store import (
 from ..utils.logger import get_logger
 from . import math_render
 from . import mermaid_render
+from .markdown_extras import register_markdown_extras, strip_end_matter
 
 try:
     from markdown_it import MarkdownIt as _MarkdownIt
@@ -218,10 +219,13 @@ def render_markdown_to_safe_html(
                 tasklists_plugin(md)
             except ImportError:
                 get_logger(__name__).debug("mdit_py_plugins 未安装，任务列表语法不可用")
+            # 脚注 / 前辅文（与预览共用同一注册点，见 markdown_extras）
+            register_markdown_extras(md)
             # 公式语法与预览用同一套规则（math_render.register 是唯一注册点）
             if enable_math:
                 math_render.register(md)
-            return _finish(md.render(markdown_text))
+            # 末尾 YAML 后辅文在渲染前剥离（预览与导出一致）
+            return _finish(md.render(strip_end_matter(markdown_text)))
         except Exception:
             get_logger(__name__).debug("markdown-it 渲染失败，回退到 python-markdown")
 
@@ -231,10 +235,10 @@ def render_markdown_to_safe_html(
             'attr_list', 'def_list', 'sane_lists',
         ]
         try:
-            result = _md_lib.markdown(markdown_text, extensions=extensions)
+            result = _md_lib.markdown(strip_end_matter(markdown_text), extensions=extensions)
         except Exception:
             try:
-                result = _md_lib.markdown(markdown_text)
+                result = _md_lib.markdown(strip_end_matter(markdown_text))
             except Exception:
                 get_logger(__name__).warning("python-markdown 渲染失败")
                 return html_module.escape(markdown_text)
@@ -371,6 +375,35 @@ li input[type="checkbox"] {
     margin-right: 6px;
     vertical-align: middle;
 }
+
+/* ========== 脚注（markdown-it-footnote 渲染产物，预览与导出共用） ========== */
+sup.footnote-ref a {
+    color: var(--primary);
+    text-decoration: none;
+    font-size: 0.8em;
+    margin-left: 2px;
+}
+sup.footnote-ref a:hover { text-decoration: underline; }
+hr.footnotes-sep {
+    margin: 24px 0 6px 0;
+    border: none;
+    border-top: 1px solid var(--border-soft);
+}
+section.footnotes { margin-top: 2px; }
+ol.footnotes-list {
+    font-size: 0.92em;
+    color: var(--text-secondary);
+    padding-left: 26px;
+    margin: 4px 0;
+}
+.footnote-item { margin: 2px 0; }
+.footnote-backref {
+    color: var(--text-muted);
+    text-decoration: none;
+    margin-left: 4px;
+    font-size: 0.9em;
+}
+.footnote-backref:hover { text-decoration: underline; }
 """
 
 

@@ -72,6 +72,7 @@ from .secure_markdown_renderer import (
     strip_dangerous_html as _strip_dangerous_html,
 )
 from .document_render_cache import _DOC_RENDER_CACHE, clear_document_render_cache
+from .markdown_extras import strip_end_matter
 from . import math_render as _math_render
 from . import mermaid_render as _mermaid_render
 
@@ -1016,13 +1017,16 @@ a {{
             tasklists_plugin(md)
         except ImportError:
             get_logger(__name__).debug("mdit_py_plugins 未安装，扩展语法（定义列表/任务列表）不可用")
+        # 脚注 / 前辅文（与导出共用同一注册点，见 markdown_extras）
+        from .markdown_extras import register_markdown_extras
+        register_markdown_extras(md)
         _math_render.register(md)
         return md
 
     def _render_markdown(self, text: str) -> str:
         if self._md_parser is not None:
             try:
-                result = self._md_parser.render(text)
+                result = self._md_parser.render(strip_end_matter(text))
                 return _strip_dangerous_html(result)
             except Exception:
                 get_logger(__name__).debug("markdown-it 渲染失败，回退到 python-markdown")
@@ -1057,7 +1061,9 @@ a {{
             return self._render_markdown(text)
 
         try:
-            tokens = self._md_parser.parse(text)
+            # 末尾 YAML 后辅文在渲染前剥离（不参与源码行号：它只占文档末尾，
+            # 前面正文的行号不变，滚动同步不受影响）
+            tokens = self._md_parser.parse(strip_end_matter(text))
 
             self._code_block_source_lines: list[int] = []
             injected_count = 0

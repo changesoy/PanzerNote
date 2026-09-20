@@ -216,21 +216,30 @@ def convert_to_web(
 
 
 def _qimage_to_pil(image: QImage) -> Image.Image:
-    """QImage → PIL（内存转换）；按是否真带 alpha 通道决定 RGBA / RGB。"""
+    """QImage → PIL（内存转换）；按是否真带 alpha 通道决定 RGBA / RGB。
+
+    注意：QImage 每行按 4 字节对齐，`bytesPerLine()` 可能大于 `width*通道数`。
+    必须逐行取 `constScanLine` 剥掉行尾 padding——按 `width*height*通道数`
+    整块截断只让**总长度**对上，每行仍按未补齐的步长解析，错位逐行累加，
+    表现为图片斜切扭曲（宽度不是 4 的倍数时必现）。
+    """
     if image.hasAlphaChannel():
         converted = image.convertToFormat(QImage.Format.Format_RGBA8888)
-        width, height = converted.width(), converted.height()
-        buffer = converted.constBits()
-        if buffer is None:  # pragma: no cover - Qt 保证非空
-            raise ValueError("QImage 数据不可读")
-        # 按 w*h*4 截断：去掉 Qt 可能的行对齐填充，避免 PIL 报长度不符
-        data = bytes(buffer.asarray(converted.sizeInBytes()))[: width * height * 4]
-        return Image.frombytes("RGBA", (width, height), data)
+        mode, channels = "RGBA", 4
+    else:
+        converted = image.convertToFormat(QImage.Format.Format_RGB888)
+        mode, channels = "RGB", 3
 
-    converted = image.convertToFormat(QImage.Format.Format_RGB888)
     width, height = converted.width(), converted.height()
+    row_bytes = width * channels
     buffer = converted.constBits()
     if buffer is None:  # pragma: no cover - Qt 保证非空
         raise ValueError("QImage 数据不可读")
-    data = bytes(buffer.asarray(converted.sizeInBytes()))[: width * height * 3]
-    return Image.frombytes("RGB", (width, height), data)
+
+    if converted.bytesPerLine() == row_bytes:
+        data = bytes(buffer.asarray(converted.sizeInBytes()))[: width * height * channels]
+    else:
+        data = b"".join(
+            bytes(converted.constScanLine(y).asarray(row_bytes)) for y in range(height)
+        )
+    return Image.frombytes(mode, (width, height), data)

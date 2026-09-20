@@ -261,6 +261,7 @@ class MainWindow(QMainWindow):
         self.file_tree.file_move_requested.connect(self._on_file_move_from_tree)
         self.file_tree.file_copy_requested.connect(self._on_file_copy_from_tree)
         self.file_tree.file_deleted.connect(self._on_file_deleted)
+        self.file_tree.file_renamed.connect(self._on_file_renamed)
         self.file_tree.untitled_save_requested.connect(self._on_untitled_save_from_tree)
         self.outline_panel.heading_clicked.connect(self._on_outline_heading_clicked)
         self.find_in_files_panel.result_clicked.connect(self._on_find_in_files_result)
@@ -1157,6 +1158,15 @@ class MainWindow(QMainWindow):
     def _table_format_align(self):
         self.edit_actions.table_format_align()
 
+    def _table_align_left(self):
+        self.edit_actions.table_align_left()
+
+    def _table_align_center(self):
+        self.edit_actions.table_align_center()
+
+    def _table_align_right(self):
+        self.edit_actions.table_align_right()
+
     def _format_bold(self):
         self.edit_actions.format_bold()
 
@@ -1258,7 +1268,7 @@ class MainWindow(QMainWindow):
     def _register_command_palette(self):
         """注册命令面板快捷键。"""
         action = self.shortcut_manager.register(
-            "command_palette", "命令面板", "Ctrl+Shift+P",
+            "command_palette", "命令面板",
             self._show_command_palette, "帮助"
         )
         if action:
@@ -1474,6 +1484,11 @@ class MainWindow(QMainWindow):
         """文件树删除文件/文件夹后，同步关闭所有（含分屏）已打开的对应标签页"""
         for tabs in [self.editor_tabs, *self.view_coordinator.split_tabs]:
             tabs.close_tabs_of_deleted_path(path, is_dir)
+
+    def _on_file_renamed(self, old: str, new: str):
+        """文件树重命名后，同步更新所有（含分屏）图片标签持有的路径"""
+        for tabs in [self.editor_tabs, *self.view_coordinator.split_tabs]:
+            tabs.update_tabs_of_renamed_path(old, new)
 
     @staticmethod
     def _on_untitled_save_from_tree(source_tabs, tab_id: int, dest_folder: str):

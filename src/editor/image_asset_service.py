@@ -10,6 +10,8 @@
   percent-encode 成不可读的 src —— 因此落盘名只保留 [A-Za-z0-9-]，
   其余（含中文/空格）替换为下划线；原名无有效字符时回落为 img_时间戳。
 - 写入统一经 FileGuard.safe_write_bytes（原子写 + 大小上限），不做旁路 IO。
+- 落盘成功即登记进隐藏索引（`data/config/image_assets.json`，见 image_asset_ledger），
+  给后续迁移 / 断链恢复留下「最后已知线索」；索引写失败只告警，不影响插图本身。
 - 仅对超过阈值的大图做优化：PNG 无损重存、JPEG 近无损重存（quality="keep"），
   且仅当结果更小才采用；其余格式原样落盘；任何优化异常均回退原字节。
 """
@@ -28,6 +30,7 @@ from PIL import Image
 from ..security.file_access_context import FileAccessContext
 from ..security.file_guard import FileGuard
 from ..utils.logger import get_logger
+from .image_asset_ledger import ORIGIN_FILE, ImageAssetLedger
 from .image_formats import WEB_RENDERABLE, is_insertable
 
 logger = get_logger(__name__)
@@ -71,10 +74,12 @@ class ImageAssetService:
         *,
         optimize_threshold_bytes: int = DEFAULT_OPTIMIZE_THRESHOLD_BYTES,
         access_context: Optional[FileAccessContext] = FileAccessContext.DOCUMENT_ASSET,
+        ledger: Optional[ImageAssetLedger] = None,
     ) -> None:
         self._file_guard = file_guard
         self._optimize_threshold_bytes = optimize_threshold_bytes
         self._access_context = access_context
+        self._ledger = ledger
 
     # ---------- 公共 API ----------
 
@@ -95,6 +100,7 @@ class ImageAssetService:
         original_name: Optional[str] = None,
         *,
         extension: Optional[str] = None,
+        origin: str = ORIGIN_FILE,
     ) -> ImageAssetResult:
         """把图片写入文档同级 PanzerNote_assets/，返回绝对路径与相对路径。
 
@@ -103,6 +109,7 @@ class ImageAssetService:
             data: 图片二进制（由调用方产出，如剪贴板 QImage → PNG 字节）。
             original_name: 原始文件名（用于生成 ASCII 安全名）；可空。
             extension: 显式扩展名（如剪贴板无文件名时传 ".png"）；优先于 original_name。
+            origin: 图片来源（paste / file / drop），仅作为索引里的来路标记。
 
         Raises:
             ImageAssetError: 扩展名不支持、文档未保存、数据为空或写入失败。
@@ -132,12 +139,30 @@ class ImageAssetService:
             raise ImageAssetError(f"图片写入失败: {exc}") from exc
 
         logger.debug("图片已落盘: %s (%d 字节)", target, len(payload))
+        self._register_in_ledger(filename, target, payload, origin)
         return ImageAssetResult(
             absolute_path=target,
             relative_path=f"{ASSETS_DIRNAME}/{filename}",
         )
 
     # ---------- 内部实现 ----------
+
+    def _register_in_ledger(
+        self, name: str, absolute_path: str, data: bytes, origin: str
+    ) -> None:
+        """把新落盘的图片登记进隐藏索引（指纹与体积取自实际写入的字节）。
+
+        索引只是「最后已知线索」，可删除可重建：登记失败只告警，绝不阻断插图。
+        """
+        if self._ledger is None:
+            return
+        try:
+            self._ledger.add(
+                ImageAssetLedger.build_record(name, absolute_path, data, origin)
+            )
+            self._ledger.save()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("图片资源索引登记失败（不影响插图）: %s", exc)
 
     def _resolve_extension(
         self, original_name: Optional[str], extension: Optional[str]

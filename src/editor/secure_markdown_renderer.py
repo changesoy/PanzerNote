@@ -214,12 +214,7 @@ def render_markdown_to_safe_html(
             md = _MarkdownIt("commonmark", {"html": False})
             # commonmark preset 不含表格/删除线（GFM 扩展），与预览渲染保持一致
             md.enable(["table", "strikethrough"])
-            try:
-                from mdit_py_plugins.tasklists import tasklists_plugin
-                tasklists_plugin(md)
-            except ImportError:
-                get_logger(__name__).debug("mdit_py_plugins 未安装，任务列表语法不可用")
-            # 脚注 / 前辅文（与预览共用同一注册点，见 markdown_extras）
+            # 定义列表 / 任务列表 / 脚注 / 前辅文：与预览共用同一注册点（markdown_extras）
             register_markdown_extras(md)
             # 公式语法与预览用同一套规则（math_render.register 是唯一注册点）
             if enable_math:

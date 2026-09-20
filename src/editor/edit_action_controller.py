@@ -132,6 +132,15 @@ class EditActionController:
     def table_format_align(self) -> None:
         self._editor_tabs.table_format_align()
 
+    def table_align_left(self) -> None:
+        self._editor_tabs.table_align_left()
+
+    def table_align_center(self) -> None:
+        self._editor_tabs.table_align_center()
+
+    def table_align_right(self) -> None:
+        self._editor_tabs.table_align_right()
+
     def format_bold(self) -> None:
         self._editor_tabs.format_bold()
 

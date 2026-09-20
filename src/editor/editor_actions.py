@@ -15,13 +15,14 @@ from contextlib import contextmanager
 from typing import Callable, Generator, Optional
 
 from PyQt6.QtCore import QBuffer, QIODevice, QMimeData
-from PyQt6.QtGui import QImage, QPixmap, QTextCursor
+from PyQt6.QtGui import QTextBlock, QImage, QPixmap, QTextCursor
 from PyQt6.QtWidgets import QFileDialog, QMessageBox
 
 from ..security.file_access_context import FileAccessContext
 from ..security.file_guard import FileGuard
 from ..utils.logger import get_logger
 from . import image_formats as _image_formats
+from .image_asset_ledger import ORIGIN_FILE, ORIGIN_PASTE, ImageAssetLedger
 from .image_asset_service import (
     ASSETS_DIRNAME,
     ImageAssetError,
@@ -334,6 +335,7 @@ class EditorActionsMixin:
         """
         cursor = self.textCursor()
         line = cursor.block().text()
+        offset = cursor.positionInBlock()
 
         m = self._TASK_ROW_RE.match(line)
         if m:
@@ -351,23 +353,54 @@ class EditorActionsMixin:
                 QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor
             )
             row_cursor.insertText(new_line)
+            # 整行替换会让光标失效：按原列位置归位（标记长度变化量补上）
+            row_cursor.setPosition(
+                row_cursor.block().position()
+                + max(0, min(offset + len(new_line) - len(line), len(new_line)))
+            )
+            self.setTextCursor(row_cursor)
 
     # ═══════════════════ Markdown 表格（阶段 2 F3） ═══════════════════
 
-    def _table_rows_at_cursor(self) -> Optional[list[str]]:
-        """返回光标所在 Markdown 表格的各行文本（含分隔行）。
+    _FENCE_RE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
 
-        表格 = 光标块向上/向下连续的以 `|` 开头（允许前导空白）的行；
-        遇到空行或非表格行即停。光标不在表格内时返回 None。
+    def _inside_fenced_code(self, block: QTextBlock) -> bool:
+        """该块是否落在未闭合的围栏代码块内部。
+
+        代码块里的 `| a | b |` 是示例文本，不该被当成可编辑表格。围栏不能嵌套，
+        从文首按出现顺序两两配对即可判定（走到目标块为止，不必扫全篇）。
         """
-        doc = self.document()
+        fence: Optional[str] = None
+        target = block.blockNumber()
+        b = self.document().firstBlock()
+        while b.isValid():
+            match = self._FENCE_RE.match(b.text())
+            if match:
+                mark = match.group(1)[0]
+                fence = None if fence == mark else (fence or mark)
+            if b.blockNumber() >= target:
+                break
+            b = b.next()
+        return fence is not None
+
+    def _table_at_cursor(self) -> Optional[tuple[int, list[str]]]:
+        """光标所在 Markdown 表格的「起始块号 + 各行文本」；不在表格内返回 None。
+
+        表格判定口径：连续的 `|` 开头行、其中**含分隔行**（如 `| --- |`）、
+        且不在围栏代码块内。只看 `|` 开头会过宽——普通段落或示例文本都会被
+        当成可编辑表格，命令落到无关文本上。
+        """
         block = self.textCursor().block()
         if not block.text().lstrip().startswith("|"):
             return None
+        if self._inside_fenced_code(block):
+            return None
 
         rows: list[str] = []
+        first = block
         b = block
         while b.isValid() and b.text().lstrip().startswith("|"):
+            first = b
             rows.append(b.text())
             b = b.previous()
         rows.reverse()
@@ -375,7 +408,29 @@ class EditorActionsMixin:
         while b.isValid() and b.text().lstrip().startswith("|"):
             rows.append(b.text())
             b = b.next()
-        return rows
+
+        if len(rows) < 2 or not any(
+            self._is_table_separator(row) for row in rows[1:]
+        ):
+            return None
+        return first.blockNumber(), rows
+
+    def _table_rows_at_cursor(self) -> Optional[list[str]]:
+        """返回光标所在 Markdown 表格的各行文本（含分隔行）。
+
+        光标不在表格内时返回 None。
+        """
+        found = self._table_at_cursor()
+        return None if found is None else found[1]
+
+    def _table_start_block(self) -> QTextBlock:
+        """光标所在表格的起始块（向上回溯连续的 `|` 开头行）。"""
+        # PyQt6 stub 里 textCursor().block() 被标成 Any，这里显式标注回落类型
+        block: QTextBlock = self.textCursor().block()
+        while block.previous().isValid() and \
+                block.previous().text().lstrip().startswith("|"):
+            block = block.previous()
+        return block
 
     @staticmethod
     def _table_cells(row: str) -> list[str]:
@@ -396,25 +451,36 @@ class EditorActionsMixin:
         return max(0, min(delimiters, len(cells) - 1))
 
     def _table_edit(self, rebuild: Callable[[list[str]], list[str]]) -> None:
-        """表格编辑公共骨架：定位表格 → 逐行重建 → 替换原文本。"""
-        rows = self._table_rows_at_cursor()
-        if rows is None:
+        """表格编辑公共骨架：定位表格 → 逐行重建 → 替换原文本 → 光标归位。
+
+        整块替换会让光标失效（不显式归位就会漂到行首或过期位置），故按
+        「原行号 + 原单元格」把光标放回重建后的对应单元格。
+        """
+        found = self._table_at_cursor()
+        if found is None:
             return
-        cursor = self.textCursor()
-        start_block = cursor.block()
-        while start_block.previous().isValid() and \
-                start_block.previous().text().lstrip().startswith("|"):
-            start_block = start_block.previous()
+        start_no, rows = found
+        row_idx = self._cursor_row_index()
+        col_idx = self._table_current_cell_index(rows[row_idx])
+        updated = rebuild(rows)
+        start_block = self.document().findBlockByNumber(start_no)
+        if start_block is None or not start_block.isValid():
+            return
 
         with self.programmatic_modify():
             sel = self.textCursor()
             sel.setPosition(start_block.position())
-            end = self.document().findBlockByNumber(
-                start_block.blockNumber() + len(rows) - 1
-            )
+            end = self.document().findBlockByNumber(start_no + len(rows) - 1)
             sel.setPosition(end.position() + end.length() - 1,
                             QTextCursor.MoveMode.KeepAnchor)
-            sel.insertText("\n".join(rebuild(rows)))
+            sel.insertText("\n".join(updated))
+
+        if updated:
+            self._table_cell_cursor(
+                start_no + min(row_idx, len(updated) - 1),
+                updated[min(row_idx, len(updated) - 1)],
+                col_idx,
+            )
 
     def table_insert_row_below(self) -> None:
         """在光标行下方插入空行；若当前是表头则插到分隔行之后。"""
@@ -422,7 +488,7 @@ class EditorActionsMixin:
             cols = len(self._table_cells(rows[0]))
             empty = self._table_render_row(["  "] * cols)
             # 表头行 → 空行插到分隔行之后，否则插到当前行之后
-            idx = self._cursor_row_index(rows)
+            idx = self._cursor_row_index()
             if idx == 0 and len(rows) > 1 and self._is_table_separator(rows[1]):
                 idx = 1
             out = list(rows)
@@ -435,8 +501,7 @@ class EditorActionsMixin:
         def rebuild(rows: list[str]) -> list[str]:
             cols = len(self._table_cells(rows[0]))
             empty = self._table_render_row(["  "] * cols)
-            current_text = self.textCursor().block().text()
-            idx = rows.index(current_text) if current_text in rows else 0
+            idx = self._cursor_row_index()
             if idx == 0:
                 return rows  # 表头上方不插
             out = list(rows)
@@ -447,8 +512,7 @@ class EditorActionsMixin:
     def table_delete_row(self) -> None:
         """删除光标所在行；表头与分隔行不可删。"""
         def rebuild(rows: list[str]) -> list[str]:
-            current_text = self.textCursor().block().text()
-            idx = rows.index(current_text) if current_text in rows else -1
+            idx = self._cursor_row_index()
             if idx <= (1 if len(rows) > 1 and self._is_table_separator(rows[1]) else 0):
                 return rows  # 表头 / 分隔行不可删
             out = list(rows)
@@ -459,7 +523,7 @@ class EditorActionsMixin:
     def table_insert_column_left(self) -> None:
         """在光标所在单元格左侧插入一列（含分隔行补齐）。"""
         def rebuild(rows: list[str]) -> list[str]:
-            idx = self._table_current_cell_index(rows[self._cursor_row_index(rows)])
+            idx = self._table_current_cell_index(rows[self._cursor_row_index()])
             out = []
             for row in rows:
                 cells = self._table_cells(row)
@@ -474,7 +538,7 @@ class EditorActionsMixin:
     def table_insert_column_right(self) -> None:
         """在光标所在单元格右侧插入一列（含分隔行补齐）。"""
         def rebuild(rows: list[str]) -> list[str]:
-            idx = self._table_current_cell_index(rows[self._cursor_row_index(rows)])
+            idx = self._table_current_cell_index(rows[self._cursor_row_index()])
             out = []
             for row in rows:
                 cells = self._table_cells(row)
@@ -489,7 +553,7 @@ class EditorActionsMixin:
     def table_delete_column(self) -> None:
         """删除光标所在列（含分隔行对应段）；仅一列时不可删。"""
         def rebuild(rows: list[str]) -> list[str]:
-            idx = self._table_current_cell_index(rows[self._cursor_row_index(rows)])
+            idx = self._table_current_cell_index(rows[self._cursor_row_index()])
             if len(self._table_cells(rows[0])) <= 1:
                 return rows
             out = []
@@ -501,9 +565,17 @@ class EditorActionsMixin:
             return out
         self._table_edit(rebuild)
 
-    def _cursor_row_index(self, rows: list[str]) -> int:
-        current_text = self.textCursor().block().text()
-        return rows.index(current_text) if current_text in rows else 0
+    def _cursor_row_index(self) -> int:
+        """光标所在行在表格里的下标：按块号定位，不用文本反查。
+
+        表格里两行内容可能完全相同（例如两条同样的空数据行），按文本 `index()`
+        反查只会拿到第一次出现的位置，行命令就会落到错误行上。
+        """
+        block: QTextBlock = self.textCursor().block()
+        return (
+            block.blockNumber()
+            - self._table_start_block().blockNumber()
+        )
 
     @staticmethod
     def _is_table_separator(row: str) -> bool:
@@ -567,7 +639,11 @@ class EditorActionsMixin:
         self._wrap_inline("*", "*", strip_guard=guard)
 
     def format_inline_code(self) -> None:
-        self._wrap_inline("`", "`")
+        # 剥壳只认「单反引号定界、内容里没有反引号」的简单代码段：
+        # ``a`b`` 这类多反引号定界剥一层会把内容里的反引号露成非法标记
+        self._wrap_inline(
+            "`", "`", strip_guard=lambda s: s[1] != "`" and s[-2] != "`"
+        )
 
     def format_link(self) -> None:
         self._wrap_inline("", "", link=True)
@@ -583,6 +659,7 @@ class EditorActionsMixin:
         """
         cursor = self.textCursor()
         line = cursor.block().text()
+        offset = cursor.positionInBlock()
         m = self._HEADING_RE.match(line)
         stripped = line[m.end():] if m else line
         if m and len(m.group(1)) == level:
@@ -596,6 +673,12 @@ class EditorActionsMixin:
             row_cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock,
                                     QTextCursor.MoveMode.KeepAnchor)
             row_cursor.insertText(new_line)
+            # 整行替换会让光标失效：按原列位置归位（`#` 前缀长度变化量补上）
+            row_cursor.setPosition(
+                row_cursor.block().position()
+                + max(0, min(offset + len(new_line) - len(line), len(new_line)))
+            )
+            self.setTextCursor(row_cursor)
 
     def _table_cell_cursor(self, row_no: int, row_text: str, col: int) -> bool:
         """把光标定位到指定行的第 col 个单元格内容起点（跳过前导空白）。"""
@@ -636,9 +719,9 @@ class EditorActionsMixin:
         if not rows:
             return False
         block = self.textCursor().block()
-        row_idx = rows.index(block.text())
+        row_idx = self._cursor_row_index()
         col_idx = self._table_current_cell_index(block.text())
-        start_no = block.blockNumber() - row_idx
+        start_no = self._table_start_block().blockNumber()
 
         editable_cells = [
             (r, c)
@@ -655,17 +738,19 @@ class EditorActionsMixin:
             r, c = editable_cells[idx - 1]
             return self._table_cell_cursor(start_no + r, rows[r], c)
 
-        target = idx + 1
-        if 0 <= target < len(editable_cells):
-            r, c = editable_cells[target]
-            return self._table_cell_cursor(start_no + r, rows[r], c)
-
         if idx == -1:
-            # 光标在分隔行等位置：跳到其后最近的单元格
+            # 光标不在可编辑单元格上（例如停在分隔行）：跳到其后最近的单元格。
+            # 必须先于下面的 target 判断——idx 为 -1 时 target 会算成 0，
+            # 那是表格第一格，不是"光标之后的下一格"。
             nxt = [x for x in editable_cells if x > cur]
             if not nxt:
                 return False
             r, c = nxt[0]
+            return self._table_cell_cursor(start_no + r, rows[r], c)
+
+        target = idx + 1
+        if target < len(editable_cells):
+            r, c = editable_cells[target]
             return self._table_cell_cursor(start_no + r, rows[r], c)
 
         # 已在最后一格：表尾新建一行并落到首格
@@ -683,13 +768,17 @@ class EditorActionsMixin:
         )
 
     def table_format_align(self) -> None:
-        """按最宽单元格对齐管道符；分隔行按列宽生成 `---`。"""
+        """按最宽单元格对齐管道符；分隔行保持各列原有的对齐标记。"""
         def rebuild(rows: list[str]) -> list[str]:
             grid = [self._table_cells(row) for row in rows]
             ncols = max(len(cells) for cells in grid)
             widths = [3] * ncols
+            aligns = ["left"] * ncols
             for r_i, row in enumerate(rows):
                 if self._is_table_separator(row):
+                    for c, cell in enumerate(grid[r_i]):
+                        if c < ncols:
+                            aligns[c] = self._separator_alignment(cell)
                     continue
                 for c, cell in enumerate(grid[r_i]):
                     widths[c] = max(widths[c], self._display_width(cell.strip()))
@@ -697,7 +786,10 @@ class EditorActionsMixin:
             out = []
             for r_i, row in enumerate(rows):
                 if self._is_table_separator(row):
-                    cells = [" " + "-" * widths[c] + " " for c in range(ncols)]
+                    cells = [
+                        " " + self._separator_cell(aligns[c], widths[c]) + " "
+                        for c in range(ncols)
+                    ]
                 else:
                     cells = []
                     for c in range(ncols):
@@ -705,6 +797,62 @@ class EditorActionsMixin:
                         pad = widths[c] - self._display_width(cell)
                         cells.append(f" {cell}{' ' * (pad + 1)}")
                 out.append(self._table_render_row(cells))
+            return out
+        self._table_edit(rebuild)
+
+    @staticmethod
+    def _separator_alignment(cell: str) -> str:
+        """分隔单元格 → 对齐方式（left / center / right；无标记按 left）。"""
+        match = re.fullmatch(r"\s*(:?)-+(:?)\s*", cell)
+        if match is None:
+            return "left"
+        left, right = match.group(1), match.group(2)
+        if left and right:
+            return "center"
+        if right:
+            return "right"
+        return "left"
+
+    @staticmethod
+    def _separator_cell(alignment: str, width: int) -> str:
+        """对齐方式 + 列宽 → 分隔单元格文本（宽度不含对齐用的冒号）。"""
+        dashes = "-" * max(3, width)
+        if alignment == "center":
+            return f":{dashes}:"
+        if alignment == "right":
+            return f"{dashes}:"
+        return dashes
+
+    def table_align_left(self) -> None:
+        self._set_table_column_alignment("left")
+
+    def table_align_center(self) -> None:
+        self._set_table_column_alignment("center")
+
+    def table_align_right(self) -> None:
+        self._set_table_column_alignment("right")
+
+    def _set_table_column_alignment(self, alignment: str) -> None:
+        """设置光标所在列的对齐标记（只改分隔行那一格，其余原样保留）。"""
+        def rebuild(rows: list[str]) -> list[str]:
+            sep_idx = next(
+                (i for i in range(1, len(rows)) if self._is_table_separator(rows[i])),
+                -1,
+            )
+            if sep_idx < 0:
+                return rows
+            col = self._table_current_cell_index(rows[self._cursor_row_index()])
+            cells = self._table_cells(rows[sep_idx])
+            if col >= len(cells):
+                return rows
+            original = cells[col]
+            markers = self._separator_cell(alignment, original.count("-"))
+            # 保留该格原有的首尾空白，避免对齐命令把整齐的分隔行改成参差状
+            lead = original[: len(original) - len(original.lstrip())]
+            trail = original[len(original.rstrip()):]
+            cells[col] = f"{lead}{markers}{trail}"
+            out = list(rows)
+            out[sep_idx] = self._table_render_row(cells)
             return out
         self._table_edit(rebuild)
 
@@ -726,20 +874,23 @@ class EditorActionsMixin:
 
         self.insert_images_from_paths([source_path])
 
-    def insert_images_from_paths(self, paths: list[str]) -> None:
+    def insert_images_from_paths(
+        self, paths: list[str], origin: str = ORIGIN_FILE
+    ) -> None:
         """把本地图片文件按序落盘到文档同级 PanzerNote_assets/ 并插入 Markdown 图片语法。
 
         - 已是当前文档资源目录内的图片：零拷贝，只新增引用。
         - 预览渲染不了的格式（HEIF/HEIC、TIFF 等）：**先转码**成 PNG/JPEG
           再落盘，保证插入后预览能显示；源文件只读、绝不改写。
         - 单个文件失败只告警并跳过，不阻断其余文件（拖入多图时保持其余可用）。
+        - origin 仅用于索引里的来路标记（文件对话框 / 拖入）。
         """
         document_path = self._image_insert_document_path()
         if document_path is None:
             return
 
         file_guard = self.config.get_file_guard()
-        service = ImageAssetService(file_guard)
+        service = ImageAssetService(file_guard, ledger=self._open_image_ledger())
         for source_path in paths:
             original_name = os.path.basename(source_path)
             # 来源已是当前文档自己的资源：零拷贝，只新增引用（文件管理器复制
@@ -752,13 +903,16 @@ class EditorActionsMixin:
             try:
                 if _image_formats.needs_conversion(original_name):
                     result = self._save_converted_image(
-                        service, document_path, source_path, original_name, file_guard
+                        service, document_path, source_path, original_name,
+                        file_guard, origin,
                     )
                 else:
                     data = file_guard.safe_read_bytes(
                         source_path, context=FileAccessContext.USER_DOCUMENT_READ
                     )
-                    result = service.save_image(document_path, data, original_name)
+                    result = service.save_image(
+                        document_path, data, original_name, origin=origin
+                    )
             except ImageAssetError as exc:
                 QMessageBox.warning(self, "插入图片", str(exc))
                 continue
@@ -776,6 +930,7 @@ class EditorActionsMixin:
         source_path: str,
         original_name: str,
         file_guard: FileGuard,
+        origin: str,
     ) -> ImageAssetResult:
         """把非渲染格式（HEIF/TIFF…）解码后转码落盘，返回落盘结果。
 
@@ -791,7 +946,20 @@ class EditorActionsMixin:
             encoded.data,
             original_name=f"{stem}{encoded.extension}",
             extension=encoded.extension,
+            origin=origin,
         )
+
+    def _open_image_ledger(self) -> Optional[ImageAssetLedger]:
+        """打开图片资源隐藏索引；不可用时返回 None（插图照常，只是不留线索）。"""
+        try:
+            ledger = ImageAssetLedger(
+                self.config.get_path_resolver(), self.config.get_file_guard()
+            )
+            ledger.load()
+            return ledger
+        except Exception as exc:  # noqa: BLE001
+            get_logger(__name__).debug("图片资源索引不可用，本次跳过登记: %s", exc)
+            return None
 
     @staticmethod
     def _reference_if_own_asset(document_path: str, source_path: str) -> Optional[str]:
@@ -900,8 +1068,10 @@ class EditorActionsMixin:
         try:
             png_bytes = _encode_png(image)
             file_guard = self.config.get_file_guard()
-            result = ImageAssetService(file_guard).save_image(
-                document_path, png_bytes, extension=".png"
+            result = ImageAssetService(
+                file_guard, ledger=self._open_image_ledger()
+            ).save_image(
+                document_path, png_bytes, extension=".png", origin=ORIGIN_PASTE
             )
         except Exception as exc:
             QMessageBox.warning(self, "插入图片", f"粘贴图片失败: {exc}")

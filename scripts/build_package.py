@@ -43,14 +43,19 @@ EXCLUDE_PARTS = (
     ".mypy_cache",
 )
 EXCLUDE_GLOBS = ["*.pyc", "*.pyo", "desktop.ini", "Thumbs.db"]
+#: 排除的路径前缀（可多段，相对仓库根）
 EXCLUDE_ROOT = ("tests", "docs", "scripts", "dist", "benchmarks", "data/logs")
+#: 排除的运行期生成文件（本机数据，不属于源码包）
+EXCLUDE_FILES = ("data/gamedata/savegame.json",)
 
 
 def _excluded(rel: str) -> bool:
     parts = rel.replace("\\", "/").split("/")
     if any(p in EXCLUDE_PARTS for p in parts):
         return True
-    if parts[0] in EXCLUDE_ROOT:
+    if rel in EXCLUDE_FILES:
+        return True
+    if any(rel == root or rel.startswith(root + "/") for root in EXCLUDE_ROOT):
         return True
     return any(fnmatch.fnmatch(parts[-1], g) for g in EXCLUDE_GLOBS)
 

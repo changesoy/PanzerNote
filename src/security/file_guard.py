@@ -166,22 +166,6 @@ class FileGuard:
             return False
         return validate_path
 
-    def validate_read_access(
-        self,
-        filepath: str,
-        context: Optional[FileAccessContext] = None,
-        validate_path: bool = True,
-    ) -> None:
-        """只做路径安全校验，不读不写。
-
-        供「后续读取会指定 context 而跳过路径校验」的场景单独把校验补上（如图片
-        解码：先经本方法校验路径，再以 USER_DOCUMENT_READ 调 safe_read_bytes）。
-        校验口径与 safe_read_bytes 完全一致——这里只是把同一套校验单独暴露出来，
-        不放松任何规则、也不产生任何 IO。
-        """
-        if self._should_validate(validate_path, context):
-            self._validator.validate_path(filepath)
-
     def safe_read(
         self,
         filepath: str,

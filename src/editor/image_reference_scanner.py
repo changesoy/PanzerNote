@@ -16,6 +16,9 @@
   **规范化后的实际路径**比较；带 scheme（http / https / file / data…）或绝对
   路径的引用不算本地相对资源；
 - 只读检测，绝不移动 / 删除任何文件；是否提示、怎么提示由调用方决定；
+- 代价上限（单篇大小 / 篇数）触顶时结果是**部分真相**：`resolve_document_refs` /
+  `scan_markdown_files` 都会带上"不可信"标记并记 warning 日志，调用方必须据此
+  放弃"未被引用即可清理 / 未被别处引用即可 MOVE"这类破坏性判定；
 - 另提供引用**位置**与定点改写（`iter_image_ref_spans` / `rewrite_local_refs`）：
   目标同名冲突改名后按 span 替换目标串，文档其余部分逐字保留。
 """
@@ -28,13 +31,19 @@ import urllib.parse
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
+from ..utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 # 行内图片 ![alt](dest "title")：alt 允许反斜杠转义（插入图片会对 ] 等做转义），
-# dest 支持 <...> 包裹（含空格时使用）与裸形式。
+# dest 支持 <...> 包裹（含空格时使用）与裸形式（裸形式里 \( \) 是合法转义）。
+# title 三种写法都要认（"..." / '...' / (...)，CommonMark 语义），否则带括号
+# title 的引用会整条漏匹配。
 _INLINE_IMAGE_RE = re.compile(
     r"!\[(?:\\[^\n]|[^\]\\])*\]"
     r"\(\s*"
-    r"(?:<(?P<angle>[^>\n]*)>|(?P<plain>[^)\s]+))"
-    r"(?:\s+(?:\"[^\"\n]*\"|'[^'\n]*'))?"
+    r"(?:<(?P<angle>[^>\n]*)>|(?P<plain>(?:\\[\s\S]|[^)\s\\])+))"
+    r"(?:\s+(?:\"[^\"\n]*\"|'[^'\n]*'|\([^)\n]*\)))?"
     r"\s*\)"
 )
 
@@ -64,10 +73,34 @@ _INLINE_CODE_RE = re.compile(r"(?P<ticks>`+)(?P<body>[^\n]*?)(?P=ticks)")
 
 _ESCAPE_RE = re.compile(r"\\(.)")
 
+# 目标串里的反斜杠转义：CommonMark 只对 ASCII 标点生效，`\p` 不是转义
+# （反斜杠是路径分隔符时保持原样，故不能像 alt 那样无差别剥壳）。
+_DEST_ESCAPE_RE = re.compile(r"\\([!\"#$%&'()*+,\-./:;<=>?@\[\\\]^_`{|}~])")
+
 # 扫描代价控制（4.5 第 5 条）：只读、限单文件大小、限文件数量、跳过隐藏目录
 SCAN_MAX_BYTES = 1 * 1024 * 1024
 SCAN_MAX_FILES = 5000
 _MARKDOWN_EXTS = (".md", ".markdown")
+
+
+@dataclass(frozen=True)
+class MarkdownScan:
+    """一次 Markdown 文件枚举的结果与截断标记。"""
+
+    paths: List[str]
+    truncated: bool
+
+
+@dataclass(frozen=True)
+class ReferenceScan:
+    """单篇文档的本地引用扫描结果与可信度。
+
+    `trustworthy=False` 表示碰到单篇大小上限或读取失败：此时 `refs` 只是
+    **部分真相**，绝不能当成"这篇文档没有引用"。
+    """
+
+    refs: List[str]
+    trustworthy: bool
 
 
 def _normalize_label(label: str) -> str:
@@ -150,9 +183,10 @@ def resolve_local_ref(base_dir: str, url: str) -> Optional[str]:
         return None
     if url.startswith("//") or _URL_SCHEME_RE.match(url):
         return None
-    # 去掉片段与查询串后再 percent-decode（渲染器会对非 ASCII / 空格编码）
+    # 去掉片段与查询串，先还原 CommonMark 的反斜杠转义（\( \) 等标点），
+    # 再 percent-decode（渲染器会对非 ASCII / 空格编码）
     path_part = url.split("#", 1)[0].split("?", 1)[0]
-    decoded = urllib.parse.unquote(path_part)
+    decoded = urllib.parse.unquote(_DEST_ESCAPE_RE.sub(r"\1", path_part))
     if not decoded:
         return None
     # 前导斜杠是根路径，不是"本地相对引用"。不依赖 os.path.isabs：
@@ -177,20 +211,31 @@ def find_missing_local_images(base_dir: str, markdown_text: str) -> List[str]:
     return missing
 
 
-def iter_markdown_files(root_dir: str, *, max_files: int = SCAN_MAX_FILES) -> List[str]:
-    """递归列出 root_dir 下的 Markdown 文件（跳过隐藏目录，限数量）。"""
+def scan_markdown_files(
+    root_dir: str, *, max_files: int = SCAN_MAX_FILES
+) -> MarkdownScan:
+    """递归列出 root_dir 下的 Markdown 文件（跳过隐藏目录，限数量）。
+
+    触到 max_files 上限时 `truncated=True` 并记 warning：清单可能不完整，
+    调用方据此放弃"没被扫描到的文档等于没有引用"的破坏性判定。
+    """
     files: List[str] = []
     if not root_dir or not os.path.isdir(root_dir):
-        return files
+        return MarkdownScan(files, False)
     for current, dirnames, filenames in os.walk(root_dir):
         dirnames[:] = [name for name in dirnames if not name.startswith(".")]
         for filename in filenames:
             if not filename.lower().endswith(_MARKDOWN_EXTS):
                 continue
-            files.append(os.path.join(current, filename))
             if len(files) >= max_files:
-                return files
-    return files
+                logger.warning(
+                    "Markdown 篇数触及扫描上限（%d），本次枚举结果不完整: %s",
+                    max_files,
+                    root_dir,
+                )
+                return MarkdownScan(files, True)
+            files.append(os.path.join(current, filename))
+    return MarkdownScan(files, False)
 
 
 def resolve_refs_in_text(base_dir: str, markdown_text: str) -> List[str]:
@@ -208,10 +253,12 @@ def resolve_refs_in_text(base_dir: str, markdown_text: str) -> List[str]:
 
 def resolve_document_refs(
     markdown_path: str, *, max_bytes: int = SCAN_MAX_BYTES
-) -> List[str]:
+) -> ReferenceScan:
     """返回某篇 Markdown 引用的**本地相对资源** canonical 绝对路径（去重、保序）。
 
-    只读、限大小；文件读不了或超限一律返回空（扫描代价控制，4.5 第 5 条）。
+    只读、限大小；文件读不了或超单篇上限时返回 `trustworthy=False` 的空结果——
+    语义是"这篇文档的引用**无法确定**"，不是"这篇文档没有引用"（扫描代价控制，
+    4.5 第 5 条）。破坏性判定必须据此放弃，否则会把仍在使用的图片判成未引用。
     供共享判定使用：调用方按 canonical path 比较，不依赖 ledger。
 
     注意：文档在编辑器里有未保存改动时，磁盘内容不是真相——那种情况下调用方
@@ -219,13 +266,20 @@ def resolve_document_refs(
     """
     try:
         if os.path.getsize(markdown_path) > max_bytes:
-            return []
+            logger.warning(
+                "文档超过单篇扫描上限（%d 字节），引用扫描结果不可信: %s",
+                max_bytes,
+                markdown_path,
+            )
+            return ReferenceScan([], False)
         with open(markdown_path, "r", encoding="utf-8", errors="replace") as handle:
             text = handle.read()
-    except OSError:
-        return []
+    except OSError as exc:
+        logger.warning("文档读取失败，引用扫描结果不可信: %s (%s)", markdown_path, exc)
+        return ReferenceScan([], False)
 
-    return resolve_refs_in_text(os.path.dirname(os.path.abspath(markdown_path)), text)
+    refs = resolve_refs_in_text(os.path.dirname(os.path.abspath(markdown_path)), text)
+    return ReferenceScan(refs, True)
 
 
 # ═══════════ 引用位置与定点改写（E6c1b2：目标同名冲突改名后改写引用） ═══════════

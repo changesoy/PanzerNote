@@ -1010,14 +1010,7 @@ a {{
             return None
         md = _MarkdownIt("commonmark", {"html": False})
         md.enable(["table", "strikethrough"])
-        try:
-            from mdit_py_plugins.deflist import deflist_plugin
-            from mdit_py_plugins.tasklists import tasklists_plugin
-            deflist_plugin(md)
-            tasklists_plugin(md)
-        except ImportError:
-            get_logger(__name__).debug("mdit_py_plugins 未安装，扩展语法（定义列表/任务列表）不可用")
-        # 脚注 / 前辅文（与导出共用同一注册点，见 markdown_extras）
+        # 定义列表 / 任务列表 / 脚注 / 前辅文：与导出共用同一注册点（markdown_extras）
         from .markdown_extras import register_markdown_extras
         register_markdown_extras(md)
         _math_render.register(md)

@@ -2955,11 +2955,21 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         - 未修改的标签直接关闭；
         - 已修改的标签弹确认（关闭 = 放弃未保存的修改，不重新保存）。
         这是删除语义：此时"保存"只会把已删除的文件重新创建回来。
+        图片标签没有 Document，按 `image_path` 匹配后同样关闭（否则会留一个
+        指向已不存在文件的空白/报错标签）。
         """
         norm = os.path.normpath(path)
         indices = []
         for i in range(self.count()):
             widget = self.widget(i)
+            image_path = getattr(widget, "image_path", None)
+            if image_path:
+                matched = os.path.normpath(image_path) == norm or (
+                    is_dir and os.path.normpath(image_path).startswith(norm + os.sep)
+                )
+                if matched:
+                    indices.append(i)
+                continue
             # D3b：路径读 Document
             w_doc = getattr(widget, "shared_doc", None)
             if w_doc is None or not w_doc.filepath:
@@ -2975,6 +2985,25 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         # 从后往前关闭，避免索引随 removeTab 偏移
         for i in reversed(indices):
             self._close_deleted_tab(i)
+
+    def update_tabs_of_renamed_path(self, old: str, new: str) -> None:
+        """文件树重命名后，同步更新图片标签持有的路径、标题与显示内容。
+
+        只处理图片标签：文档标签的路径由 Document 持有，改名走保存/另存为链路。
+        """
+        from .image_viewer import ImageViewerWidget
+
+        old_norm = os.path.normpath(old)
+        for i in range(self.count()):
+            widget = self.widget(i)
+            if not isinstance(widget, ImageViewerWidget):
+                continue
+            image_path = widget.image_path
+            if not image_path or os.path.normpath(image_path) != old_norm:
+                continue
+            widget.reload_to(new)
+            self.setTabText(i, os.path.basename(new))
+            self.setTabToolTip(i, os.path.abspath(new))
 
     def _close_deleted_tab(self, index: int) -> None:
         """关闭单个标签（文件已被删除，不提供"保存"选项）。"""
@@ -3262,6 +3291,21 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         editor = self.current_editor()
         if editor:
             editor.table_format_align()
+
+    def table_align_left(self):
+        editor = self.current_editor()
+        if editor:
+            editor.table_align_left()
+
+    def table_align_center(self):
+        editor = self.current_editor()
+        if editor:
+            editor.table_align_center()
+
+    def table_align_right(self):
+        editor = self.current_editor()
+        if editor:
+            editor.table_align_right()
 
     # === 行内格式 / 标题代理（阶段 2 G2/G5） ===
 

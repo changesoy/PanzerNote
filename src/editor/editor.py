@@ -39,6 +39,7 @@ from .virtual_scroll import (
     LazyHighlightManager, DocumentLazyHighlightCoordinator, LARGE_FILE_THRESHOLD,
 )
 from .extra_selection_manager import ExtraSelectionManager
+from .image_asset_ledger import ORIGIN_DROP
 from .indentation import get_indent_width, get_indent_unit
 from .completion import CompletionPopup, CompletionProvider
 from .text_stats import count_mixed_words
@@ -899,7 +900,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         image_paths = self._local_image_paths(event.mimeData())
         if image_paths:
             event.acceptProposedAction()
-            self.insert_images_from_paths(image_paths)
+            self.insert_images_from_paths(image_paths, origin=ORIGIN_DROP)
             return
         if self._has_local_file_urls(event.mimeData()):
             event.ignore()

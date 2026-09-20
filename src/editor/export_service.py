@@ -121,7 +121,8 @@ class ExportService:
                     code_font: str = DEFAULT_CODE_FONT_FAMILY,
                     line_spacing: float = DEFAULT_LINE_SPACING,
                     code_line_spacing: float = DEFAULT_CODE_LINE_SPACING,
-                    resource_root: str = "") -> None:
+                    resource_root: str = "",
+                    on_notice: Callable[[str], None] | None = None) -> None:
         """导出为 HTML 文件
 
         参数：
@@ -138,11 +139,15 @@ class ExportService:
           resource_root：相对资源的解析根目录（通常为当前文档所在目录）。提供时
             把本地相对图片内嵌为 data URI —— HTML 导出按设计是单文件自包含，
             相对路径在导出位置之外必然断链，故不能只留相对 src。
+          on_notice：非致命降级提示回调 (message: str) -> None（本地图片缺失 /
+            格式不支持 / 读取失败时，导出仍成功但会缺图，须让用户可见）
 
         异常：文件写入失败时抛出 IOError
         """
         body_html = ExportService.render_content(content, is_markdown, theme_engine)
-        body_html = _embed_local_images(body_html, resource_root, file_guard)
+        body_html = _embed_local_images(
+            body_html, resource_root, file_guard, on_notice=on_notice
+        )
         full_html = build_export_html_document(
             body_html, colors, title, code_font, line_spacing, code_line_spacing
         )
@@ -202,25 +207,45 @@ class ExportService:
 
 
 def _embed_local_images(
-    body_html: str, resource_root: str, file_guard: Optional[FileGuard]
+    body_html: str,
+    resource_root: str,
+    file_guard: Optional[FileGuard],
+    on_notice: Optional[Callable[[str], None]] = None,
 ) -> str:
     """把 body 里的本地相对图片内嵌为 data URI（外链 / 读取失败保持原样）。
 
     HTML 导出按设计是单文件自包含，而渲染产物里的图片是相对路径 —— 导出到文档
     目录之外时相对路径必然断链，故在此读回原始字节内嵌；后端无资源根能力、
     只能靠 base href 的场景（PDF）不走这里。
+
+    本该内嵌却失败的本地图（缺失 / 格式不支持 / 读取失败）经 on_notice 汇总告知：
+    导出仍算成功，但用户必须知道成品里会缺图，不能静默降级。外链图片不算失败。
     """
     if not resource_root or file_guard is None or "<img" not in body_html.lower():
         return body_html
+
+    failed: list[str] = []
 
     def _replace(match: "re.Match[str]") -> str:
         prefix, quote, src = match.group(1), match.group(2), match.group(3)
         data_uri = _to_data_uri(src, resource_root, file_guard)
         if data_uri is None:
+            if resolve_local_ref(resource_root, src) is not None:
+                failed.append(src)
             return match.group(0)
         return f"{prefix}{quote}{data_uri}{quote}"
 
-    return _IMG_SRC_RE.sub(_replace, body_html)
+    embedded = _IMG_SRC_RE.sub(_replace, body_html)
+    if failed and on_notice is not None:
+        on_notice(_embed_failure_message(failed))
+    return embedded
+
+
+def _embed_failure_message(failed: list[str]) -> str:
+    """内嵌失败提示文案（最多列出前 3 个，其余按数量概括）。"""
+    shown = "、".join(failed[:3])
+    more = f" 等 {len(failed)} 张" if len(failed) > 3 else ""
+    return f"导出为HTML：本地图片 {shown}{more} 未能内嵌，导出文件里会缺图"
 
 
 def _to_data_uri(

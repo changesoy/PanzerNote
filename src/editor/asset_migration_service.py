@@ -22,16 +22,16 @@ import hashlib
 import os
 import shutil
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence, Set
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 from ..core.config import Config
 from ..utils.logger import get_logger
 from .image_asset_ledger import ImageAssetLedger
 from .image_reference_scanner import (
     canonical_path_key,
-    iter_markdown_files,
     resolve_document_refs,
     resolve_refs_in_text,
+    scan_markdown_files,
 )
 
 logger = get_logger(__name__)
@@ -74,16 +74,25 @@ def _is_within(path: str, root: str) -> bool:
     return path_key == root_key or path_key.startswith(root_key + os.sep)
 
 
-def _allocate_free_name(dest_abs: str, *, limit: int = 999) -> Optional[str]:
+def _allocate_free_name(
+    dest_abs: str, *, taken: Optional[Set[str]] = None, limit: int = 999
+) -> Optional[str]:
     """为目标目录里的同名冲突挑一个空闲名：`stem_1.ext`、`stem_2.ext`…
 
     只给**这一份新副本**改名，目标目录里已存在的同名文件保持原样不动。
+    `taken` 是本批已分配出去的目标路径键集合，返回值必定不与它重合：改名的空闲名
+    可能正好撞上另一项的**自然目标**（源目录里同时有 `a.png` / `a_1.png`、目标目录
+    已有 `a.png` 时，前者改名为 `a_1.png` 就与后者的自然目标重合），两项写同一路径、
+    内容互相覆盖；MOVE 时两个源文件都已删除 = 一份内容永久丢失。
     分配不出空闲名（极端情况）返回 None，由调用方按冲突整体中止。
     """
+    claimed = taken if taken is not None else set()
     directory = os.path.dirname(dest_abs)
     stem, suffix = os.path.splitext(os.path.basename(dest_abs))
     for index in range(1, limit + 1):
         candidate = os.path.join(directory, f"{stem}_{index}{suffix}")
+        if _key(candidate) in claimed:
+            continue
         if not os.path.exists(candidate):
             return candidate
     return None
@@ -152,6 +161,8 @@ class _ReferenceIndex:
     """可证明范围内「资源 canonical 路径 → 引用它的文档」索引。
 
     一次扫描、多次查询：让同一批资产的独占判定不必反复读遍整个范围。
+    扫描触到代价上限（单篇超限 / 篇数截断 / 文档读不了）时 `partial_scan` 为真：
+    引用面不完整，独占判定必须保守——见 `is_referenced_elsewhere`。
     """
 
     def __init__(
@@ -161,20 +172,28 @@ class _ReferenceIndex:
         exclude_docs: Set[str],
     ) -> None:
         self._refs: Dict[str, List[str]] = {}
-        for doc in self._iter_documents(roots, external_files):
+        documents, truncated = self._iter_documents(roots, external_files)
+        self._partial_scan = truncated
+        for doc in documents:
             if _key(doc) in exclude_docs:
                 continue
-            for asset in resolve_document_refs(doc):
+            outcome = resolve_document_refs(doc)
+            self._partial_scan = self._partial_scan or not outcome.trustworthy
+            for asset in outcome.refs:
                 self._refs.setdefault(_key(asset), []).append(doc)
 
     @staticmethod
     def _iter_documents(
         roots: Sequence[str], external_files: Sequence[str]
-    ) -> List[str]:
+    ) -> Tuple[List[str], bool]:
+        """范围内待扫描的文档列表 + 篇数是否被截断。"""
         documents: List[str] = []
+        truncated = False
         seen: Set[str] = set()
         for root in roots:
-            for doc in iter_markdown_files(root):
+            scan = scan_markdown_files(root)
+            truncated = truncated or scan.truncated
+            for doc in scan.paths:
                 if _key(doc) not in seen:
                     seen.add(_key(doc))
                     documents.append(doc)
@@ -182,9 +201,16 @@ class _ReferenceIndex:
             if os.path.isfile(extra) and _key(extra) not in seen:
                 seen.add(_key(extra))
                 documents.append(extra)
-        return documents
+        return documents, truncated
 
     def is_referenced_elsewhere(self, asset_abs: str) -> bool:
+        """引用面不完整时一律按"仍被别处引用"处理。
+
+        判定为未引用 → MOVE 会删掉源文件；扫描若漏读了引用它的文档，源文件一删
+        那些引用就永久断链。故证伪不成立时退到非破坏性的 COPY（源文件保留）。
+        """
+        if self._partial_scan:
+            return True
         return bool(self._refs.get(_key(asset_abs)))
 
 
@@ -225,8 +251,26 @@ class AssetMigrationService:
         if markdown_text is not None:
             assets = resolve_refs_in_text(source_dir, markdown_text)
         else:
-            assets = resolve_document_refs(source_md)
+            outcome = resolve_document_refs(source_md)
+            assets = outcome.refs
+            if not outcome.trustworthy:
+                # 源文档读不了 / 超单篇上限：引用面无法确定，只能迁移"能确定的部分"，
+                # 剩下的留在原处（缺失检测会提示），绝不猜着搬。
+                logger.warning(
+                    "源文档引用扫描结果不可信（超单篇上限或读取失败），"
+                    "本次只迁移能确定的资源: %s",
+                    source_md,
+                )
 
+        # ── 第一遍：收齐所有项的自然目标 ──
+        # 每个自然目标是该资产按相对路径「应落的位置」，彼此天然唯一（同一源目录下
+        # relative 必不相同）。它同时构成**改名时的保留集**：源目录有 a.png / a_1.png、
+        # 目标目录已有 a.png 时，a.png 若改名成 a_1.png 就与后一项的自然目标重合，
+        # 两项写同一路径、内容互相覆盖；MOVE 时两个源文件都已删除 = 一份内容永久丢失。
+        # 故必须先收齐保留集，再逐项分配（只登记「已处理项」不够：后面项的自然目标
+        # 在处理前面项时还不知道）。
+        natural: List[Tuple[str, str]] = []
+        reserved: Set[str] = set()
         for asset in assets:
             # 已断链的引用无从迁移（交由缺失检测 / E6c2），也不该算冲突
             if not os.path.isfile(asset):
@@ -242,7 +286,12 @@ class AssetMigrationService:
             if _key(asset) == _key(dest_abs):
                 plan.skipped.append(asset)
                 continue
+            natural.append((asset, dest_abs))
+            reserved.add(_key(dest_abs))
 
+        # ── 第二遍：分配目标，避开磁盘已有文件 + 本批保留集 + 本批已分配 ──
+        claimed: Set[str] = set()
+        for asset, dest_abs in natural:
             copy_needed = True
             renamed_from: Optional[str] = None
             if os.path.exists(dest_abs):
@@ -251,12 +300,15 @@ class AssetMigrationService:
                 else:
                     # 同名不同内容：绝不覆盖目标目录里的现有文件，给这一份挑个空闲名
                     # （x_1.png / x_2.png…），由调用方把新文档里的引用改写到新名字。
-                    free_name = _allocate_free_name(dest_abs)
+                    free_name = _allocate_free_name(
+                        dest_abs, taken=reserved | claimed
+                    )
                     if free_name is None:
                         plan.conflicts.append(asset)
                         continue
                     renamed_from = dest_abs
                     dest_abs = free_name
+            claimed.add(_key(dest_abs))
 
             exclusive = not self.is_referenced_elsewhere(
                 asset, source_md, dest_md, exclude
@@ -326,7 +378,21 @@ class AssetMigrationService:
             return result
 
         ledger = self.open_ledger()
+        seen_dests: Set[str] = set()
         for item in plan.items:
+            # 兜量检测：plan() 已保证目标路径互不重合，此处是绕过预检（手工构造 plan）
+            # 时的最后一道防线——宁可少迁一项，也不能让两项写同一路径、覆盖后丢内容。
+            dest_key = _key(item.dest_abs)
+            if dest_key in seen_dests:
+                logger.warning(
+                    "资源迁移跳过（同一目标路径在本批中重复）%s -> %s",
+                    item.source_abs,
+                    item.dest_abs,
+                )
+                result.failed.append(item.source_abs)
+                continue
+            seen_dests.add(dest_key)
+
             created_dest = False
             try:
                 if item.copy_needed:

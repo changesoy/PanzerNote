@@ -1,15 +1,19 @@
 # -*- coding: utf-8 -*-
 """
-Markdown 扩展语法统一注册（脚注 / 前辅文 / 后辅文）
+Markdown 扩展语法统一注册（定义列表 / 任务列表 / 脚注 / 前辅文 / 后辅文）
 
 预览（markdown_preview）与导出（secure_markdown_renderer）共用一个注册入口，
-避免两侧各自装插件导致语法口径漂移。
+避免两侧各自装插件导致语法口径漂移——两侧都只调 ``register_markdown_extras``，
+不再各自注册插件（曾出现导出漏注册定义列表、口径与预览不一致的问题）。
 
 能力来源（尽可能复用成熟库，零新增依赖）：
+  - 定义列表 / 任务列表：``mdit_py_plugins.deflist`` / ``mdit_py_plugins.tasklists``
   - 脚注：``mdit_py_plugins.footnote``（markdown-it-footnote 的官方移植），
     支持 ``[^1]`` 引用式与 ``^[inline]`` 行内式脚注，定义区自动移到文档末尾。
   - 前辅文（Front Matter）：``mdit_py_plugins.front_matter``
     （markdown-it-front-matter 的官方移植），隐藏文档开头的 ``---…---`` 元数据块。
+    库本身只校验「文档开头 + 标记 ≥ 3」，不看块内内容，故这里在其规则外再包一层
+    内容守卫：块内必须能解析为 YAML 键值对（dict）才隐藏，否则按普通正文渲染。
   - 后辅文（End Matter）：无现成插件，这里自写 ``strip_end_matter``——
     Markdown 引擎按"行扫描"处理块级语法，天然没有"文档末尾区块"的概念，
     故放在渲染前做文本级剥离：识别文档末尾的 ``---…---`` YAML 块，
@@ -32,23 +36,86 @@ _log = get_logger(__name__)
 # 独占一行的 ---（≥3 个连字符，允许尾随空白）：front/end matter 的边界标记
 _DASH_LINE_RE = re.compile(r"^-{3,}\s*$")
 
+# front_matter 规则参与的规则链（与库内注册保持一致）
+_FRONT_MATTER_ALT = ["paragraph", "reference", "blockquote", "list"]
+
 
 def register_markdown_extras(md) -> bool:
-    """给 markdown-it 实例装上脚注与前辅文规则。
+    """给 markdown-it 实例装上定义列表 / 任务列表 / 脚注 / 前辅文规则。
 
     预览与导出两个解析器都必须调用，否则两侧语法不一致。
     mdit_py_plugins 缺失时返回 False（相关语法退化为原样文本，不影响其它渲染）。
     """
     try:
+        from mdit_py_plugins.deflist import deflist_plugin
         from mdit_py_plugins.footnote import footnote_plugin
         from mdit_py_plugins.front_matter import front_matter_plugin
+        from mdit_py_plugins.tasklists import tasklists_plugin
     except ImportError:
-        _log.debug("mdit_py_plugins 未安装，脚注 / 前辅文语法不可用")
+        _log.debug(
+            "mdit_py_plugins 未安装，扩展语法（定义列表/任务列表/脚注/前辅文）不可用"
+        )
         return False
 
+    deflist_plugin(md)
+    tasklists_plugin(md)
     footnote_plugin(md)
     front_matter_plugin(md)
+    _install_front_matter_guard(md)
     return True
+
+
+def _install_front_matter_guard(md) -> None:
+    """把库注册的 front_matter 规则换成带内容校验的版本（就地替换同名规则）。
+
+    库规则只认「文档开头 + ``---`` 标记 ≥ 3」，不校验块内内容：正文开头写一条
+    水平线加一段文字（``---`` / ``说明`` / ``---``）会被整块静默隐藏。
+    这里要求块内容经 ``yaml.safe_load`` 解析为 dict（与 ``strip_end_matter``
+    同一口径）才隐藏；否则撤销本次识别与状态改动，交给普通块级规则渲染。
+
+    依赖库内私有 ``_front_matter_rule``：取不到时保持库原行为，不阻断渲染。
+    """
+    try:
+        from mdit_py_plugins.front_matter.index import _front_matter_rule
+    except ImportError:  # pragma: no cover - 私有符号缺失即退化，不影响其它语法
+        _log.debug("front_matter 私有规则不可用，前辅文按库默认行为处理")
+        return
+
+    def guarded(state, start_line, end_line, silent):
+        if silent:
+            return _front_matter_rule(state, start_line, end_line, silent)
+
+        # 库规则在识别成功时会改动 state（line / lineMax / parentType）并压入
+        # hidden token；判定为「非元数据」时必须全部撤回，否则块解析器的行游标
+        # 会被带偏（parser_block 以 state.line 作为下一轮起点）。
+        tokens_before = len(state.tokens)
+        line_before = state.line
+        line_max_before = state.lineMax
+        parent_type_before = state.parentType
+
+        if not _front_matter_rule(state, start_line, end_line, silent):
+            return False
+        if _is_yaml_mapping(state.tokens[tokens_before].content):
+            return True
+
+        del state.tokens[tokens_before:]
+        state.line = line_before
+        state.lineMax = line_max_before
+        state.parentType = parent_type_before
+        return False
+
+    md.block.ruler.at("front_matter", guarded, {"alt": _FRONT_MATTER_ALT})
+
+
+def _is_yaml_mapping(text: str) -> bool:
+    """文本是否是可解析为 dict 的 YAML 元数据（与 strip_end_matter 同口径）。"""
+    if not HAS_PYYAML or not text.strip():
+        return False
+    try:
+        value = yaml.safe_load(text)
+    except Exception:  # noqa: BLE001 - 解析失败即视为普通正文
+        return False
+    return isinstance(value, dict)
 
 
 def strip_end_matter(text: str) -> str:

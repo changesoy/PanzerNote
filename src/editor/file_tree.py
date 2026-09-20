@@ -200,6 +200,8 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
     file_copy_requested = pyqtSignal(str, str)
     # (filepath, is_dir)：删除成功后通知外部同步关闭已打开的标签页
     file_deleted = pyqtSignal(str, bool)
+    # (old_path, new_path)：重命名成功后通知外部同步更新图片标签持有的路径
+    file_renamed = pyqtSignal(str, str)
     # 3.5.11：(source_tabs, tab_id, dest_folder) 未命名标签落盘保存
     untitled_save_requested = pyqtSignal(object, int, str)
     # Batch 4：文件树变化（刷新/移动/复制/删除成功后触发）
@@ -467,6 +469,11 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
             except Exception as e:
                 get_logger(__name__).error("重命名失败: %s", e)
                 ErrorHandler.show_from_exception(e, ErrorCategory.FILE, "重命名失败")
+            else:
+                # 重命名成功后再通知外部（同步更新已打开图片标签的路径）
+                self.file_renamed.emit(os.path.normpath(filepath),
+                                       os.path.normpath(new_path))
+                self.tree_changed.emit()
 
     def _delete_item(self, filepath: str, is_dir: bool):
         name = os.path.basename(filepath)

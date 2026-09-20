@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import List, Optional, Set
+from typing import List, Optional, Set, Tuple
 
 from ..core.config import Config
 from ..utils.logger import get_logger
@@ -27,8 +27,8 @@ from .image_asset_service import ASSETS_DIRNAME
 from .image_reference_scanner import (
     SCAN_MAX_FILES,
     canonical_path_key,
-    iter_markdown_files,
     resolve_document_refs,
+    scan_markdown_files,
 )
 
 logger = get_logger(__name__)
@@ -68,8 +68,15 @@ class OrphanImageService:
     # ---------- 扫描 ----------
 
     def find_orphans(self) -> List[OrphanImage]:
-        """返回范围内所有未被 Markdown 引用的图片文件（按目录分组保序）。"""
-        referenced = self._collect_referenced_paths()
+        """返回范围内所有未被 Markdown 引用的图片文件（按目录分组保序）。
+
+        引用面扫描不完整（篇数截断 / 有文档太大或读不了）时**不给出任何候选**：
+        "未被引用"证不出来就不能当作清理依据，宁可这次什么都不做。
+        """
+        referenced, trustworthy = self._collect_referenced_paths()
+        if not trustworthy:
+            logger.warning("引用扫描结果不完整，本次跳过未使用图片检测")
+            return []
         candidates = self._scan_asset_images()
         orphans: List[OrphanImage] = []
         seen: Set[str] = set()
@@ -88,19 +95,27 @@ class OrphanImageService:
         orphans.sort(key=lambda o: (o.dirname, o.name))
         return orphans
 
-    def _collect_referenced_paths(self) -> Set[str]:
-        """范围内所有 Markdown 引用的本地图片 canonical 键集合。"""
+    def _collect_referenced_paths(self) -> Tuple[Set[str], bool]:
+        """范围内所有 Markdown 引用的本地图片 canonical 键集合 + 结果可信度。
+
+        可信度：篇数截断、或某篇读不了 / 超单篇上限时为 False——引用面只是
+        部分真相，调用方必须放弃"未被引用即清理"的破坏性判定。
+        """
         referenced: Set[str] = set()
-        base = self._config.get_base_path()
+        trustworthy = True
         doc_dirs = self._doc_scan_dirs()
         count = 0
         for doc_dir in doc_dirs:
             remaining = max(1, SCAN_MAX_FILES - count)
-            for md_path in iter_markdown_files(doc_dir, max_files=remaining):
-                count += 1
-                for ref in resolve_document_refs(md_path):
+            scan = scan_markdown_files(doc_dir, max_files=remaining)
+            count += len(scan.paths)
+            trustworthy = trustworthy and not scan.truncated
+            for md_path in scan.paths:
+                outcome = resolve_document_refs(md_path)
+                trustworthy = trustworthy and outcome.trustworthy
+                for ref in outcome.refs:
                     referenced.add(canonical_path_key(ref))
-        return referenced
+        return referenced, trustworthy
 
     def _doc_scan_dirs(self) -> List[str]:
         """Markdown 引用扫描范围：workspace 根 + external files 所在目录。"""

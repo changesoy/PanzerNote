@@ -76,8 +76,11 @@ def decode_image_file(
     if not fmt.is_viewable(filepath):
         return DecodeResult(reason=f"不支持的图片格式：{ext or '无扩展名'}")
 
+    # 这里**不做**路径白名单校验：解码入口的来源是「用户显式选择」（QFileDialog /
+    # 拖拽）或文件树里已存在的图片，用户动作本身就是授权。插入链路对可渲染格式
+    # （PNG / JPEG）走的是同一条 USER_DOCUMENT_READ context 路径，若此处额外查一次
+    # 白名单，就会出现「工作区外的 PNG 能插、工作区外的 HEIC 不能插」的口径分裂。
     try:
-        file_guard.validate_read_access(filepath)
         data = file_guard.safe_read_bytes(
             filepath, context=FileAccessContext.USER_DOCUMENT_READ
         )

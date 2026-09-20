@@ -36,6 +36,7 @@ class ImageViewerWidget(QWidget):
     def __init__(self, filepath: str, file_guard: FileGuard, parent=None):
         super().__init__(parent)
         self.image_path = os.path.abspath(filepath)
+        self._file_guard = file_guard
         self._pixmap: QPixmap | None = None
         self._fit_mode = True
         self._failure = ""
@@ -64,6 +65,19 @@ class ImageViewerWidget(QWidget):
                 target.installEventFilter(self)
 
         self._load(file_guard)
+
+    def reload_to(self, filepath: str) -> None:
+        """换成新的文件路径并重新解码（文件树重命名后同步用）。
+
+        图片标签没有 Document，`image_path` 是它唯一的路径真相源；不换路径
+        标签会一直指向已不存在的旧文件。
+        """
+        self.image_path = os.path.abspath(filepath)
+        self._pixmap = None
+        self._failure = ""
+        self._label.clear()
+        self._hint.clear()
+        self._load(self._file_guard)
 
     # ---------- 加载 ----------
 

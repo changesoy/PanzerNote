@@ -144,6 +144,9 @@ class ExportActionController:
         is_md = ExportService.is_markdown_content(content, widget_type)
 
         try:
+            # 缺图提示先收集起来：M4 语义是"导出成功但降级"，不能被后面的
+            # 「已导出」摘要盖掉，也不能静默吞掉，故合并成一条消息给用户。
+            notices: list[str] = []
             ExportService.export_html(
                 content,
                 is_md,
@@ -152,10 +155,12 @@ class ExportActionController:
                 file_guard=self._editor_tabs.config.get_file_guard(),
                 theme_engine=self._theme_engine,
                 resource_root=self._document_dir(),
+                on_notice=notices.append,
                 **self._typography(),
             )
+            done = f"已导出HTML: {os.path.basename(filepath)}"
             self._secretary.show_message(
-                f"已导出HTML: {os.path.basename(filepath)}"
+                "；".join(notices + [done]) if notices else done
             )
         except Exception as e:
             QMessageBox.warning(self._parent_widget, "导出失败", str(e))

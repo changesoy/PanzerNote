@@ -82,7 +82,7 @@ class MenuBuilder:
         menu.addSeparator()
         self._add_action(menu, "查找", QKeySequence.StandardKey.Find, mw._find, "edit.find", "编辑")
         self._add_action(menu, "替换", QKeySequence("Ctrl+H"), mw._replace, "edit.replace", "编辑")
-        self._add_action(menu, "跨文件搜索", QKeySequence("Ctrl+Shift+F"), mw._show_find_in_files, "search.find_in_files", "搜索")
+        self._add_action(menu, "跨文件搜索", None, mw._show_find_in_files, "search.find_in_files", "搜索")
         menu.addSeparator()
 
         line_menu = menu.addMenu("行操作")
@@ -138,6 +138,9 @@ class MenuBuilder:
                 self._add_action(table_menu, "在右侧插入列", None, mw._table_insert_column_right, "edit.table_insert_column_right", "编辑")
                 self._add_action(table_menu, "删除当前列", None, mw._table_delete_column, "edit.table_delete_column", "编辑")
                 self._add_action(table_menu, "格式化对齐", None, mw._table_format_align, "edit.table_format_align", "编辑")
+                self._add_action(table_menu, "左对齐当前列", None, mw._table_align_left, "edit.table_align_left", "编辑")
+                self._add_action(table_menu, "居中当前列", None, mw._table_align_center, "edit.table_align_center", "编辑")
+                self._add_action(table_menu, "右对齐当前列", None, mw._table_align_right, "edit.table_align_right", "编辑")
 
     def _build_game_menu(self, menubar: QMenuBar, mw: Any) -> None:
         menu = menubar.addMenu("游戏")
@@ -242,12 +245,10 @@ class MenuBuilder:
         category: str = "通用",
     ) -> QAction:
         if self._shortcut_manager and action_id:
-            default_key = ""
-            if shortcut:
-                ks = QKeySequence(shortcut)
-                default_key = ks.toString() if not ks.isEmpty() else ""
+            # 键位唯一真相源是 ShortcutManager 的 _DEFAULT_SHORTCUTS（可被用户覆盖）；
+            # 此处 shortcut 参数只在下面的降级分支（无 ShortcutManager）才生效。
             shortcut_action = self._shortcut_manager.register(
-                action_id, text, default_key, callback, category
+                action_id, text, callback, category
             )
             # 将快捷键 QAction 挂到主窗口，确保全局快捷键生效
             if shortcut_action is not None and self._mw is not None:

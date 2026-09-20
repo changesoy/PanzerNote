@@ -28,6 +28,7 @@ META_FILES = [
     "requirements.txt",
     "pyproject.toml",
     "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
     "README.md",
     "CHANGELOG.md",
     "项目说明.md",

@@ -20,7 +20,16 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=_extra_binaries,
-    datas=[('data', 'data'), ('themes', 'themes'), ('plugins', 'plugins')],
+    datas=[
+        ('data', 'data'),
+        ('themes', 'themes'),
+        ('plugins', 'plugins'),
+        # 合规文件必须随冻结产物分发：本产物内含 GPLv3 应用代码，以及 pillow-heif
+        # 带来的 libheif/libde265（LGPLv3）与 libx265（GPLv2）原生库。
+        # 少了这两份文件，分发二进制即缺失许可证正文与第三方许可证清单。
+        ('LICENSE', '.'),
+        ('THIRD_PARTY_NOTICES.md', '.'),
+    ],
     hiddenimports=_hidden_imports,
     hookspath=[],
     hooksconfig={},

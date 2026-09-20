@@ -113,7 +113,6 @@ PanzerNote/
 │   │   ├── temp_session_manager.py # 临时会话恢复（异常退出 autosave 恢复；autosave 读写经 FileGuard）
 │   │   ├── virtual_scroll.py       # 虚拟滚动管理器（大文件延迟语法高亮；Wave 4 E2：Document 级多 View 协作）
 │   │   ├── async_highlight.py      # 异步代码高亮渲染器（QThread + 任务队列）
-│   │   ├── incremental_renderer.py # 渲染缓存（MD5 哈希缓存，全文级）
 │   │   ├── document_render_cache.py # Markdown HTML render cache（Wave 4 C：Document 改动渲染一次、多 View 共用）
 │   │   ├── syntax_highlighter.py   # 语法高亮（Pygments 适配器 + Markdown 专用高亮器）
 │   │   ├── highlight_themes.py     # 代码高亮主题
@@ -121,6 +120,7 @@ PanzerNote/
 │   │   ├── web_preview_webview2.py # WebView2 后端实现（PyWinRT + WebView2 Runtime）
 │   │   ├── webview2_runtime.py     # WebView2 Runtime 可用性检测（只读注册表 + 安装指引）
 │   │   ├── markdown_preview.py     # Markdown 分屏预览（源码行号同步 + 代码块高亮 + 本地图片）
+│   │   ├── markdown_extras.py      # Markdown 扩展语法注册点（脚注 / 前辅文 / 后辅文剥离；预览与导出共用）
 │   │   ├── image_asset_service.py  # 图片落盘（PanzerNote_assets/ + ASCII 安全名 + 大图优化）
 │   │   ├── image_formats.py        # 图片扩展名清单单一真相源（可渲染 ⊂ 可查看 = 可插入）
 │   │   ├── image_decoder.py        # 图片解码统一入口（Qt / Pillow / HEIF / AVIF）
@@ -833,7 +833,7 @@ LOADED → on_unload() → UNLOADED
 **版本传播链路**：
 
 ```
-src/__init__.py (__version__ = "2.4.0")
+src/__init__.py (__version__ = "2.5.0")
   ├─→ main.py                    (from src import __version__)
   ├─→ src/main_window.py         (from . import __version__)
   ├─→ src/plugins/plugin_base.py (from .. import __version__ as _app_version)
@@ -1077,7 +1077,8 @@ pip install PyQt6>=6.11.0 shiboken6>=6.11.2 Pygments>=2.21.0 markdown>=3.10.3 Pi
 python main.py
 ```
 
-> 图片查看器的格式覆盖只依赖 `pillow-heif`（HEIF/HEIC，约 0.2 MB）；AVIF 由 Pillow 内置解码，无需额外依赖。**相机 RAW 未纳入支持**：需要 LibRaw（`rawpy`），其传递依赖 `numpy` + `numpy.libs` 会带来约 54 MB 包体，成本与收益不成比例。
+> 图片查看器的格式覆盖只依赖 `pillow-heif`（HEIF/HEIC）；AVIF 由 Pillow 内置解码，无需额外依赖。**相机 RAW 未纳入支持**：需要 LibRaw（`rawpy`），其传递依赖 `numpy` + `numpy.libs` 会带来约 54 MB 包体，成本与收益不成比例。
+> 注意 `pillow-heif` 的**冻结版成本同样可观**：Python 包仅 0.2 MB，但随包原生库约 27 MB（`libx265` 21.6 MB、`libstdc++` 2.5 MB、`libheif` 2.1 MB、`libde265` 0.9 MB 等），冻结构建产物由 98.8 MB 增至 126.3 MB。`libx265` 虽是编码器（本应用只解码）却是 import 时硬依赖——移走即 `import _pillow_heif` 失败，不可裁剪。
 
 > 预览与 PDF 导出依赖系统安装的 **Microsoft Edge WebView2 Runtime**（Windows 11 与多数 Windows 10 已预装，**不随包分发**）；缺失时启动会记录 error 日志并在窗口显示后弹一次安装指引，预览区同时显示可读提示。
 > `qasync` / `webview2-*` / `winrt-*` 均为 Windows 专用；完整依赖清单以 `pyproject.toml` / `requirements.txt` 为准。
@@ -1173,4 +1174,4 @@ pip install mypy>=2.3.1                                        # 类型检查
 
 ---
 
-_本文档基于 PanzerNote v2.4.0 源码整理。版本变更见 [../CHANGELOG.md](../CHANGELOG.md)，未完成规划见 [roadmap.md](roadmap.md)。_
+_本文档基于 PanzerNote v2.5.0 源码整理。版本变更见 [../CHANGELOG.md](../CHANGELOG.md)，未完成规划见 [roadmap.md](roadmap.md)。_

@@ -13,6 +13,7 @@ PanzerNote 自身许可证：GPL-3.0-or-later（见 `LICENSE`）。
 | Pygments                             | >=2.21.0              | BSD-2-Clause                                   | 语法高亮                                                                 |
 | markdown (Python-Markdown)           | >=3.10.3              | BSD-3-Clause                                   | Markdown 渲染（导出 fallback）                                           |
 | Pillow                               | >=12.3.0              | HPND（MIT-CMU 风格，含自由再分发条款）         | 图像处理                                                                 |
+| pillow-heif                          | >=1.7.0               | BSD-3-Clause（wheel 整体另计，见下）           | HEIF / HEIC 解码（图片查看器与插入转码）                                 |
 | send2trash                           | >=2.1.0               | BSD-3-Clause                                   | 文件树删除到回收站                                                       |
 | markdown-it-py                       | >=4.2.0               | MIT                                            | Markdown 主渲染引擎                                                      |
 | mdit-py-plugins                      | >=0.6.1               | MIT                                            | Markdown 扩展语法（定义列表/任务列表）                                   |
@@ -25,6 +26,25 @@ PanzerNote 自身许可证：GPL-3.0-or-later（见 `LICENSE`）。
 > 该 Runtime 由操作系统 / Microsoft Edge 提供，**不随 PanzerNote 分发**，故不列入本表；
 > 缺失时的只读检测与安装指引见 `src/editor/webview2_runtime.py`。
 > `qasync` / `webview2-*` / `winrt-*` 均为 Windows 专用。
+> `pillow-heif` 源码为 **BSD-3-Clause**，但其官方二进制 wheel 打包了若干第三方库，
+> 依包内 `licenses/LICENSES_bundled.txt` 的声明，**wheel 整体按 GPLv2 分发**：
+> `libheif`（LGPLv3）、`libde265`（LGPLv3）、`x265`（GPLv2）、
+> MinGW-w64 运行时（GPL-3.0-with-GCC-exception / MIT / BSD）。
+>
+> **两种分发形态的义务不同**：
+>
+> - **源码包**（`dist/PanzerNote-<ver>-src.zip`）：只把 `pillow-heif` 声明为 pip 依赖，
+>   不随包分发这些原生库，由使用者自行从 PyPI 安装。
+> - **冻结版**（`dist/PanzerNote/`，PyInstaller 产物）：**随包分发**下列原生库，
+>   需一并遵守各自许可证——`libx265-*.dll`（GPLv2，21.6 MB）、
+>   `libstdc++-6-*.dll`（GPL-3.0-with-GCC-exception，2.5 MB）、
+>   `libheif-*.dll`（LGPLv3，2.1 MB）、`libde265-*.dll`（LGPLv3，0.9 MB）、
+>   `libgcc_s_seh-1-*.dll`（GPL-3.0-with-GCC-exception，0.1 MB）、
+>   `libwinpthread-1-*.dll`（MIT/BSD，0.06 MB）。
+>
+> 需注意：本项目自身为 **GPLv3**（见 [LICENSE](LICENSE)），而 `libx265` 为 **GPLv2**，
+> 二者在同一分发作品中的组合存在已知不兼容问题。这是**已知且接受**的风险；
+> 若需彻底消除，可移除 `pillow-heif`（代价是同时失去 HEIF / HEIC 支持）。
 > 许可证依据：`qasync` 包元数据 `License-Expression: BSD-2-Clause`（作者 Arve Knudsen 等，
 > 上游 https://github.com/CabbageDevelopment/qasync ）；`webview2-*` / `winrt-*` 包元数据
 > `License-Expression: MIT`（PyWinRT 官方投影，上游 https://github.com/pywinrt/pywinrt ）。

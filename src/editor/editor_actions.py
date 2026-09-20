@@ -19,14 +19,23 @@ from PyQt6.QtGui import QImage, QPixmap, QTextCursor
 from PyQt6.QtWidgets import QFileDialog, QMessageBox
 
 from ..security.file_access_context import FileAccessContext
+from ..security.file_guard import FileGuard
 from ..utils.logger import get_logger
-from .image_asset_service import SUPPORTED_EXTENSIONS, ImageAssetError, ImageAssetService
+from . import image_formats as _image_formats
+from .image_asset_service import (
+    ASSETS_DIRNAME,
+    ImageAssetError,
+    ImageAssetResult,
+    ImageAssetService,
+)
+from .image_decoder import convert_to_web
 
 
-# 文件选择对话框的图片过滤器（从支持的扩展名派生，避免与落盘白名单漂移）
-_IMAGE_FILE_FILTER = "图片 (" + " ".join(
-    f"*{ext}" for ext in sorted(SUPPORTED_EXTENSIONS)
-) + ")"
+# 文件选择对话框的图片过滤器（从可插入格式派生，避免与白名单漂移；
+# 含 HEIF/TIFF 等需转码的格式）
+_IMAGE_FILE_FILTER = _image_formats.dialog_filter(
+    _image_formats.INSERTABLE, "图片"
+)
 
 
 def _to_qimage(image_data: object) -> Optional[QImage]:
@@ -720,7 +729,10 @@ class EditorActionsMixin:
     def insert_images_from_paths(self, paths: list[str]) -> None:
         """把本地图片文件按序落盘到文档同级 PanzerNote_assets/ 并插入 Markdown 图片语法。
 
-        单个文件失败只告警并跳过，不阻断其余文件（拖入多图时保持其余可用）。
+        - 已是当前文档资源目录内的图片：零拷贝，只新增引用。
+        - 预览渲染不了的格式（HEIF/HEIC、TIFF 等）：**先转码**成 PNG/JPEG
+          再落盘，保证插入后预览能显示；源文件只读、绝不改写。
+        - 单个文件失败只告警并跳过，不阻断其余文件（拖入多图时保持其余可用）。
         """
         document_path = self._image_insert_document_path()
         if document_path is None:
@@ -730,11 +742,23 @@ class EditorActionsMixin:
         service = ImageAssetService(file_guard)
         for source_path in paths:
             original_name = os.path.basename(source_path)
+            # 来源已是当前文档自己的资源：零拷贝，只新增引用（文件管理器复制
+            # PanzerNote_assets 里的图片再粘贴进同一文档时，期望是引用而非副本）
+            local_ref = self._reference_if_own_asset(document_path, source_path)
+            if local_ref is not None:
+                alt = os.path.splitext(original_name)[0]
+                self._insert_markdown_image(alt, local_ref)
+                continue
             try:
-                data = file_guard.safe_read_bytes(
-                    source_path, context=FileAccessContext.USER_DOCUMENT_READ
-                )
-                result = service.save_image(document_path, data, original_name)
+                if _image_formats.needs_conversion(original_name):
+                    result = self._save_converted_image(
+                        service, document_path, source_path, original_name, file_guard
+                    )
+                else:
+                    data = file_guard.safe_read_bytes(
+                        source_path, context=FileAccessContext.USER_DOCUMENT_READ
+                    )
+                    result = service.save_image(document_path, data, original_name)
             except ImageAssetError as exc:
                 QMessageBox.warning(self, "插入图片", str(exc))
                 continue
@@ -744,6 +768,46 @@ class EditorActionsMixin:
 
             alt = os.path.splitext(original_name)[0]
             self._insert_markdown_image(alt, result.relative_path)
+
+    @staticmethod
+    def _save_converted_image(
+        service: ImageAssetService,
+        document_path: str,
+        source_path: str,
+        original_name: str,
+        file_guard: FileGuard,
+    ) -> ImageAssetResult:
+        """把非渲染格式（HEIF/TIFF…）解码后转码落盘，返回落盘结果。
+
+        转码目标是 PNG（带透明通道）或 JPEG（照片）；落盘名沿用原主干，
+        扩展名换成转码后的真实格式，避免 `x.heic` 里其实是 PNG 的错位。
+        """
+        encoded, reason = convert_to_web(source_path, file_guard)
+        if encoded is None:
+            raise ImageAssetError(reason or "图片转码失败")
+        stem = _image_formats.file_stem(original_name) or "image"
+        return service.save_image(
+            document_path,
+            encoded.data,
+            original_name=f"{stem}{encoded.extension}",
+            extension=encoded.extension,
+        )
+
+    @staticmethod
+    def _reference_if_own_asset(document_path: str, source_path: str) -> Optional[str]:
+        """来源文件位于当前文档的 PanzerNote_assets/ 内时，返回可直接插入的相对引用。
+
+        仅限「当前文档自己的资源目录」：其他文档 / 其他位置的图片仍走落盘复制，
+        保持各文档资源自包含。来源不在资源目录内时返回 None。
+        """
+        doc_dir = os.path.dirname(os.path.abspath(document_path))
+        assets_dir = os.path.join(doc_dir, ASSETS_DIRNAME)
+        source_abs = os.path.abspath(source_path)
+        if os.path.dirname(source_abs) != assets_dir:
+            return None
+        if not os.path.isfile(source_abs):
+            return None
+        return f"{ASSETS_DIRNAME}/{os.path.basename(source_abs)}"
 
     @staticmethod
     def _local_image_paths(mime: Optional[QMimeData]) -> list[str]:

@@ -30,6 +30,9 @@ dependencies = [
     "send2trash>=2.1.0",
     "markdown-it-py>=4.2.0",
     "mdit-py-plugins>=0.6.1",  # markdown 渲染扩展语法（定义列表/任务列表）
+    "pillow-heif>=1.7.0",  # HEIF/HEIC 解码（图片查看器）
+    # 相机 RAW 不纳入支持范围：解码需 LibRaw（rawpy），其传递依赖 numpy
+    # （含 numpy.libs）会带来约 54 MB 包体，成本与收益不成比例。
     # C3-D：预览/PDF 导出改由系统共享的 WebView2 Runtime 承载，
     # 不再随包分发 Qt WebEngine/Chromium（PyQt6-WebEngine 已摘除）。
     # webview2-* 提供 webview2 命名空间；winrt-Windows.Foundation 提供

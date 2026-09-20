@@ -257,6 +257,7 @@ class MainWindow(QMainWindow):
         """
         self.game_sidebar.view_changed.connect(self._on_view_changed)
         self.file_tree.file_open_requested.connect(self._open_file)
+        self.file_tree.image_open_requested.connect(self._open_image_from_tree)
         self.file_tree.file_move_requested.connect(self._on_file_move_from_tree)
         self.file_tree.file_copy_requested.connect(self._on_file_copy_from_tree)
         self.file_tree.file_deleted.connect(self._on_file_deleted)
@@ -894,6 +895,11 @@ class MainWindow(QMainWindow):
         if filepath:
             self._open_file(filepath, target_tabs=target_tabs)
 
+    def _open_image_from_tree(self, filepath: str):
+        """文件树双击图片：以标签页形式打开只读查看器（读取走 FileGuard）。"""
+        tabs = self._focused_editor_tabs() or self.editor_tabs
+        tabs.open_image_tab(filepath, self.config.get_file_guard())
+
     def _open_file(self, filepath: str, target_tabs: Optional[EditorTabWidget] = None):
         """打开文件（编排委托 FileActionController）"""
         try:
@@ -1057,6 +1063,39 @@ class MainWindow(QMainWindow):
     def _recover_missing_images(self):
         """恢复缺失的图片（E6c2：外部移动后的断链恢复）"""
         self.edit_actions.recover_missing_images()
+
+    def _cleanup_orphan_images(self):
+        """清理未使用的图片：扫描 → 确认对话框 → 勾选后移入回收站。"""
+        from .editor.orphan_image_service import OrphanImageService
+        from .editor.orphan_image_dialog import OrphanImageDialog
+
+        orphans = OrphanImageService(self.config).find_orphans()
+        if not orphans:
+            QMessageBox.information(self, "清理未使用的图片", "没有找到未使用的图片。")
+            return
+        dialog = OrphanImageDialog(orphans, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        selected = dialog.selected_paths()
+        if not selected:
+            return
+        removed: list[str] = []
+        for path in selected:
+            try:
+                from send2trash import send2trash
+
+                send2trash(os.path.normpath(path))
+                removed.append(path)
+            except Exception as exc:  # noqa: BLE001 - 单项失败继续，尽量清理其余
+                get_logger(__name__).error("清理图片失败 %s: %s", path, exc)
+        if removed:
+            OrphanImageService(self.config).remove_from_ledger(removed)
+            self.file_tree.tree_changed.emit()
+        QMessageBox.information(
+            self,
+            "清理未使用的图片",
+            f"已移入回收站 {len(removed)} 张，失败 {len(selected) - len(removed)} 张。",
+        )
 
     # === 行操作 ===
 

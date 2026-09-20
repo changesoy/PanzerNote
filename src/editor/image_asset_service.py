@@ -28,15 +28,16 @@ from PIL import Image
 from ..security.file_access_context import FileAccessContext
 from ..security.file_guard import FileGuard
 from ..utils.logger import get_logger
+from .image_formats import WEB_RENDERABLE, is_insertable
 
 logger = get_logger(__name__)
 
 ASSETS_DIRNAME = "PanzerNote_assets"
 
-# 支持的图片扩展名（小写）
-SUPPORTED_EXTENSIONS = frozenset(
-    {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"}
-)
+# 落盘允许的扩展名 = 预览可渲染格式（单一真相源见 image_formats）。
+# 非渲染格式（HEIF/TIFF 等）由调用方先用 image_decoder 转码再落盘，
+# 因此这里不会、也不应出现它们的扩展名。
+SUPPORTED_EXTENSIONS = WEB_RENDERABLE
 
 # 参与大图优化的扩展名；其余（gif/webp/bmp/svg）原样落盘
 _PNG_EXTENSIONS = frozenset({".png"})
@@ -79,8 +80,13 @@ class ImageAssetService:
 
     @staticmethod
     def is_supported_image(filename: str) -> bool:
-        """判断文件名扩展名是否属于支持的图片类型。"""
-        return _split_extension(filename) in SUPPORTED_EXTENSIONS
+        """判断该文件是否允许作为图片插入文档。
+
+        含 HEIF/TIFF 等预览渲染不了的格式——它们由调用方先转码成
+        PNG/JPEG 再落盘（见 `image_decoder.convert_to_web`），
+        因此这里返回 True 不代表可以直接按原扩展名落盘。
+        """
+        return is_insertable(filename)
 
     def save_image(
         self,

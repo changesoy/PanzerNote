@@ -25,6 +25,7 @@ from ..utils.error_handler import ErrorHandler, ErrorCategory
 from ..security.input_validator import FilenameValidationError
 from ..themes.theme_aware_mixin import ThemeAwareMixin
 from ..themes.theme_v2.consumer import v2_token
+from .image_formats import VIEWABLE, filter_patterns, is_viewable
 
 
 MIME_TAB_FILEPATH = "application/x-panzernote-tab-filepath"
@@ -193,6 +194,8 @@ class DroppableTreeView(QTreeView):
 class FileTreeWidget(ThemeAwareMixin, QWidget):
 
     file_open_requested = pyqtSignal(str)
+    # 图片文件双击时打开查看器
+    image_open_requested = pyqtSignal(str)
     file_move_requested = pyqtSignal(str, str)
     file_copy_requested = pyqtSignal(str, str)
     # (filepath, is_dir)：删除成功后通知外部同步关闭已打开的标签页
@@ -234,7 +237,9 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
 
         self.model.setNameFilters([
             "*.txt", "*.md", "*.py", "*.c", "*.cpp", "*.h", "*.hpp",
-            "*.java", "*.js", "*.json", "*.html", "*.css", "*.xml"
+            "*.java", "*.js", "*.json", "*.html", "*.css", "*.xml",
+            # 图片也进文件树：双击由查看器打开（含 HEIF/AVIF 等，见 image_formats）
+            *filter_patterns(VIEWABLE),
         ])
         self.model.setNameFilterDisables(False)
 
@@ -385,7 +390,10 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
     def _on_double_click(self, index: QModelIndex):
         if not self.model.isDir(index):
             filepath = self.model.filePath(index)
-            self.file_open_requested.emit(filepath)
+            if is_viewable(filepath):
+                self.image_open_requested.emit(filepath)
+            else:
+                self.file_open_requested.emit(filepath)
 
     def _add_external_file(self):
         from PyQt6.QtWidgets import QFileDialog

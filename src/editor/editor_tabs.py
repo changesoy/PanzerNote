@@ -898,6 +898,32 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 self._notify_missing_images(widget, shared_doc.filepath)
         return int(index)
 
+    def open_image_tab(self, filepath: str, file_guard, *, activate: bool = True) -> int:
+        """以标签页形式打开图片（只读查看器）。
+
+        图片标签与文档标签同族但无 Document：不带 `tab_id` / `shared_doc`，
+        因此关闭走 `_close_tab` 的「无 tab_id」分支（直接移除，不涉及保存/脏确认）；
+        编辑类命令经 `current_editor()` 返回 None 自然失效。
+        同一张图片已打开时聚焦既有标签，不重复开。
+        """
+        from .image_viewer import ImageViewerWidget
+
+        target = os.path.abspath(filepath)
+        for i in range(self.count()):
+            widget = self.widget(i)
+            if getattr(widget, "image_path", None) == target:
+                if activate:
+                    self.setCurrentIndex(i)
+                return i
+
+        viewer = ImageViewerWidget(target, file_guard)
+        index = self.addTab(viewer, os.path.basename(target))
+        self.setTabToolTip(index, target)
+        if activate:
+            self.setCurrentIndex(index)
+        self.tab_count_changed.emit(self.count())
+        return int(index)
+
     def save_current(self) -> Tuple[bool, int]:
         """保存当前文件"""
         widget = self.currentWidget()

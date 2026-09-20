@@ -190,19 +190,29 @@ class DraggableTabBar(QTabBar):
             return
 
         widget = tab_widget.widget(self._drag_tab_index)
-        tab_id = getattr(widget, 'tab_id', None) if widget else None
-        if tab_id is None:
+        if widget is None:
+            super().mouseMoveEvent(event)
+            return
+        # 图片标签按设计不带 tab_id（不参与保存状态机），但同样应可拖拽跨分屏迁移：
+        # 用 image_path 作身份标记塞进 MIME_TAB_ID（接收方只判「存在该格式」，不解析内容）。
+        tab_id = getattr(widget, 'tab_id', None)
+        identity = tab_id if tab_id is not None else getattr(widget, 'image_path', None)
+        if identity is None:
             super().mouseMoveEvent(event)
             return
 
-        filepath = tab_widget._get_filepath_for_index(self._drag_tab_index) or ""
+        # 图片标签不携带文件路径：否则拖到文件树会触发「移动图片文件」这类副作用
+        # （本版未定义该行为，保持与迁移一致的纯内部搬动）。
+        filepath = ""
+        if tab_id is not None:
+            filepath = tab_widget._get_filepath_for_index(self._drag_tab_index) or ""
 
         # 发起 QDrag
         # 注意：MIME_TAB_FILEPATH 仅对已保存文件设置——空数据格式在平台拖拽协议中
         # 可能被丢弃，导致目标 hasFormat 判断失败；未命名标签靠 MIME_TAB_ID 识别。
         drag = QDrag(self)
         mime = QMimeData()
-        mime.setData(MIME_TAB_ID, str(tab_id).encode('utf-8'))
+        mime.setData(MIME_TAB_ID, str(identity).encode('utf-8'))
         if filepath:
             mime.setData(MIME_TAB_FILEPATH, filepath.encode('utf-8'))
         drag.setMimeData(mime)
@@ -520,6 +530,10 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         widget = source_tabs.widget(index)
         if widget is None:
             return False
+        # 图片标签无 Document / 无 tab_id，走独立分支：只搬 widget 本身
+        image_path = getattr(widget, 'image_path', None)
+        if image_path is not None:
+            return self._migrate_image_tab_from(source_tabs, index, str(image_path))
         tab_id = getattr(widget, 'tab_id', None)
         if tab_id is None:
             return False
@@ -584,6 +598,29 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         # 关键：每个面板 _next_tab_id 独立计数，提升避免未来生成重复 tab_id
         self._next_tab_id = max(self._next_tab_id, tab_id + 1)
         self._update_tab_tooltip(self.indexOf(widget))
+        self.tab_count_changed.emit(self.count())
+        return True
+
+    def _migrate_image_tab_from(
+        self, source_tabs: "EditorTabWidget", index: int, image_path: str
+    ) -> bool:
+        """图片标签跨分屏迁移：无 Document / 无 tab_id，只搬 widget 本身。
+
+        不涉及保存状态机与 Document 注册表（图片标签本就不在两者中）；
+        迁移后 `_close_tab` 仍走「无 tab_id」分支直接移除，不弹保存确认。
+        tooltip 需显式设为图片路径——`_update_tab_tooltip` 对无 Document 的
+        标签会写「未保存」，对图片标签是错的。
+        """
+        if source_tabs is self:
+            return False
+        widget = source_tabs.widget(index)
+        if widget is None:
+            return False
+        title = source_tabs.tabText(index)
+        source_tabs.removeTab(index)
+        source_tabs.tab_count_changed.emit(source_tabs.count())
+        new_index = self.addTab(widget, title)
+        self.setTabToolTip(new_index, image_path)
         self.tab_count_changed.emit(self.count())
         return True
 

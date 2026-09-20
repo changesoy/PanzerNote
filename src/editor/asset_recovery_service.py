@@ -35,6 +35,7 @@ from .asset_migration_service import (
     sha256_of,
 )
 from .image_asset_ledger import ImageAssetLedger, ImageAssetRecord
+from .image_asset_service import ASSETS_DIRNAME
 from .image_reference_scanner import canonical_path_key, find_missing_local_images
 
 logger = get_logger(__name__)
@@ -44,9 +45,12 @@ RECOVER_MOVE = "recover_move"
 RECOVER_COPY = "recover_copy"
 NEEDS_USER = "needs_user"
 
+# 兜底扫描的安全阀（与引用扫描同量级）
+SCAN_MAX_DIRS = 20000
+
 # 「不猜」的原因（对话框与汇总文案共用）
 REASON_NO_LEDGER = "图片索引不可用，取不到恢复线索"
-REASON_NO_CANDIDATE = "图片索引里没有这个文件名的记录"
+REASON_NO_CANDIDATE = "图片索引与可扫描范围内都找不到这个文件名"
 REASON_CANDIDATE_GONE = "索引里的候选文件已不存在或内容已改变"
 REASON_AMBIGUOUS = "同名候选内容不一致，需要人工判断"
 REASON_EXCLUSIVE = "索引命中的副本没有被其他 Markdown 引用"
@@ -141,24 +145,40 @@ class AssetRecoveryService:
     def _decide(
         self, missing_abs: str, ledger: Optional[ImageAssetLedger]
     ) -> AssetRecoveryItem:
+        # 兜底扫描只在「完全没有 ledger 线索」时启用：旧图片 / 手动拷贝的图片
+        # 从未进过索引，范围资源目录按文件名找仍可能接活。一旦 ledger 有同名记录
+        # 但复核不过（文件被删 / 内容已改），说明「这条线索失效」，仍然不猜——
+        # 否则会把内容被用户改过的文件误当作同一张图捞回来。
         if ledger is None:
-            return AssetRecoveryItem(missing_abs, NEEDS_USER, reason=REASON_NO_LEDGER)
+            verified = self._scan_candidates(missing_abs)
+            if not verified:
+                return AssetRecoveryItem(missing_abs, NEEDS_USER, reason=REASON_NO_LEDGER)
+            return self._finalize(missing_abs, verified)
 
         candidates = ledger.find_by_name(os.path.basename(missing_abs))
         if not candidates:
-            return AssetRecoveryItem(
-                missing_abs, NEEDS_USER, reason=REASON_NO_CANDIDATE
-            )
+            verified = self._scan_candidates(missing_abs)
+            if not verified:
+                return AssetRecoveryItem(
+                    missing_abs, NEEDS_USER, reason=REASON_NO_CANDIDATE
+                )
+            return self._finalize(missing_abs, verified)
+
         verified = self._verified_candidates(missing_abs, candidates)
         if not verified:
             return AssetRecoveryItem(
                 missing_abs, NEEDS_USER, reason=REASON_CANDIDATE_GONE
             )
-        if len({digest for _record, _src, digest in verified}) > 1:
+        return self._finalize(missing_abs, verified)
+
+    def _finalize(
+        self, missing_abs: str, verified: List[Tuple[str, str]]
+    ) -> AssetRecoveryItem:
+        if len({digest for _src, digest in verified}) > 1:
             # 4.7：只有候选实际内容指纹不同，才是真正需要用户判断的歧义
             return AssetRecoveryItem(missing_abs, NEEDS_USER, reason=REASON_AMBIGUOUS)
 
-        _record, source_abs, _digest = verified[0]
+        source_abs, _digest = verified[0]
         exclusive = not self._migration.is_referenced_elsewhere(
             source_abs, source_abs, missing_abs
         )
@@ -169,13 +189,78 @@ class AssetRecoveryService:
             reason=REASON_EXCLUSIVE if exclusive else REASON_SHARED,
         )
 
+    def _scan_candidates(
+        self, missing_abs: str
+    ) -> List[Tuple[str, str]]:
+        """ledger 无有效线索时的兜底：在可证明范围内按文件名扫描资源目录。
+
+        命中条件仍保守：只认 `PanzerNote_assets/` 里的同名文件，多个命中时
+        内容指纹一致才可用（否则由调用方按歧义交给用户）。无 hash 记录可比对，
+        文件名 + 目录约定即身份证据——这正是「索引只是线索，不猜」的兜底延伸。
+        """
+        name = os.path.basename(missing_abs)
+        target_key = canonical_path_key(missing_abs)
+        found: List[Tuple[str, str]] = []
+        scanned_dirs = 0
+        try:
+            roots = self._scan_roots(missing_abs)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("兜底扫描根目录解析失败: %s", exc)
+            return found
+        for root_dir in roots:
+            if not os.path.isdir(root_dir):
+                continue
+            for dirpath, dirnames, filenames in os.walk(root_dir):
+                scanned_dirs += 1
+                if scanned_dirs > SCAN_MAX_DIRS:
+                    logger.warning("兜底扫描超出目录数上限，提前终止")
+                    return self._dedupe_verified(found)
+                dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+                if os.path.basename(dirpath) != ASSETS_DIRNAME:
+                    continue
+                if name not in filenames:
+                    continue
+                candidate = os.path.join(dirpath, name)
+                if canonical_path_key(candidate) == target_key:
+                    continue  # 缺失的期望位置本身
+                try:
+                    digest = sha256_of(candidate)
+                except OSError:
+                    continue
+                found.append((candidate, digest))
+        return self._dedupe_verified(found)
+
+    @staticmethod
+    def _dedupe_verified(found: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
+        """同名命中按 canonical 路径去重（os.walk 不会重复，防御大小写差异）。"""
+        seen: set[str] = set()
+        unique: List[Tuple[str, str]] = []
+        for source, digest in found:
+            key = canonical_path_key(source)
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append((source, digest))
+        return unique
+
+    def _scan_roots(self, missing_abs: str) -> List[str]:
+        """兜底扫描范围：workspace 根 + 缺失文档所在目录（可证明范围的同口径）。"""
+        roots: List[str] = []
+        base = self._config.get_base_path()
+        if base:
+            roots.append(base)
+        doc_dir = os.path.dirname(os.path.dirname(os.path.abspath(missing_abs)))
+        if doc_dir and all(canonical_path_key(doc_dir) != canonical_path_key(r) for r in roots):
+            roots.append(doc_dir)
+        return roots
+
     @staticmethod
     def _verified_candidates(
         missing_abs: str, candidates: Sequence[ImageAssetRecord]
-    ) -> List[Tuple[ImageAssetRecord, str, str]]:
+    ) -> List[Tuple[str, str]]:
         """复核候选：跳过「已在期望位置」的、不存在的、以及内容指纹不符的。"""
         target_key = canonical_path_key(missing_abs)
-        verified: List[Tuple[ImageAssetRecord, str, str]] = []
+        verified: List[Tuple[str, str]] = []
         for record in candidates:
             source_abs = record.last_known_abs
             if canonical_path_key(source_abs) == target_key:
@@ -190,7 +275,7 @@ class AssetRecoveryService:
             if record.sha256 and record.sha256 != digest:
                 # 文件被用户改过 → 内容身份不再成立，不猜
                 continue
-            verified.append((record, source_abs, digest))
+            verified.append((source_abs, digest))
         return verified
 
     # ---------- 执行 ----------

@@ -122,6 +122,11 @@ PanzerNote/
 │   │   ├── webview2_runtime.py     # WebView2 Runtime 可用性检测（只读注册表 + 安装指引）
 │   │   ├── markdown_preview.py     # Markdown 分屏预览（源码行号同步 + 代码块高亮 + 本地图片）
 │   │   ├── image_asset_service.py  # 图片落盘（PanzerNote_assets/ + ASCII 安全名 + 大图优化）
+│   │   ├── image_formats.py        # 图片扩展名清单单一真相源（可渲染 ⊂ 可查看 = 可插入）
+│   │   ├── image_decoder.py        # 图片解码统一入口（Qt / Pillow / HEIF / AVIF）
+│   │   ├── image_viewer.py         # 图片查看器标签页（只读；适应窗口只缩不放；EXIF 方向仅影响显示）
+│   │   ├── orphan_image_service.py # 未使用图片扫描（手动 GC，进回收站）
+│   │   ├── orphan_image_dialog.py  # 未使用图片确认对话框（默认全不勾选）
 │   │   ├── image_asset_ledger.py   # 托管图片恢复索引（data/config/image_assets.json，只作线索）
 │   │   ├── image_reference_scanner.py # 图片引用扫描 / 缺失检测 / 冲突改名定点改写
 │   │   ├── asset_migration_service.py # 文档移动 / 复制时的图片迁移（独占 Move / 共享 Copy）
@@ -885,6 +890,9 @@ src/__init__.py (__version__ = "2.4.0")
 **落盘与引用**（`editor/image_asset_service.py` / `editor/image_reference_scanner.py`）：
 
 - 图片统一落盘到笔记同级的 `PanzerNote_assets/`，文件名 ASCII 安全（markdown-it 对含空格的图片语法直接解析失败，中文路径会被 percent-encode 成不可读 src），写入经 `FileGuard.safe_write_bytes`；仅 >2 MB 的 PNG/JPEG 做重存优化（PNG 无损 / JPEG 近无损 `quality="keep"`），且仅在结果更小时采用。
+- **格式能力分三档，单一真相源为 `editor/image_formats.py`**：`WEB_RENDERABLE`（Chromium 可渲染，即落盘目标）⊂ `VIEWABLE`（查看器可显示）＝ `INSERTABLE`（允许插入）。`image_asset_service.SUPPORTED_EXTENSIONS` 直接引用 `WEB_RENDERABLE`，不再各自维护扩展名表——`PanzerNote_assets/` 里只允许出现可渲染格式，否则预览断图。
+- **非渲染格式插入前转码**：HEIF/HEIC、TIFF 等在 `insert_images_from_paths` 内先经 `image_decoder.convert_to_web` 解码并转码为 PNG（带 alpha）或 JPEG（照片，质量 92）再落盘，落盘名换成真实转码扩展名；源文件全程只读。转码决策只看 `image.hasAlphaChannel()`，避免「一律 RGBA」把所有图都判成带透明而全走 PNG。
+- **零拷贝引用**：插入来源若已是当前文档自己的 `PanzerNote_assets/` 内文件（`_reference_if_own_asset`），只插入相对引用、不复制副本；仅限当前文档自己的资源目录，其他文档 / 其他位置仍复制落盘以保持各文档自包含。
 - 引用扫描（`image_reference_scanner.py`，纯函数、只读）覆盖行内 / 完整引用式 / collapsed / 快捷引用式四种语法，剔除围栏代码块与行内代码里的示例；URL decode → 规范化后按 **canonical path** 比较，`../` 跨目录计入，带 scheme / 协议相对 / 根路径不算本地相对引用。同模块另提供引用**位置**（`iter_image_ref_spans`）与定点改写（`rewrite_local_refs`），供同名冲突改名后只替换目标串区间、其余逐字保留。
 
 **归属判定与迁移**（`editor/asset_migration_service.py`）：
@@ -897,8 +905,16 @@ src/__init__.py (__version__ = "2.4.0")
 
 - ledger 落在 `{base_path}/data/config/image_assets.json`，只记「最后已知线索」（名称 / 最后已知绝对路径 / sha256 / 尺寸 / 来源），**完全不存引用关系**；可删除、可重建、损坏即降级为空，`last_known_abs` 使用前一律重新 `exists` + 重算 hash。
 - 外部移动恢复：文档解析出的期望绝对路径缺失时，按文件名取 ledger 候选 → 逐条复核存在性与**实际重算** sha256 → 同名多候选按内容身份判断（内容一致 = 多物理副本、不构成歧义；指纹不同才是真歧义）→ 在可证明范围内扫描该候选是否仍被别的 Markdown 引用 → 独占则 MOVE、仍被引用则 COPY、证据不足 / 内容已变 / 目标被占用**一律不猜**。
+- **ledger 无线索时的兜底扫描**（`_scan_candidates`）：旧图片、程序外放进来的图片从未入过索引，直接判「需人工处理」会让最常见的场景走死路。故 ledger 无同名记录（或 ledger 不可用）时，退一步在「workspace 根 + 文档所在目录」范围内按文件名扫 `PanzerNote_assets/`：唯一命中即按候选人处理，多个命中仍比内容指纹决定可用性，指纹不一致仍交用户。**反之，ledger 有同名记录但复核不过（文件已删 / 内容已改）时不启用兜底扫描**——那说明这条线索本身失效，扫回来等于把用户改过的文件误认成同一张图。
 - 恢复落位即文档期望路径，**不需要改写 Markdown**；执行复用 `AssetMigrationService.apply`，执行前再复核目标位置。入口为「编辑 → 恢复缺失的图片...」，结果经 `asset_recovery_finished` 信号由 `MainWindow` 以小秘书气泡非打断汇报。
 - 缺失检测（E6b）在文档打开 / 资源根变化时触发只读扫描，经 `missing_images_detected` 由 `MainWindow` 汇总为非打断提示；小秘书正忙时暂存、气泡消失（`message_hidden`）后补发，不与渲染循环绑定。
+
+**查看与清理**（`editor/image_decoder.py` / `image_viewer.py` / `orphan_image_service.py` / `orphan_image_dialog.py`）：
+
+- **解码分派**（`image_decoder.decode_image_file`）按扩展名：Qt 原生格式先走 `QImageReader`（`setAutoTransform` 处理 EXIF 方向）；HEIF/HEIC（`pillow-heif` 注册打开器）、AVIF（Pillow 内置）以及 Qt 认不出的格式交给 Pillow 兜底（`ImageOps.exif_transpose` 处理方向）。Qt 与 Pillow 都解不了的格式返回带原因的 `DecodeResult`，不抛异常给 UI。**相机 RAW 不在支持范围**：解码需 LibRaw（`rawpy`），其传递依赖 `numpy`（含 `numpy.libs`）约 54 MB，成本与收益不成比例，故 `VIEWABLE` 里不再包含 RAW 扩展名。
+- **只看不改是硬约束**：解码只读、只在内存中进行；EXIF 方向修正走 `QImageReader.setAutoTransform` / `ImageOps.exif_transpose`，**仅影响显示**，不回写文件。字节读取一律经 `FileGuard`：先调 `validate_read_access()` 做路径白名单校验（与 `safe_read_bytes` 同一套 PathValidator，零 IO），再以 `USER_DOCUMENT_READ` context 调 `safe_read_bytes`——该 context 会跳过 `safe_read_bytes` 内部的重复校验，故显式那一次是必要的，不可省。
+- **入口**：文件树 `setNameFilters` 加入 `filter_patterns(VIEWABLE)`（此前只列文本扩展名，图片在树里完全不可见），双击图片由 `image_open_requested` 交给 `MainWindow._open_image_from_tree` → `EditorTabWidget.open_image_tab()`，在编辑区**以标签页**打开 `ImageViewerWidget`（适应窗口只缩不放 ⇄ 原始大小单击切换、大图可滚动）；非图片仍走原 `file_open_requested` 通道。图片标签与文档标签同族但**无 Document**：不带 `tab_id` / `shared_doc`，关闭走 `_close_tab` 的「无 tab_id」分支（直接移除，不涉及保存/脏确认），编辑类命令经 `current_editor()` 返回 None 而自然失效；`image_path` 属性兼作去重键，同一图片重复打开只聚焦既有标签。注意首帧视口仍是占位尺寸，适应缩放必须等 `showEvent` 之后（`QTimer.singleShot(0)`）再算，否则大图会被压成一点点大。文件树只影响可见性，全工作区搜索侧另有 `_is_binary_file` 兜底，不会把图片当文本扫。
+- **孤儿清理**（`orphan_image_service.py`）：删除文档或删掉引用后图片不会被自动删除，故提供手动 GC——引用面复用 `image_reference_scanner`（与恢复 / 迁移同口径）扫 workspace + external files 范围内全部 Markdown，候选面扫范围内 `PanzerNote_assets/` 内的图片，二者差集即孤儿。清理**不自动执行**：对话框列出候选（目录分组 / 大小）且**默认全部不勾选**，用户确认后 `send2trash` 移入回收站（可还原），并同步移除 ledger 记录、发 `tree_changed` 刷新文件树。
 
 ---
 
@@ -1055,9 +1071,11 @@ DraggableTabBar.mouseMoveEvent (鼠标离开标签栏)
 ### 运行依赖
 
 ```bash
-pip install PyQt6>=6.11.0 shiboken6>=6.11.2 Pygments>=2.21.0 markdown>=3.10.3 Pillow>=12.3.0 send2trash>=2.1.0 markdown-it-py>=4.2.0 mdit-py-plugins>=0.6.1 qasync>=0.28.0 webview2-Microsoft.Web.WebView2.Core>=3.2.1 winrt-Windows.Foundation>=3.2.1
+pip install PyQt6>=6.11.0 shiboken6>=6.11.2 Pygments>=2.21.0 markdown>=3.10.3 Pillow>=12.3.0 send2trash>=2.1.0 markdown-it-py>=4.2.0 mdit-py-plugins>=0.6.1 pillow-heif>=1.7.0 qasync>=0.28.0 webview2-Microsoft.Web.WebView2.Core>=3.2.1 winrt-Windows.Foundation>=3.2.1
 python main.py
 ```
+
+> 图片查看器的格式覆盖只依赖 `pillow-heif`（HEIF/HEIC，约 0.2 MB）；AVIF 由 Pillow 内置解码，无需额外依赖。**相机 RAW 未纳入支持**：需要 LibRaw（`rawpy`），其传递依赖 `numpy` + `numpy.libs` 会带来约 54 MB 包体，成本与收益不成比例。
 
 > 预览与 PDF 导出依赖系统安装的 **Microsoft Edge WebView2 Runtime**（Windows 11 与多数 Windows 10 已预装，**不随包分发**）；缺失时启动会记录 error 日志并在窗口显示后弹一次安装指引，预览区同时显示可读提示。
 > `qasync` / `webview2-*` / `winrt-*` 均为 Windows 专用；完整依赖清单以 `pyproject.toml` / `requirements.txt` 为准。
@@ -1065,13 +1083,15 @@ python main.py
 ### 开发依赖
 
 ```bash
-pip install pytest>=9.0 pytest-cov pytest-qt  # 单元测试
-pip install mypy>=1.20                         # 类型检查
+pip install pytest>=9.1.1 pytest-cov pytest-qt pytest-timeout  # 单元测试
+pip install mypy>=2.3.1                                        # 类型检查
 ```
+
+> mypy 覆盖 `src/` 全量（`mypy src/`），目标 `python_version = "3.11"`，无 per-module 豁免（`PIL` / `rawpy` 的临时 `follow_imports = "skip"` 已随 rawpy 摘除一并删除）。
 
 ### 单元测试
 
-项目共 33 个测试文件（`tests/test_*.py`），覆盖核心模块、编辑器、游戏系统、安全模块及可扩展性架构。另有 `tests/benchmarks/` 存放性能基准测试。运行方式：`pytest tests/ -v`。测试文件命名约定为 `test_<module>.py`，每个测试文件覆盖对应模块的关键路径。
+项目共 102 个测试文件（`tests/test_*.py`），覆盖核心模块、编辑器、图片资源工作流、游戏系统、安全模块及可扩展性架构。另有 `tests/benchmarks/` 存放性能基准测试。运行方式：`pytest tests/ -v`。测试文件命名约定为 `test_<module>.py`，每个测试文件覆盖对应模块的关键路径。
 
 ---
 

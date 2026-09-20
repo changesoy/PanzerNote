@@ -95,6 +95,7 @@ class MenuBuilder:
 
         self._add_action(menu, "插入图片...", QKeySequence("Ctrl+Shift+I"), mw._insert_image, "edit.insert_image", "编辑")
         self._add_action(menu, "恢复缺失的图片...", None, mw._recover_missing_images, "edit.recover_images", "编辑")
+        self._add_action(menu, "清理未使用的图片...", None, mw._cleanup_orphan_images, "edit.cleanup_orphan_images", "编辑")
         menu.addSeparator()
         self._add_action(menu, "转到行...", QKeySequence("Ctrl+G"), mw._goto_line, "edit.goto_line", "编辑")
         menu.addSeparator()

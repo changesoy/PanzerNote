@@ -92,6 +92,7 @@ _DEFAULT_SHORTCUTS = {
     "edit.toggle_case": ("切换大小写", "Ctrl+Shift+U", "编辑"),
     "edit.insert_image": ("插入图片", "Ctrl+Shift+I", "编辑"),
     "edit.recover_images": ("恢复缺失的图片", "", "编辑"),
+    "edit.cleanup_orphan_images": ("清理未使用的图片", "", "编辑"),
     "edit.toggle_task": ("切换任务勾选", "Ctrl+Alt+T", "编辑"),
     "edit.format_bold": ("加粗", "Ctrl+Alt+B", "编辑"),
     "edit.format_italic": ("斜体", "Ctrl+Alt+I", "编辑"),

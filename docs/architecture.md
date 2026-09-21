@@ -492,6 +492,7 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 
 - `_render_markdown_with_source_map()`：使用 `markdown-it-py` 的 `token.map` 给块级节点注入 `data-source-line` 属性（1-based 行号），覆盖 heading_open/paragraph_open/blockquote_open/bullet_list_open/ordered_list_open/list_item_open/table_open/thead_open/tbody_open/tr_open/hr/fence/code_block 共 13 种 token
 - `_build_container()` 支持 `source_line` 参数：代码块外层容器携带 `data-source-line` 属性
+- **脚注区不注入锚点**：脚注定义区被 `markdown-it-footnote` 移到**文末**渲染，但其 token 仍带 `map`（定义写在源文件第几行）。照常注入会让锚点表出现「行号靠前、位置靠后」的反序项，而预览→编辑器同步是在**按行号排序**的锚点表里按 `top` 插值 —— 一个反序项就会把其后整段正文压成「定义行 ~ 其后一行」（表现为预览滚过脚注引用处后左侧编辑器不再跟随，定义写在中段时最容易复现）。故 `footnote_block_open … footnote_block_close` 区间一律跳过注入；脚注区内的代码块只在 `_code_block_source_lines` 里占位（索引必须与渲染顺序对齐）、行号置 `None`，整块由文末 EOF 哨兵覆盖
 - `_current_editor_top_line()`：通过 `cursorForPosition(QPoint(0, 0))` 获取编辑器视口顶部行号
 - `_sync_scroll()` 改为源码行号同步：经适配器 `run_javascript`（WebView2 侧为 `execute_script_async`）调用 `scrollToSourceLine(line)`（唯一同步路径）
 - HTML 模板注入 `scrollToSourceLine()` JS 函数：查找 `data-source-line` 节点，在相邻锚点间线性插值计算滚动位置

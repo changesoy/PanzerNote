@@ -1069,10 +1069,26 @@ a {{
             # 前面正文的行号不变，滚动同步不受影响）
             tokens = self._md_parser.parse(strip_end_matter(text))
 
-            self._code_block_source_lines: list[int] = []
+            self._code_block_source_lines: list[Optional[int]] = []
             injected_count = 0
 
+            # 脚注定义区会被 markdown-it-footnote 移到**文档末尾**渲染，但其内部
+            # token 仍带着「定义写在源文件第几行」的 map。照常注入会让锚点数组出现
+            # 「行号靠前、位置靠后」的反序项（例：定义写在第 3 行、渲染却在文末）；
+            # 预览→编辑器同步是在按行号排序的锚点里按 top 插值，一个反序项就会把
+            # 整段正文压进「定义行 ~ 其后一行」——实测表现为预览滚过脚注引用位置后
+            # 左侧编辑器不再跟随。故脚注区一律不注入源码行锚点（该区域位于文档
+            # 末尾，由 EOF 哨兵覆盖）。
+            in_footnote_tail = False
+
             for token in tokens:
+                if token.type == "footnote_block_open":
+                    in_footnote_tail = True
+                    continue
+                if token.type == "footnote_block_close":
+                    in_footnote_tail = False
+                    continue
+
                 if token.type in ("fence", "code_block") and token.map:
                     # 图表围栏稍后转成图表容器 div，不占代码块序号：
                     # 否则 _code_block_source_lines 与真实代码块索引错位
@@ -1080,9 +1096,13 @@ a {{
                         getattr(token, "info", "") or ""
                     ):
                         continue
-                    self._code_block_source_lines.append(token.map[0] + 1)
+                    # 脚注区里的代码块仍要占位（索引必须与渲染顺序对齐），
+                    # 但行号置空：它和脚注区其它内容一样落在文档末尾
+                    self._code_block_source_lines.append(
+                        None if in_footnote_tail else token.map[0] + 1
+                    )
 
-                if not token.map:
+                if in_footnote_tail or not token.map:
                     continue
 
                 if token.nesting == -1:

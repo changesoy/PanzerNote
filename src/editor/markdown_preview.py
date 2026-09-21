@@ -670,12 +670,12 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         if not ok:
             return
         self._html_template_loaded = True
-        # 整页灌入这条路（见 _push_to_preview 的 else 分支）不注入图表库，而
-        # 「首次推送就带着图表」恰好走它：会话恢复时内容在模板加载完成前就推了进来，
-        # 之后没有内容更新，图表便一直以源码文本留在页面上。故「模板已加载」这一
-        # 事实本身就要补齐一次能力 —— 注入载荷自带当前 #content 的渲染，
-        # 不需要再推一次内容（_mermaid_loaded 保证同一 JS 上下文只注入一次）。
-        self._ensure_mermaid_capability(self._last_render_html)
+        # 首屏现在是空壳（见 _push_to_preview 的 else 分支）：模板加载完成后
+        # 必须把已有内容补推一次。会话恢复时内容在模板加载完成前就推了进来，
+        # 之后没有内容更新，若不补推正文区就一直空白。补推走模板已加载分支：
+        # 注入载荷自带当前 #content 的渲染（正文 + 公式 + 图表一次到位），
+        # 与后续内容更新脚本互为幂等（_mermaid_loaded 保证同一 JS 上下文只注入一次）。
+        self._push_to_preview(self._last_render_html)
 
     def _reset_template_state(self) -> None:
         """整页（重新）加载前作废「模板已加载」与「图表库已注入」两项状态。
@@ -900,7 +900,7 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         """
         if self._html_template_loaded:
             self._ensure_mermaid_capability(html_content)
-            escaped = json.dumps(html_content)
+            escaped = json.dumps(html_content, ensure_ascii=False)
             doc = self.editor.document()
             assert doc is not None
             total_lines = doc.blockCount()
@@ -926,40 +926,57 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             )
             self.preview.run_javascript(js)
         else:
-            css_vars = _build_preview_css_vars(
-                self._theme_engine,
-                self.config.get_code_font_family(),
-                self.config.get_line_spacing(),
-                self.config.get_code_line_spacing(),
+            # B 阶段 1′ 方案 A：首屏只导航空壳（正文区为空），内容由
+            # _on_load_finished 在模板加载完成后经 run_javascript 更新脚本补推。
+            # 空壳远小于 WebView2 NavigateToString 的 2 MB 上限，大文档不再被
+            # 1.8 MB 阈值卡死；之后的每次更新走同一条 run_javascript 路径，
+            # 不做大小阈值切换。
+            self.preview.set_resource_root(self._base_path or None)
+            self.preview.set_html(self._build_full_html(""))
+
+        # 同步当前折叠状态到预览
+        self._sync_folds_to_preview()
+
+    def _build_full_html(self, html_content: str) -> str:
+        """构建预览整页 HTML（空壳与整页共用：传空串即空壳）。
+
+        模板只在首屏加载一次，之后仅换 #content 内容，故公式库始终内联一次。
+        """
+        css_vars = _build_preview_css_vars(
+            self._theme_engine,
+            self.config.get_code_font_family(),
+            self.config.get_line_spacing(),
+            self.config.get_code_line_spacing(),
+        )
+        template = PREVIEW_HTML_TEMPLATE
+        try:
+            return template.format(
+                content=html_content,
+                layout_css=_MARKDOWN_LAYOUT_CSS,
+                math_style=_math_render.style_fragment(),
+                math_script=_math_render.script_fragment(
+                    "document.getElementById('content')"
+                ),
+            ).replace(
+                "</style>", css_vars + "\n</style>", 1
             )
-            template = PREVIEW_HTML_TEMPLATE
-            try:
-                full_html = template.format(
-                    content=html_content,
-                    layout_css=_MARKDOWN_LAYOUT_CSS,
-                    # 模板只加载一次，之后仅换 #content 内容，故公式库始终内联一次
-                    math_style=_math_render.style_fragment(),
-                    math_script=_math_render.script_fragment(
-                        "document.getElementById('content')"
-                    ),
-                ).replace(
-                    "</style>", css_vars + "\n</style>", 1
-                )
-            except Exception as exc:
-                get_logger(__name__).error(
-                    "Markdown preview template format failed: %s",
-                    exc,
-                    exc_info=True,
-                )
+        except Exception as exc:
+            get_logger(__name__).error(
+                "Markdown preview template format failed: %s",
+                exc,
+                exc_info=True,
+            )
 
-                # B2：模板格式失败时的降级 HTML（B8：字面量 = v1 light 值，无 v1 回退）
-                fallback_bg = "#FFFFFF"
-                fallback_text = "#212121"
-                fallback_code_bg = "#EDF3FA"
-                fallback_border = "#D8DEE9"
-                fallback_link = "#2196F3"
+            # B2：模板格式失败时的降级 HTML（B8：字面量 = v1 light 值，无 v1 回退）
+            fallback_bg = "#FFFFFF"
+            fallback_text = "#212121"
+            fallback_code_bg = "#EDF3FA"
+            fallback_border = "#D8DEE9"
+            fallback_link = "#2196F3"
 
-                full_html = f"""<!DOCTYPE html>
+            # 内容放进 #content 容器：模板已加载后的更新脚本固定改 #content，
+            # 降级文档若没有该容器，正文更新会因 getElementById 落空而失效
+            return f"""<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -992,17 +1009,11 @@ a {{
 </style>
 </head>
 <body>
+<div id="content">
 {html_content}
+</div>
 </body>
 </html>"""
-            # 文档目录即资源根：预览 HTML 中的相对图片路径（PanzerNote_assets/xxx.ext）由
-            # 后端映射到 https://<vhost>/ 解析。不得改写成 file:// ——
-            # NavigateToString 文档以 https 为基址，Chromium 会拒绝 file:// 子资源。
-            self.preview.set_resource_root(self._base_path or None)
-            self.preview.set_html(full_html)
-
-        # 同步当前折叠状态到预览
-        self._sync_folds_to_preview()
 
     @staticmethod
     def _create_md_parser():

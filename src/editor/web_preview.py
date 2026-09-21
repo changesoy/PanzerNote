@@ -74,8 +74,18 @@ class WebPreviewAdapter(QObject, ABC, metaclass=_AdapterMeta):
         """
 
     @abstractmethod
-    def export_pdf(self, html: str, on_done: Callable[[bytes], None]) -> None:
-        """加载 html 并导出为 PDF，完成时以字节回调（失败回调 b""）。
+    def export_pdf(
+        self,
+        shell_html: str,
+        content_js: str,
+        on_done: Callable[[bytes], None],
+    ) -> None:
+        """导航空壳并注入正文后导出为 PDF，完成时以字节回调（失败回调 b""）。
+
+        shell_html：不含正文的空壳文档（正文区是空的 ``#content`` 容器）；
+        content_js：正文注入脚本 —— 后端在导航空壳前经文档级脚本通道注册
+        （图表库按 shell 声明按需同通道注入），避开 NavigateToString 的
+        2 MB 上限（B 阶段 1′ 方案 A）。
 
         时序与既有实现一致：加载完成后才触发导出。
 
@@ -138,7 +148,9 @@ class _FallbackPreviewAdapter(WebPreviewAdapter):
     def set_resource_root(self, root: str | None) -> None:
         pass
 
-    def export_pdf(self, html: str, on_done: Callable[[bytes], None]) -> None:
+    def export_pdf(
+        self, shell_html: str, content_js: str, on_done: Callable[[bytes], None]
+    ) -> None:
         on_done(b"")
 
     def close(self) -> None:

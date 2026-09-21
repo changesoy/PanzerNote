@@ -34,6 +34,8 @@ from .secure_markdown_renderer import (
     render_markdown_to_safe_html,
     render_plain_text_to_safe_html,
     build_export_html_document,
+    build_export_shell,
+    build_export_content_script,
 )
 from .web_preview import create_preview_adapter
 
@@ -189,12 +191,13 @@ class ExportService:
         返回：离屏预览控件（调用方不应持有，由内部自动清理）
         """
         body_html = ExportService.render_content(content, is_markdown, theme_engine)
-        # PDF 走 WebView2 导航：图表库不能内联（NavigateToString 有 2 MB 上限，
-        # 内联 Mermaid 约 5.6 MB 会直接失败），改由适配器注入 vendor
-        full_html = build_export_html_document(
-            body_html, colors, title, code_font, line_spacing, code_line_spacing,
-            inline_mermaid=False,
+        # PDF 走 WebView2 导航（B 阶段 1′ 方案 A）：NavigateToString 对文档有
+        # 2 MB 上限（内联 Mermaid 约 5.6 MB 会直接失败），故一律只导航空壳，
+        # 正文与图表库经文档级脚本通道注入（该通道实测可承载 5.6 MB）。
+        shell_html = build_export_shell(
+            body_html, colors, title, code_font, line_spacing, code_line_spacing
         )
+        content_js = build_export_content_script(body_html)
 
         # PDF 导出经 Web 预览适配器（离屏实例），后端由 create_preview_adapter 选择
         adapter = create_preview_adapter(parent_widget)
@@ -202,7 +205,7 @@ class ExportService:
         adapter.set_resource_root(resource_root or None)
         if on_notice is not None:
             adapter.export_notice.connect(on_notice)
-        adapter.export_pdf(full_html, on_pdf_generated)
+        adapter.export_pdf(shell_html, content_js, on_pdf_generated)
         return adapter.widget()
 
 

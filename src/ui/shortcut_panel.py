@@ -12,7 +12,7 @@ v1.6.4 改动：
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QLineEdit, QTreeWidget, QTreeWidgetItem,
-    QPushButton, QHeaderView,
+    QPushButton, QHeaderView, QMessageBox,
     QDialog, QKeySequenceEdit, QApplication
 )
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -221,9 +221,17 @@ class ShortcutPanel(ThemeAwareMixin, QWidget):
         self._tree.itemDoubleClicked.connect(self._on_item_double_clicked)
         layout.addWidget(self._tree)
 
+        footer_layout = QHBoxLayout()
         self._footer_label = QLabel("双击快捷键项可自定义 | 灰色项为系统级快捷键")
         self._footer_label.setObjectName("ShortcutFooterLabel")
-        layout.addWidget(self._footer_label)
+        footer_layout.addWidget(self._footer_label)
+        footer_layout.addStretch()
+
+        self._reset_all_btn = QPushButton("重置全部")
+        self._reset_all_btn.setToolTip("把所有快捷键恢复为默认值")
+        self._reset_all_btn.clicked.connect(self._on_reset_all)
+        footer_layout.addWidget(self._reset_all_btn)
+        layout.addLayout(footer_layout)
 
         self._populate_tree()
 
@@ -341,6 +349,26 @@ class ShortcutPanel(ThemeAwareMixin, QWidget):
                 self._edit_callback(action_id, new_shortcut)
 
             self._populate_tree(self._search_input.text())
+
+    def _on_reset_all(self):
+        """把所有快捷键恢复为默认值（先确认：自定义键位会一并丢失）。"""
+        answer = QMessageBox.question(
+            self, "重置全部快捷键",
+            "将把所有快捷键恢复为默认值，已自定义的键位会一并丢失。是否继续？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self._manager.reset_all()
+        self._populate_tree(self._search_input.text())
+
+    def keyPressEvent(self, event):
+        """Esc 关闭本面板：与 Ctrl+/ 的显隐同一状态源（隐藏后 isVisible() 即为假）。"""
+        if event is not None and event.key() == Qt.Key.Key_Escape:
+            self.hide()
+            return
+        super().keyPressEvent(event)
 
     def refresh(self):
         self._populate_tree(self._search_input.text())

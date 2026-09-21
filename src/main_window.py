@@ -867,13 +867,37 @@ class MainWindow(QMainWindow):
 
     def keyPressEvent(self, event):
         """键盘事件"""
-        if event.key() == Qt.Key.Key_Escape and self.view_coordinator.current_view != "editor":
-            self._switch_view("editor")
-            return
+        if event.key() == Qt.Key.Key_Escape:
+            if self.view_coordinator.current_view != "editor":
+                self._switch_view("editor")
+                return
+            if self._close_side_panel_on_escape():
+                return
         if event.key() == Qt.Key.Key_F1:
             self._show_command_palette()
             return
         super().keyPressEvent(event)
+
+    def _close_side_panel_on_escape(self) -> bool:
+        """Esc 收起侧栏子面板（大纲 / 跨文件搜索），返回是否收起了。
+
+        文件树是文件窗口的一部分，不在此列；焦点不在侧栏时也不动 ——
+        用户在编辑器里按 Esc 不该把侧栏带下去。
+        """
+        host = self.side_panel_host
+        if not host.isVisible() or host.current_panel_id() in (None, "filetree"):
+            return False
+        focus = QApplication.focusWidget()
+        if focus is None:
+            return False
+        if focus is not host and not host.isAncestorOf(focus):
+            return False
+        host.hide_panel()
+        tabs = self._focused_editor_tabs() or self.editor_tabs
+        editor = tabs.current_editor()
+        if editor is not None:
+            editor.setFocus()
+        return True
 
     # === 文件操作 ===
 

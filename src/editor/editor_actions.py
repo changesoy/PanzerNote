@@ -591,7 +591,12 @@ class EditorActionsMixin:
                      strip_guard: Optional[Callable[[str], bool]] = None) -> None:
         """行内格式 toggle：选中且已被该标记包裹 → 剥掉标记；否则包裹。
 
-        无选中 → 插入 `标记标记` 骨架，光标落在标记之间直接输入内容。
+        选中内容的**首尾空白留在标记之外**：`** 文字 **` 因定界符不满足
+        CommonMark 的 flanking 规则而整体退化成正文（预览里只会看到字面星号），
+        故标记只包住去空白后的核心。
+        选区外侧紧贴本标记时把标记一并纳入判定 —— 只选内部文字再按一次键即可剥壳。
+        无选中 → 若光标正贴在成对标记上（含着正好落在空标记对 `**|**` 之间）
+        则剥掉该对；否则插入 `标记标记` 骨架、光标落在标记之间直接输入内容。
         link=True 时插入 `[文本]()` 并把光标移到括号内；选中 `[文本](url)`
         整体时还原为 `文本`。strip_guard 用于排除会误剥的相邻标记
         （如斜体不应剥掉 `**` 粗体的半个标记）。
@@ -607,24 +612,115 @@ class EditorActionsMixin:
                     cursor.insertText(f"[{selected}]()")
                     cursor.movePosition(QTextCursor.MoveOperation.Left)
             else:
+                if selected:
+                    selected = self._absorb_outer_markers(
+                        cursor, prefix, suffix)
+                core = selected.strip()
+                lead = selected[:len(selected) - len(selected.lstrip())]
+                trail = selected[len(selected.rstrip()):]
                 stripped = (
-                    selected
-                    and len(selected) >= len(prefix) + len(suffix)
-                    and selected.startswith(prefix)
-                    and selected.endswith(suffix)
-                    and (strip_guard is None or strip_guard(selected))
+                    len(core) >= len(prefix) + len(suffix)
+                    and core.startswith(prefix)
+                    and core.endswith(suffix)
+                    and (strip_guard is None or strip_guard(core))
                 )
                 if stripped:
-                    cursor.insertText(
-                        selected[len(prefix):len(selected) - len(suffix)])
+                    inner = core[len(prefix):len(core) - len(suffix)]
+                    cursor.insertText(f"{lead}{inner}{trail}")
+                    if inner:
+                        # 保留选区：再按一次键即重新包裹（toggle 闭环）
+                        self._select_inserted_tail(cursor, len(trail), len(inner))
+                elif core:
+                    cursor.insertText(f"{lead}{prefix}{core}{suffix}{trail}")
+                    # 选中核心（跳过闭标记与尾部空白）：再按一次键即剥壳
+                    self._select_inserted_tail(cursor,
+                                               len(suffix) + len(trail),
+                                               len(core))
+                elif not selected and self._strip_adjacent_markers(
+                        cursor, prefix, suffix):
+                    pass  # 光标处的成对标记已剥掉
                 else:
-                    cursor.insertText(f"{prefix}{selected}{suffix}")
+                    cursor.insertText(f"{lead}{prefix}{suffix}{trail}")
                     if not selected:
                         # 无选中：光标移到标记之间，直接输入内容
                         cursor.movePosition(QTextCursor.MoveOperation.Left,
                                             QTextCursor.MoveMode.MoveAnchor,
                                             len(suffix))
             self.setTextCursor(cursor)
+
+    @staticmethod
+    def _absorb_outer_markers(cursor: QTextCursor, prefix: str,
+                              suffix: str) -> str:
+        """选区外侧紧贴本标记时把标记纳入选区，返回新的选中文本。
+
+        只选 `文字` 而标记在选区外侧时，若不做这一步就只能手动把星号一起选中
+        才能剥壳；纳入后即可与「选整体」走同一条剥壳判定。
+        吸收的是**整段同类标记串**：`**粗体**` 里只选 `粗体` 必须吃进整对 `**`，
+        只吃最近一个 `*` 会让斜体把粗体削成 `*粗体*`（与「选整体按斜体」的
+        strip_guard 语义冲突）。
+        """
+        doc = cursor.document()
+        if doc is None:
+            return cursor.selectedText()
+        start = cursor.selectionStart()
+        end = cursor.selectionEnd()
+        text_len = doc.characterCount() - 1
+        if start < len(prefix) or end + len(suffix) > text_len:
+            return cursor.selectedText()
+        marker = prefix[0]
+        if marker != suffix[-1]:
+            return cursor.selectedText()
+        run_start = start
+        while run_start > 0 and doc.characterAt(run_start - 1) == marker:
+            run_start -= 1
+        run_end = end
+        while run_end < text_len and doc.characterAt(run_end) == marker:
+            run_end += 1
+        if start - run_start < len(prefix) or run_end - end < len(suffix):
+            return cursor.selectedText()
+        cursor.setPosition(run_start)
+        cursor.setPosition(run_end, QTextCursor.MoveMode.KeepAnchor)
+        return cursor.selectedText()
+
+    @staticmethod
+    def _select_inserted_tail(cursor: QTextCursor, tail_len: int,
+                              length: int) -> None:
+        """回选刚插入内容里、末尾 tail_len 个字符之前的 length 个字符。"""
+        end = cursor.position() - tail_len
+        cursor.setPosition(end - length)
+        cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+
+    @staticmethod
+    def _strip_adjacent_markers(cursor: QTextCursor, prefix: str,
+                               suffix: str) -> bool:
+        """无选中时剥掉光标紧贴的成对标记，返回是否真的剥掉了。
+
+        只认「光标紧贴在开标记之后、或闭标记之前」的成对标记：这是 `**|**`
+        与 `**文字|**` 两种「刚包好、想立刻取消」的姿态。判定只用光标所在块
+        的文本（行内格式不跨段落），并排除更长同类标记串的一半
+        （斜体不应把 `**粗体**` 削成 `*粗体*`）。
+        """
+        block = cursor.block()
+        line = block.text()
+        base = block.position()
+        col = cursor.position() - base
+        prefix_start = line.rfind(prefix, 0, col)
+        suffix_start = line.find(suffix, col)
+        if prefix_start < 0 or suffix_start < 0:
+            return False
+        if col != prefix_start + len(prefix) and col != suffix_start:
+            return False
+        if prefix_start > 0 and line[prefix_start - 1] == prefix[0]:
+            return False
+        after_suffix = suffix_start + len(suffix)
+        if after_suffix < len(line) and line[after_suffix] == suffix[0]:
+            return False
+        cursor.setPosition(base + prefix_start)
+        cursor.setPosition(base + after_suffix,
+                           QTextCursor.MoveMode.KeepAnchor)
+        cursor.insertText(line[prefix_start + len(prefix):suffix_start])
+        cursor.setPosition(base + col - len(prefix))
+        return True
 
     def format_bold(self) -> None:
         self._wrap_inline("**", "**")

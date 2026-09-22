@@ -196,6 +196,15 @@ class ShortcutPanel(ThemeAwareMixin, QWidget):
         self._hint_label.setObjectName("ShortcutHintLabel")
         header_layout.addWidget(self._hint_label)
 
+        # 重置全部：小号纯文字按钮（无边框/无底色），放在标题行末尾 —— 醒目度低、
+        # 离列表交互区远，避免误触（此前是页脚上的实体按钮，过于抢眼）。
+        self._reset_all_btn = QPushButton("重置全部")
+        self._reset_all_btn.setObjectName("ShortcutResetButton")
+        self._reset_all_btn.setFlat(True)
+        self._reset_all_btn.setToolTip("把所有快捷键恢复为默认值")
+        self._reset_all_btn.clicked.connect(self._on_reset_all)
+        header_layout.addWidget(self._reset_all_btn)
+
         layout.addLayout(header_layout)
 
         search_layout = QHBoxLayout()
@@ -221,17 +230,9 @@ class ShortcutPanel(ThemeAwareMixin, QWidget):
         self._tree.itemDoubleClicked.connect(self._on_item_double_clicked)
         layout.addWidget(self._tree)
 
-        footer_layout = QHBoxLayout()
         self._footer_label = QLabel("双击快捷键项可自定义 | 灰色项为系统级快捷键")
         self._footer_label.setObjectName("ShortcutFooterLabel")
-        footer_layout.addWidget(self._footer_label)
-        footer_layout.addStretch()
-
-        self._reset_all_btn = QPushButton("重置全部")
-        self._reset_all_btn.setToolTip("把所有快捷键恢复为默认值")
-        self._reset_all_btn.clicked.connect(self._on_reset_all)
-        footer_layout.addWidget(self._reset_all_btn)
-        layout.addLayout(footer_layout)
+        layout.addWidget(self._footer_label)
 
         self._populate_tree()
 
@@ -259,6 +260,18 @@ class ShortcutPanel(ThemeAwareMixin, QWidget):
         QLabel#ShortcutFooterLabel {{
             color: {text_secondary};
             background: transparent;
+        }}
+
+        QPushButton#ShortcutResetButton {{
+            color: {text_secondary};
+            background: transparent;
+            border: none;
+            padding: 2px 6px;
+            font-size: 12px;
+        }}
+
+        QPushButton#ShortcutResetButton:hover {{
+            color: {text_primary};
         }}
 
         QHeaderView::section {{

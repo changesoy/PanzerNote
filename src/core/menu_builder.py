@@ -122,9 +122,12 @@ class MenuBuilder:
                 self._add_action(inline_menu, "插入链接", QKeySequence("Ctrl+Alt+K"), mw._format_link, "edit.format_link", "编辑")
             heading_menu = md_menu.addMenu("标题")
             if heading_menu is not None:
+                level_names = ("一级标题", "二级标题", "三级标题",
+                               "四级标题", "五级标题", "六级标题")
                 for lvl in range(1, 7):
                     self._add_action(
-                        heading_menu, f"标题 {lvl}", QKeySequence(f"Ctrl+Alt+{lvl}"),
+                        heading_menu, level_names[lvl - 1],
+                        QKeySequence(f"Ctrl+Alt+{lvl}"),
                         lambda checked=False, l=lvl: mw._set_heading_level(l),
                         f"edit.heading_{lvl}", "编辑",
                     )

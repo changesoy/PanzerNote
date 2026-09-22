@@ -42,6 +42,22 @@ class AlwaysExpandableModel(QFileSystemModel):
             return True
         return False
 
+    def canDropMimeData(self, data, action, row, column, parent):
+        """让「标签拖拽」也能被接受 —— 仅为让 QTreeView 画出原生落点指示线。
+
+        QAbstractItemView 只在模型 canDropMimeData 通过时才绘制落点指示：树内
+        拖拽带 text/uri-list 天然通过，标签拖拽只带自定义 MIME 会被拒，于是
+        同一个「拖到文件夹上」的动作在文件树里有落点线、拖标签时却没有。
+        实际落盘由 DroppableTreeView.dropEvent 接管，不走模型的 dropMimeData。
+        """
+        if data is not None and (
+            data.hasFormat(MIME_TAB_FILEPATH) or data.hasFormat(MIME_TAB_ID)
+        ):
+            if action == Qt.DropAction.IgnoreAction or not parent.isValid():
+                return False
+            return self.isDir(parent)
+        return super().canDropMimeData(data, action, row, column, parent)
+
 
 class ExternalFileLabel(QLabel):
 
@@ -94,13 +110,46 @@ class DroppableTreeView(QTreeView):
             return "copy"
         return None
 
-    def _handle_saved_tab_drop(self, src_filepath: str, dest_folder: str):
+    def _schedule_drop(self, src_filepath: str, dest_folder: str) -> None:
+        """拖放结束后再异步询问：模态对话框不能嵌在（Windows 原生）拖拽事件循环里。"""
+        QTimer.singleShot(
+            0, lambda: self._ask_and_request_drop(src_filepath, dest_folder))
+
+    def _ask_and_request_drop(self, src_filepath: str, dest_folder: str):
         """拖放结束后（异步）询问移动/复制并发出对应请求。"""
         action = self._ask_move_or_copy(os.path.basename(src_filepath), dest_folder)
         if action == "move":
             self.file_move_requested.emit(src_filepath, dest_folder)
         elif action == "copy":
             self.file_copy_requested.emit(src_filepath, dest_folder)
+
+    @staticmethod
+    def _can_drop_into(src_filepath: str, dest_folder: str) -> bool:
+        """目标文件夹能否接收该条目。
+
+        排除「原地放下」（父目录就是目标）与「文件夹放进自己的子孙目录」——
+        后者会把自己的父链搬断。
+        """
+        src = os.path.abspath(src_filepath)
+        dest = os.path.abspath(dest_folder)
+        if os.path.dirname(src) == dest or src == dest:
+            return False
+        return not dest.startswith(src + os.sep)
+
+    def _dest_folder_at(self, pos) -> Optional[str]:
+        """落点对应的目标文件夹：命中文件夹用它本身，命中文件用其父目录，
+        空白处用树根。"""
+        model = self.model()
+        if not isinstance(model, QFileSystemModel):
+            return None
+        index = self.indexAt(pos)
+        if index.isValid():
+            if model.isDir(index):
+                return model.filePath(index)
+            parent_idx = index.parent()
+            if parent_idx.isValid():
+                return model.filePath(parent_idx)
+        return model.rootPath()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -125,60 +174,34 @@ class DroppableTreeView(QTreeView):
 
     def dragMoveEvent(self, event):
         if self._is_tab_drag(event.mimeData()):
-            # PyQt6 拖拽事件没有 pos()（仅 position() 返回 QPointF）
-            index = self.indexAt(event.position().toPoint())
-            model = self.model()
-            if index.isValid() and model:
-                if isinstance(model, QFileSystemModel) and model.isDir(index):
-                    event.acceptProposedAction()
-                    return
-                parent_idx = index.parent()
-                if parent_idx.isValid():
-                    event.acceptProposedAction()
-                    return
+            # 先让基类走一遍：落点指示线由基类计算并绘制（要求模型接受该拖拽
+            # 数据，见 AlwaysExpandableModel.canDropMimeData）。落点判定与落盘
+            # 仍由本视图 dropEvent 负责，这里只补「画线」这一半。
+            super().dragMoveEvent(event)
             event.acceptProposedAction()
         else:
             super().dragMoveEvent(event)
 
     def dropEvent(self, event):
-        if self._is_tab_drag(event.mimeData()):
-            data = event.mimeData().data(MIME_TAB_FILEPATH)
+        mime = event.mimeData()
+        pos = event.position().toPoint()
+        if self._is_tab_drag(mime):
+            data = mime.data(MIME_TAB_FILEPATH)
             src_filepath = bytes(data).decode('utf-8')
             # 3.5.11：未命名标签无 filepath，通过 tab_id 定位源标签
             tab_id = None
-            tab_id_data = event.mimeData().data(MIME_TAB_ID)
+            tab_id_data = mime.data(MIME_TAB_ID)
             if tab_id_data and not tab_id_data.isEmpty():
                 try:
                     tab_id = int(bytes(tab_id_data).decode('utf-8'))
                 except (ValueError, UnicodeDecodeError):
                     tab_id = None
 
-            index = self.indexAt(event.position().toPoint())
-            model = self.model()
-            dest_folder = None
-
-            if index.isValid() and model and isinstance(model, QFileSystemModel):
-                if model.isDir(index):
-                    dest_folder = model.filePath(index)
-                else:
-                    parent_idx = index.parent()
-                    if parent_idx.isValid():
-                        dest_folder = model.filePath(parent_idx)
-                    else:
-                        dest_folder = model.rootPath()
-            else:
-                if model and isinstance(model, QFileSystemModel):
-                    dest_folder = model.rootPath()
-
+            dest_folder = self._dest_folder_at(pos)
             if dest_folder:
                 if src_filepath:
-                    if os.path.dirname(os.path.abspath(src_filepath)) != os.path.abspath(dest_folder):
-                        # 先完成拖放事件，再异步弹窗询问：
-                        # 模态对话框不能嵌套在（Windows 原生）拖拽事件循环内。
-                        QTimer.singleShot(
-                            0,
-                            lambda: self._handle_saved_tab_drop(src_filepath, dest_folder),
-                        )
+                    if self._can_drop_into(src_filepath, dest_folder):
+                        self._schedule_drop(src_filepath, dest_folder)
                 elif tab_id is not None:
                     # 未命名标签拖到文件树 = 落盘保存（源面板从拖拽发起者父级取）
                     source = event.source()
@@ -187,8 +210,24 @@ class DroppableTreeView(QTreeView):
                         self.untitled_save_requested.emit(source_tabs, tab_id, dest_folder)
 
             event.acceptProposedAction()
-        else:
-            super().dropEvent(event)
+            return
+
+        if event.source() is self:
+            # 树内拖拽：必须由本视图接管。QFileSystemModel 在 readOnly 放开后能自己
+            # 完成落盘（rename/copy），那条默认路径既不询问用户、也不做图片资源
+            # 迁移，直接跳过会让两种拖拽行为不一致。
+            dest_folder = self._dest_folder_at(pos)
+            if dest_folder:
+                for url in mime.urls():
+                    src_filepath = url.toLocalFile()
+                    if src_filepath and self._can_drop_into(src_filepath, dest_folder):
+                        self._schedule_drop(src_filepath, dest_folder)
+                        event.acceptProposedAction()
+                        return
+            event.ignore()
+            return
+
+        super().dropEvent(event)
 
 
 class FileTreeWidget(ThemeAwareMixin, QWidget):
@@ -245,8 +284,10 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
         ])
         self.model.setNameFilterDisables(False)
 
-        # QFileSystemModel.readOnly 默认为 True，会导致 dropMimeData 直接返回 False，
-        # 树内拖拽（不同子文件夹之间移动/复制）完全无反应。放开只读以启用拖放。
+        # QFileSystemModel.readOnly 默认为 True 时条目不接受拖放（ItemIsDropEnabled
+        # 不置位），树内拖拽连落点指示都不会画。放开只读仅为「接受拖放」这件事：
+        # 实际落盘由 DroppableTreeView.dropEvent 接管（询问移动/复制 + 资源迁移），
+        # 不再复用模型的 dropMimeData。
         self.model.setReadOnly(False)
 
         self.tree_view = DroppableTreeView()

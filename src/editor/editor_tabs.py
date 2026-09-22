@@ -2533,6 +2533,13 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         for editor in self._iter_editors():
             editor.set_wrap_mode(mode)
 
+    def set_preview_wrap_mode_all(self, mode: str):
+        """把「预览行宽」设置广播到所有 Markdown 预览（与编辑区行宽互不影响）。"""
+        for i in range(self.count()):
+            widget = self.widget(i)
+            if isinstance(widget, MarkdownPreviewWidget):
+                widget.set_preview_wrap_mode(mode)
+
     def toggle_md_preview(self):
         """切换当前MD标签的预览"""
         widget = self.currentWidget()

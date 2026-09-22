@@ -185,10 +185,11 @@ body {{
     background: transparent !important;
 }}
 
-/* ========== 行宽模式：跟随编辑区「限制行宽」 ========== */
-/* 编辑区在「限制行宽」下把一切内容严格限制在面板宽度内（不出现横向滚动）；
-   预览此前只有正文会折行，长代码行只在代码块内横向滚动、宽表格会把整页顶宽，
-   两边观感不一致。class 由 Python 侧写入（见 _wrap_mode_js）。 */
+/* ========== 预览行宽：「记事本设置 → 预览行宽」 ========== */
+/* 编辑区「限制行宽」把一切内容严格限制在面板宽度内（不出现横向滚动）；预览默认
+   只让正文折行，长代码行只在代码块内横向滚动、宽表格会把整页顶宽。预览行宽与
+   编辑区行宽模式**各自独立**（各有选项，用户可自主组合），class 由 Python 侧按
+   设置写入（见 _wrap_mode_js）。 */
 body.limit-width .code-pre {{
     white-space: pre-wrap;
     overflow-wrap: anywhere;
@@ -620,11 +621,13 @@ def _css_vars_update_js(vars_map: dict[str, str]) -> str:
 
 
 def _wrap_mode_js(mode: str) -> str:
-    """生成「把行宽模式写到预览 body class」的 JS。
+    """生成「把预览行宽写到 body class」的 JS。
 
-    编辑区的「限制行宽 / 不换行」是 QPlainTextEdit 的换行开关，预览侧没有等价
-    开关 —— 长代码行此前只在代码块内横向滚动，与编辑区「限制行宽」下处处折行
-    的观感不一致。模板里以 body.limit-width 承载对应 CSS（见 PREVIEW_HTML_TEMPLATE）。
+    取值与编辑区同形（"limit_width" / "no_wrap"），但来自**预览自己的设置**
+    （记事本设置 →「预览行宽」，默认限制行宽），与编辑区行宽模式互不影响：
+    编辑区的开关是 QPlainTextEdit 的换行行为，预览这一侧是网页排版 —— 长代码行
+    默认只在代码块内横向滚动、宽表格会把整页顶宽，「限制行宽」下改为按面板宽度
+    折行。模板里以 body.limit-width 承载对应 CSS（见 PREVIEW_HTML_TEMPLATE）。
     """
     return (
         "document.body.classList.toggle('limit-width',"
@@ -661,6 +664,11 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self._pending_async_task: Optional[str] = None
         self._last_render_text: str = ""
         self._last_render_html: str = ""
+        # 空壳导航时登记的内容，供 _on_load_finished 补推（见 _push_to_preview）
+        self._pending_shell_content: str = ""
+        # 预览行宽（自己的设置，与编辑区行宽模式互不影响），见 _wrap_mode_js
+        self._preview_wrap_mode: str = self.config.get_editor_setting(
+            "preview_wrap_mode", "limit_width")
         self._md_parser = self._create_md_parser()
         self._reset_template_state()
         self._preview_dirty = True
@@ -707,7 +715,8 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         # 之后没有内容更新，若不补推正文区就一直空白。补推走模板已加载分支：
         # 注入载荷自带当前 #content 的渲染（正文 + 公式 + 图表一次到位），
         # 与后续内容更新脚本互为幂等（_mermaid_loaded 保证同一 JS 上下文只注入一次）。
-        self._push_to_preview(self._last_render_html)
+        self._push_to_preview(
+            self._pending_shell_content or self._last_render_html)
 
     def _reset_template_state(self) -> None:
         """整页（重新）加载前作废「模板已加载」与「图表库已注入」两项状态。
@@ -717,6 +726,8 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         """
         self._html_template_loaded = False
         self._mermaid_loaded = False
+        # 待补推内容同样属于上一轮上下文，一并作废（新的空壳导航会重新登记）
+        self._pending_shell_content = ""
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
@@ -831,11 +842,14 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         # 折叠状态变更 → 同步预览（3.5.8 批次 5：监听编辑器转发的有效折叠信号，
         # attach 共享 Document 后仍指向 Document 级 FoldingManager，连接不漂移）
         self.editor.fold_state_changed.connect(self._sync_folds_to_preview)
-        # 行宽模式（菜单「换行 → 不换行 / 限制行宽」、编辑器设置）→ 预览跟随
-        self.editor.wrap_mode_changed.connect(self._on_wrap_mode_changed)
+        # 注意：**不**监听 editor.wrap_mode_changed —— 预览行宽是自己的设置，
+        # 由「记事本设置 →「预览行宽」」经 set_preview_wrap_mode 广播（见
+        # EditorTabWidget.set_preview_wrap_mode_all），跟随编辑区会剥夺用户
+        # 单独选择的权利。
 
-    def _on_wrap_mode_changed(self, mode: str) -> None:
-        """同步行宽模式到预览：模板未加载时不用管，首次推送会带上。"""
+    def set_preview_wrap_mode(self, mode: str) -> None:
+        """应用「预览行宽」设置：模板未加载时不用管，首次推送会带上。"""
+        self._preview_wrap_mode = mode
         if not self._html_template_loaded:
             return
         self.preview.run_javascript(_wrap_mode_js(mode))
@@ -954,7 +968,7 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             at = "true" if at_top else "false"
             ab = "true" if at_bottom else "false"
             js = (
-                f"{_wrap_mode_js(self.editor.get_wrap_mode())}"
+                f"{_wrap_mode_js(self._preview_wrap_mode)}"
                 f"document.getElementById('content').innerHTML = {escaped};"
                 "_nodesVersion = null; _cachedNodes = null;"
                 # 公式与图表都是客户端展开（不经 Python），内容变换后各自重跑
@@ -979,6 +993,11 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             # 1.8 MB 阈值卡死；之后的每次更新走同一条 run_javascript 路径，
             # 不做大小阈值切换。
             self.preview.set_resource_root(self._base_path or None)
+            # 记下本次要显示的内容：补推只能靠 _on_load_finished，而它拿
+            # _last_render_html 是不完整的 —— 异步高亮完成早于空壳加载时会走
+            # 本分支，其结果不进 _last_render_html，按旧值补推会把高亮结果丢掉
+            # （代码块一直无配色）。存最近一次请求的内容即可覆盖该情形。
+            self._pending_shell_content = html_content
             self.preview.set_html(self._build_full_html(""))
 
         # 同步当前折叠状态到预览

@@ -127,9 +127,13 @@ async def flow(host: QWidget) -> None:
     def _done(data: bytes) -> None:
         box["data"] = data
 
+    # 导出接口是 (shell_html, content_js, on_done)：空壳文档 + 正文注入脚本，
+    # 正文经文档级脚本通道写入 #content（绕开 NavigateToString 的 2 MB 上限）。
     exp.export_pdf(
-        "<html><head><meta charset='utf-8'></head><body><h1>C3A PDF</h1>"
-        "<p>中文段落。</p></body></html>",
+        "<html><head><meta charset='utf-8'></head>"
+        "<body><div id='content'></div></body></html>",
+        "document.getElementById('content').innerHTML = "
+        "'<h1>C3A PDF</h1><p>中文段落。</p>';",
         _done,
     )
     for _ in range(300):

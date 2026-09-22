@@ -98,6 +98,8 @@ class SettingsActionController:
             "line_spacing": self._config.get_line_spacing(),
             "code_line_spacing": self._config.get_code_line_spacing(),
             "wrap_mode": self._config.get_editor_setting("wrap_mode", "no_wrap"),
+            "preview_wrap_mode": self._config.get_editor_setting(
+                "preview_wrap_mode", "limit_width"),
             "auto_save_interval": self._config.get_editor_setting("auto_save_interval", 30),
             "enable_completion": self._config.get_editor_setting("enable_completion", False),
         }
@@ -118,6 +120,7 @@ class SettingsActionController:
         # 三项共用一次整页变量刷新，避免逐项重复重建
         self._editor_tabs.refresh_preview_typography_all()
         self._editor_tabs.set_wrap_mode_all(editor["wrap_mode"])
+        self._editor_tabs.set_preview_wrap_mode_all(editor["preview_wrap_mode"])
         self._editor_tabs.apply_auto_minimap_all()
         self._editor_tabs.update_indent_settings_all()
         self._editor_tabs.set_completion_enabled_all(editor.get("enable_completion", False))

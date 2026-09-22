@@ -85,8 +85,6 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
     # 转发 Document 级 FoldingManager 的 fold_state_changed；独立时转发本地）。
     # MarkdownPreviewWidget 与重绘统一监听本信号，避免 attach 前后连接对象漂移。
     fold_state_changed = pyqtSignal()
-    # 行宽模式变化（"no_wrap" / "limit_width"）：分屏预览据此让内容宽度限制跟随
-    wrap_mode_changed = pyqtSignal(str)
 
     # 需要自动增加缩进的行尾字符（按语言）
     INDENT_TRIGGERS = {
@@ -737,15 +735,12 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
     # ═══════════════════ 行宽模式 ═══════════════════
 
     def set_wrap_mode(self, mode: str):
-        """设置行宽模式"""
-        changed = mode != self._wrap_mode
+        """设置行宽模式（编辑器自身；Markdown 预览的行宽是独立设置）"""
         self._wrap_mode = mode
         if mode == "limit_width":
             self.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
         else:
             self.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
-        if changed:
-            self.wrap_mode_changed.emit(mode)
 
     def get_wrap_mode(self) -> str:
         return self._wrap_mode

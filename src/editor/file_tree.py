@@ -282,14 +282,24 @@ class DroppableTreeView(QTreeView):
             # 树内拖拽：必须由本视图接管。QFileSystemModel 在 readOnly 放开后能自己
             # 完成落盘（rename/copy），那条默认路径既不询问用户、也不做图片资源
             # 迁移，直接跳过会让两种拖拽行为不一致。
+            # 例外：拖的是**文件夹**时仍交回模型 —— 应用层入口只支持文件
+            # （move_file_to_folder / copy_file_to_folder 首行要求 os.path.isfile），
+            # 接管会让「拖文件夹」变成问完就静默无动作（弹窗收不到任何结果），
+            # 而模型本来就能完成目录 rename，这是本次接管前就有的能力。落点守卫
+            # （原地放下 / 拖进自己的子孙）仍由这里先判，模型那侧不认这些。
             dest_folder = self._dest_folder_at(pos)
             if dest_folder:
-                for url in mime.urls():
-                    src_filepath = url.toLocalFile()
-                    if src_filepath and self._can_drop_into(src_filepath, dest_folder):
-                        self._schedule_drop(src_filepath, dest_folder)
-                        event.acceptProposedAction()
+                droppable = [
+                    path for path in (url.toLocalFile() for url in mime.urls())
+                    if path and self._can_drop_into(path, dest_folder)
+                ]
+                if droppable:
+                    if any(os.path.isdir(path) for path in droppable):
+                        super().dropEvent(event)
                         return
+                    self._schedule_drop(droppable[0], dest_folder)
+                    event.acceptProposedAction()
+                    return
             event.ignore()
             return
 

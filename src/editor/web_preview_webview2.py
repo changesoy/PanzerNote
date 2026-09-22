@@ -148,11 +148,15 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
         self._nav_token: object | None = None
         # close() 幂等标志：导出完成后与预览 teardown 都可能触发释放
         self._closed = False
-        # 导航归属标记（M5）：NavigationCompleted 是所有导航的完成通知（含
+        # 导航归属计数（M5）：NavigationCompleted 是所有导航的完成通知（含
         # controller 创建时的初始空白文档），只有本适配器经 _navigate 发起的
         # 导航才 emit load_finished —— 否则消费方会在模板尚未 set_html 时
-        # 永久置位，预览静默空白
-        self._navigating = False
+        # 永久置位，预览静默空白。
+        # 用**计数**而不是布尔标志：上一轮空壳尚未完成时又发起一轮（开文件后
+        # 立刻输入 / 切主题）时，布尔标志会让第一轮完成就把它清掉，真正上屏的
+        # 第二轮反被当成「非本适配器发起」而不 emit，消费方因此失去唯一的补推
+        # 时机（预览一直空白）。计数到 0 才算「最后一轮完成」。
+        self._outstanding_nav = 0
         # L5：就绪前的 set_visible 期望值（初始化完成时按它显示）
         self._pending_visible = True
 
@@ -429,7 +433,7 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
         # 每轮导航重置异步就绪门：图表文档要等页面回传就绪信号才打印
         self._async_ready = False
         self._await_async_render = needs_async_render(html)
-        self._navigating = True
+        self._outstanding_nav += 1
         _log.debug("WebView2 导航：html %d 字符，资源根=%s", len(html), self._resource_root)
         self._webview.navigate_to_string(self._inject(html))
 
@@ -467,7 +471,7 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
             ok = bool(args.is_success)
         except Exception:  # noqa: BLE001
             ok = True
-        if not self._navigating:
+        if self._outstanding_nav <= 0:
             # 非本适配器发起的导航（controller 创建时的初始空白文档、页面内
             # 导航等）：只驱动导出的导航门，不 emit —— 消费方收到 ok=True 会
             # 永久置位「模板已加载」，届时预览静默空白（M5）
@@ -475,7 +479,14 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
             if self._nav_event is not None:
                 self._nav_event.set()
             return
-        self._navigating = False
+        self._outstanding_nav -= 1
+        if self._outstanding_nav > 0:
+            # 还有更晚发起的导航在飞：此时 emit 会让消费方把正文写进即将被替换
+            # 的文档，而真正上屏的那一轮完成时不再 emit，预览就一直空着。
+            # 等最后一轮完成再 emit（消费方的补推时机只有这一次）。
+            _log.debug("WebView2 导航完成（仍有 %d 轮在飞）: success=%s",
+                       self._outstanding_nav, ok)
+            return
         _log.debug("WebView2 导航完成: success=%s", ok)
         if self._nav_event is not None:
             self._nav_event.set()
@@ -548,28 +559,36 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
         注册顺序即执行顺序：先 vendor（图表库定义），再正文注入脚本（挂
         DOMContentLoaded，注入 #content 并渲染公式/图表、回传就绪）。
 
-        注入失败不致命：vendor 缺失时图表渲染无产出且不回传就绪，就绪门等
-        超时后降级打印并提示，图表位置留空但正文照常导出；正文脚本失败时
-        正文区保持空白（导航已成功，打印产物为空壳）。
+        两次注册各自独立兜底，**不共用一个 try**：vendor 注册失败（约 5.6 MB
+        载荷走 WinRT RPC，失败并非不可能）时若连带跳过正文注册，导航出来的
+        空壳会一直空着 —— 有图表时表现为「就绪门超时、提示可能缺图表」的
+        空文档，无图表时连提示都没有，用户只看到「已导出」加一份空白 PDF。
+        vendor 缺失本身只影响图表：图表位置留空、正文照常；正文注册失败才
+        是正文区空白。
         """
         webview = self._webview
         if webview is None:
             return
-        try:
-            if needs_vendor_injection(shell_html):
+        if needs_vendor_injection(shell_html):
+            try:
                 vendor = mermaid_render.vendor_js()
                 if vendor:
                     await webview.add_script_to_execute_on_document_created_async(
                         vendor
                     )
-            if content_js:
+            except Exception:  # noqa: BLE001
+                _log.warning(
+                    "图表库注入失败，导出的 PDF 可能缺少图表", exc_info=True
+                )
+        if content_js:
+            try:
                 await webview.add_script_to_execute_on_document_created_async(
                     content_js
                 )
-        except Exception:  # noqa: BLE001
-            _log.warning(
-                "图表库/正文注入失败，导出的 PDF 可能缺少内容或图表", exc_info=True
-            )
+            except Exception:  # noqa: BLE001
+                _log.error(
+                    "正文注入脚本注册失败，导出的 PDF 正文区将为空", exc_info=True
+                )
 
     async def _print_current(self, on_done: Callable[[bytes], None]) -> None:
         """等待当前导航完成 → 导出 PDF → 以 bytes 回调 → 释放自身。"""

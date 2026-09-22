@@ -45,6 +45,8 @@ class SettingsStore:
             "show_line_numbers": True,
             "auto_wrap": False,
             "wrap_mode": "no_wrap",
+            # 预览行宽：与编辑区行宽模式各自独立（用户要求可自主选择），默认限制
+            "preview_wrap_mode": "limit_width",
             "highlight_current_line": True,
             "auto_save_interval": 30,
             "max_history_count": 40,

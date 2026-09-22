@@ -641,11 +641,14 @@ class EditorActionsMixin:
                     pass  # 光标处的成对标记已剥掉
                 else:
                     cursor.insertText(f"{lead}{prefix}{suffix}{trail}")
-                    if not selected:
-                        # 无选中：光标移到标记之间，直接输入内容
-                        cursor.movePosition(QTextCursor.MoveOperation.Left,
-                                            QTextCursor.MoveMode.MoveAnchor,
-                                            len(suffix))
+                    if not core:
+                        # 没有实质内容（无选中，或选中的只是空白）：光标移到标记
+                        # 之间，直接输入内容。判据用 core 而非 selected —— 纯空白
+                        # 选区的 core 为空、selected 不为空，用后者会漏掉这一步；
+                        # 落点要把尾部空白与闭标记都退掉，否则选中的是空白时会把
+                        # 光标留在尾部空白里。
+                        cursor.setPosition(
+                            cursor.position() - len(trail) - len(suffix))
             self.setTextCursor(cursor)
 
     @staticmethod
@@ -699,17 +702,32 @@ class EditorActionsMixin:
         与 `**文字|**` 两种「刚包好、想立刻取消」的姿态。判定只用光标所在块
         的文本（行内格式不跨段落），并排除更长同类标记串的一半
         （斜体不应把 `**粗体**` 削成 `*粗体*`）。
+
+        标记对是**从左往右两两配对**得到的，只认包住光标的那一对。不能直接
+        取「光标前最近的标记 + 光标后最近的标记」：那样上一段的闭标记与下一段
+        的开标记会被凑成一对，把相邻两段同类格式合并
+        （`**a** **b**` 光标贴中间按一次加粗 → `**a b**`）。
         """
         block = cursor.block()
         line = block.text()
         base = block.position()
         col = cursor.position() - base
-        prefix_start = line.rfind(prefix, 0, col)
-        suffix_start = line.find(suffix, col)
-        if prefix_start < 0 or suffix_start < 0:
+        pair = None
+        search = 0
+        while True:
+            start = line.find(prefix, search)
+            if start < 0:
+                break
+            end = line.find(suffix, start + len(prefix))
+            if end < 0:
+                break
+            if col == start + len(prefix) or col == end:
+                pair = (start, end)
+                break
+            search = end + len(suffix)
+        if pair is None:
             return False
-        if col != prefix_start + len(prefix) and col != suffix_start:
-            return False
+        prefix_start, suffix_start = pair
         if prefix_start > 0 and line[prefix_start - 1] == prefix[0]:
             return False
         after_suffix = suffix_start + len(suffix)

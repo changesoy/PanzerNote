@@ -425,8 +425,11 @@ QToolTip {{
 def _b_tree_item(s: Mapping[str, Any]) -> str:
     # B4：Tree/List 状态（B3 文档 2.1 组件 12 含 QListView/QListWidget）。
     # QListWidget 是 QListView 子类，QTreeView 选择器不覆盖它，故一并列出。
-    # B6：补 pressed 态（按下变深，VS Code 列表交互）与拖拽 drop indicator
-    # （8.1 拖拽视觉：目标落点线）。drop-indicator 仅 QTreeView 支持样式化。
+    # B6：补 pressed 态（按下变深，VS Code 列表交互）。
+    # 拖拽落点提示不走 QSS：Qt 没有 drop-indicator 这个可样式化的子控件（写了
+    # 也不生效——实测原生指示器仍按系统调色板画整圈边框、不随主题走），改由
+    # 文件树视图按本 recipe 的 drop_indicator 自绘整行浅色高亮，
+    # 见 src/editor/file_tree.py::DroppableTreeView.drawRow。
     #
     # B6 修正（渲染实测）："QTreeView, QListView, QListWidget::xxx" 逗号混排
     # 会让 ::xxx 只附着最后一项，前面的退化为裸类型选择器——子控件规则
@@ -469,10 +472,6 @@ def _b_tree_item(s: Mapping[str, Any]) -> str:
         parts.append(f"""
 {v}::item:pressed:!selected {{
     background-color: {s['pressed_background']};
-}}""")
-    parts.append(f"""
-QTreeView::drop-indicator {{
-    border: 2px solid {s['drop_indicator']};
 }}""")
     return "\n".join(parts) + "\n"
 

@@ -52,6 +52,19 @@ class ExportActionController:
             "code_line_spacing": config.get_code_line_spacing(),
         }
 
+    def _document_dir(self) -> str:
+        """当前文档所在目录（导出时作相对资源根解析本地图片）。
+
+        未保存 / 未 attach 的文档返回空串：此时没有可解析的相对图片基准，
+        由 ExportService 按「不声明资源根」处理。
+        """
+        widget = self._editor_tabs.currentWidget()
+        shared = getattr(widget, "shared_doc", None)
+        filepath = getattr(shared, "filepath", None)
+        if not isinstance(filepath, str) or not filepath:
+            return ""
+        return os.path.dirname(os.path.abspath(filepath))
+
     def export_pdf(self) -> None:
         """导出当前文档为 PDF（经 WebView2 print_to_pdf_async 异步生成）。"""
         from .export_service import ExportService
@@ -85,6 +98,7 @@ class ExportActionController:
                 v2_export_colors(self._theme_engine),
                 theme_engine=self._theme_engine,
                 on_notice=on_export_notice,
+                resource_root=self._document_dir(),
                 **self._typography(),
             )
         except RuntimeError as e:
@@ -130,6 +144,9 @@ class ExportActionController:
         is_md = ExportService.is_markdown_content(content, widget_type)
 
         try:
+            # 缺图提示先收集起来：M4 语义是"导出成功但降级"，不能被后面的
+            # 「已导出」摘要盖掉，也不能静默吞掉，故合并成一条消息给用户。
+            notices: list[str] = []
             ExportService.export_html(
                 content,
                 is_md,
@@ -137,10 +154,13 @@ class ExportActionController:
                 v2_export_colors(self._theme_engine),
                 file_guard=self._editor_tabs.config.get_file_guard(),
                 theme_engine=self._theme_engine,
+                resource_root=self._document_dir(),
+                on_notice=notices.append,
                 **self._typography(),
             )
+            done = f"已导出HTML: {os.path.basename(filepath)}"
             self._secretary.show_message(
-                f"已导出HTML: {os.path.basename(filepath)}"
+                "；".join(notices + [done]) if notices else done
             )
         except Exception as e:
             QMessageBox.warning(self._parent_widget, "导出失败", str(e))

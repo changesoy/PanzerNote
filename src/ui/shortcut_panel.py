@@ -12,7 +12,7 @@ v1.6.4 改动：
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QLineEdit, QTreeWidget, QTreeWidgetItem,
-    QPushButton, QHeaderView,
+    QPushButton, QHeaderView, QMessageBox,
     QDialog, QKeySequenceEdit, QApplication
 )
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -196,6 +196,15 @@ class ShortcutPanel(ThemeAwareMixin, QWidget):
         self._hint_label.setObjectName("ShortcutHintLabel")
         header_layout.addWidget(self._hint_label)
 
+        # 重置全部：小号纯文字按钮（无边框/无底色），放在标题行末尾 —— 醒目度低、
+        # 离列表交互区远，避免误触（此前是页脚上的实体按钮，过于抢眼）。
+        self._reset_all_btn = QPushButton("重置全部")
+        self._reset_all_btn.setObjectName("ShortcutResetButton")
+        self._reset_all_btn.setFlat(True)
+        self._reset_all_btn.setToolTip("把所有快捷键恢复为默认值")
+        self._reset_all_btn.clicked.connect(self._on_reset_all)
+        header_layout.addWidget(self._reset_all_btn)
+
         layout.addLayout(header_layout)
 
         search_layout = QHBoxLayout()
@@ -251,6 +260,18 @@ class ShortcutPanel(ThemeAwareMixin, QWidget):
         QLabel#ShortcutFooterLabel {{
             color: {text_secondary};
             background: transparent;
+        }}
+
+        QPushButton#ShortcutResetButton {{
+            color: {text_secondary};
+            background: transparent;
+            border: none;
+            padding: 2px 6px;
+            font-size: 12px;
+        }}
+
+        QPushButton#ShortcutResetButton:hover {{
+            color: {text_primary};
         }}
 
         QHeaderView::section {{
@@ -341,6 +362,26 @@ class ShortcutPanel(ThemeAwareMixin, QWidget):
                 self._edit_callback(action_id, new_shortcut)
 
             self._populate_tree(self._search_input.text())
+
+    def _on_reset_all(self):
+        """把所有快捷键恢复为默认值（先确认：自定义键位会一并丢失）。"""
+        answer = QMessageBox.question(
+            self, "重置全部快捷键",
+            "将把所有快捷键恢复为默认值，已自定义的键位会一并丢失。是否继续？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self._manager.reset_all()
+        self._populate_tree(self._search_input.text())
+
+    def keyPressEvent(self, event):
+        """Esc 关闭本面板：与 Ctrl+/ 的显隐同一状态源（隐藏后 isVisible() 即为假）。"""
+        if event is not None and event.key() == Qt.Key.Key_Escape:
+            self.hide()
+            return
+        super().keyPressEvent(event)
 
     def refresh(self):
         self._populate_tree(self._search_input.text())

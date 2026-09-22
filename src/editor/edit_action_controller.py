@@ -62,6 +62,16 @@ class EditActionController:
         """替换"""
         self._editor_tabs.show_replace_dialog()
 
+    # === 插入 ===
+
+    def insert_image(self) -> None:
+        """插入图片（落盘到文档同级 PanzerNote_assets/ 后插入相对路径）。"""
+        self._editor_tabs.insert_image_from_file()
+
+    def recover_missing_images(self) -> None:
+        """恢复断链图片（E6c2：外部移动后按 ledger 线索 + 可证明范围判定）。"""
+        self._editor_tabs.recover_missing_images()
+
     # === 行操作 ===
 
     def delete_current_line(self) -> None:
@@ -95,6 +105,56 @@ class EditActionController:
 
     def to_titlecase(self) -> None:
         self._editor_tabs.to_titlecase()
+
+    # === Markdown 编辑（阶段 2：任务列表 / 表格） ===
+
+    def toggle_task_checkbox(self) -> None:
+        self._editor_tabs.toggle_task_checkbox()
+
+    def table_insert_row_above(self) -> None:
+        self._editor_tabs.table_insert_row_above()
+
+    def table_insert_row_below(self) -> None:
+        self._editor_tabs.table_insert_row_below()
+
+    def table_delete_row(self) -> None:
+        self._editor_tabs.table_delete_row()
+
+    def table_insert_column_left(self) -> None:
+        self._editor_tabs.table_insert_column_left()
+
+    def table_insert_column_right(self) -> None:
+        self._editor_tabs.table_insert_column_right()
+
+    def table_delete_column(self) -> None:
+        self._editor_tabs.table_delete_column()
+
+    def table_format_align(self) -> None:
+        self._editor_tabs.table_format_align()
+
+    def table_align_left(self) -> None:
+        self._editor_tabs.table_align_left()
+
+    def table_align_center(self) -> None:
+        self._editor_tabs.table_align_center()
+
+    def table_align_right(self) -> None:
+        self._editor_tabs.table_align_right()
+
+    def format_bold(self) -> None:
+        self._editor_tabs.format_bold()
+
+    def format_italic(self) -> None:
+        self._editor_tabs.format_italic()
+
+    def format_inline_code(self) -> None:
+        self._editor_tabs.format_inline_code()
+
+    def format_link(self) -> None:
+        self._editor_tabs.format_link()
+
+    def set_heading_level(self, level: int) -> None:
+        self._editor_tabs.set_heading_level(level)
 
     # === 书签与折叠 ===
 

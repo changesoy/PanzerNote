@@ -17,9 +17,9 @@
 
     manager = ShortcutManager(config)
 
-    # 注册快捷键
-    manager.register("file.new", "新建文件", "Ctrl+N", callback)
-    manager.register("file.save", "保存", "Ctrl+S", callback)
+    # 注册快捷键（默认键位取自 _DEFAULT_SHORTCUTS）
+    manager.register("file.new", "新建文件", callback)
+    manager.register("file.save", "保存", callback)
 
     # 检测冲突
     conflicts = manager.check_conflicts("Ctrl+N")
@@ -73,7 +73,10 @@ _DEFAULT_SHORTCUTS = {
     "file.open": ("打开文件", "Ctrl+O", "文件"),
     "file.save": ("保存", "Ctrl+S", "文件"),
     "file.save_as": ("另存为", "Ctrl+Shift+S", "文件"),
+    "file.export_pdf": ("导出为PDF", "", "文件"),
+    "file.export_html": ("导出为HTML", "", "文件"),
     "file.close_tab": ("关闭当前标签", "Ctrl+W", "文件"),
+    "file.reopen_closed": ("重新打开关闭的标签", "Ctrl+Shift+T", "文件"),
     "file.exit": ("退出", "Alt+F4", "文件"),
     "edit.undo": ("撤销", "Ctrl+Z", "编辑"),
     "edit.redo": ("重做", "Ctrl+Y", "编辑"),
@@ -89,7 +92,35 @@ _DEFAULT_SHORTCUTS = {
     "edit.copy_line": ("复制当前行到剪贴板", "Ctrl+Shift+C", "编辑"),
     "edit.paste_line": ("粘贴为新行", "Ctrl+Shift+V", "编辑"),
     "edit.goto_line": ("转到行", "Ctrl+G", "编辑"),
+    "edit.toggle_bookmark": ("添加/移除书签", "Ctrl+F2", "编辑"),
+    "edit.next_bookmark": ("下一个书签", "F2", "编辑"),
+    "edit.prev_bookmark": ("上一个书签", "Shift+F2", "编辑"),
     "edit.toggle_case": ("切换大小写", "Ctrl+Shift+U", "编辑"),
+    "edit.insert_image": ("插入图片", "Ctrl+Shift+I", "编辑"),
+    "edit.recover_images": ("恢复缺失的图片", "", "编辑"),
+    "edit.cleanup_orphan_images": ("清理未使用的图片", "", "编辑"),
+    "edit.toggle_task": ("切换任务勾选", "Ctrl+Alt+T", "编辑"),
+    "edit.format_bold": ("加粗", "Ctrl+Alt+B", "编辑"),
+    "edit.format_italic": ("斜体", "Ctrl+Alt+I", "编辑"),
+    "edit.format_code": ("行内代码", "Ctrl+Alt+`", "编辑"),
+    "edit.format_link": ("插入链接", "Ctrl+Alt+K", "编辑"),
+    "edit.heading_1": ("一级标题", "Ctrl+Alt+1", "编辑"),
+    "edit.heading_2": ("二级标题", "Ctrl+Alt+2", "编辑"),
+    "edit.heading_3": ("三级标题", "Ctrl+Alt+3", "编辑"),
+    "edit.heading_4": ("四级标题", "Ctrl+Alt+4", "编辑"),
+    "edit.heading_5": ("五级标题", "Ctrl+Alt+5", "编辑"),
+    "edit.heading_6": ("六级标题", "Ctrl+Alt+6", "编辑"),
+    "edit.heading_clear": ("清除标题", "Ctrl+Alt+0", "编辑"),
+    "edit.table_insert_row_above": ("表格：在上方插入行", "", "编辑"),
+    "edit.table_insert_row_below": ("表格：在下方插入行", "", "编辑"),
+    "edit.table_delete_row": ("表格：删除当前行", "", "编辑"),
+    "edit.table_insert_column_left": ("表格：在左侧插入列", "", "编辑"),
+    "edit.table_insert_column_right": ("表格：在右侧插入列", "", "编辑"),
+    "edit.table_delete_column": ("表格：删除当前列", "", "编辑"),
+    "edit.table_format_align": ("表格：格式化对齐", "", "编辑"),
+    "edit.table_align_left": ("表格：左对齐当前列", "", "编辑"),
+    "edit.table_align_center": ("表格：居中当前列", "", "编辑"),
+    "edit.table_align_right": ("表格：右对齐当前列", "", "编辑"),
     "search.find_in_files": ("跨文件搜索", "", "搜索"),
     "view.editor": ("切换到记事本", "Ctrl+1", "视图"),
     "view.construction": ("切换到建造", "Ctrl+2", "视图"),
@@ -97,8 +128,13 @@ _DEFAULT_SHORTCUTS = {
     "view.collection": ("切换到图鉴", "Ctrl+4", "视图"),
     "view.md_preview": ("切换Markdown预览", "Ctrl+Shift+M", "视图"),
     "view.minimap": ("显示/隐藏代码缩略图", "Ctrl+M", "视图"),
+    "view.split_horizontal": ("水平分屏（独立编辑）", "", "视图"),
+    "view.split_vertical": ("垂直分屏（独立编辑）", "", "视图"),
+    "view.reset_split_layout": ("重置分屏布局", "", "视图"),
+    "view.close_split": ("关闭分屏", "", "视图"),
     "view.file_tree": ("折叠/展开文件树", "Ctrl+B", "视图"),
     "view.side_panel": ("折叠/展开侧栏", "Ctrl+Shift+O", "视图"),
+    "view.fold_all": ("折叠/展开全部标题", "Ctrl+K", "视图"),
     "view.fullscreen": ("全屏模式", "F11", "视图"),
     "view.zoom_in": ("放大", "Ctrl++", "视图"),
     "view.zoom_out": ("缩小", "Ctrl+-", "视图"),
@@ -144,16 +180,17 @@ class ShortcutManager:
         self,
         action_id: str,
         name: str,
-        default_shortcut: str,
         callback: Callable,
         category: str = "通用",
     ) -> Optional[QAction]:
         """注册快捷键
 
+        默认键位的唯一真相源是 `_DEFAULT_SHORTCUTS`（含用户可在设置中改的初始值）；
+        未登记的 action_id 一律无默认键位，交由用户在快捷键设置里自行指定。
+
         Args:
             action_id: 唯一标识符，如 "file.new"
             name: 显示名称
-            default_shortcut: 默认快捷键序列
             callback: 触发回调
             category: 功能分类
 
@@ -163,7 +200,7 @@ class ShortcutManager:
         self._callbacks[action_id] = callback
 
         if action_id not in self._shortcuts:
-            self._shortcuts[action_id] = (name, default_shortcut, category)
+            self._shortcuts[action_id] = (name, "", category)
 
         _, key_seq, _ = self._shortcuts[action_id]
 

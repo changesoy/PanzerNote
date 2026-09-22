@@ -39,6 +39,7 @@ from .virtual_scroll import (
     LazyHighlightManager, DocumentLazyHighlightCoordinator, LARGE_FILE_THRESHOLD,
 )
 from .extra_selection_manager import ExtraSelectionManager
+from .image_asset_ledger import ORIGIN_DROP
 from .indentation import get_indent_width, get_indent_unit
 from .completion import CompletionPopup, CompletionProvider
 from .text_stats import count_mixed_words
@@ -103,6 +104,21 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         'CSS': ['}'], 'Go': ['}'], 'Rust': ['}'],
         'Swift': ['}'], 'Kotlin': ['}'],
     }
+
+    # Markdown 列表前缀（阶段 2 F1）：任务 / 无序 / 有序，含前导缩进。
+    # 顺序重要——任务列表须先于无序列表匹配（`- [ ]` 也会命中无序分支）。
+    # prefix 捕获到标记末尾（不含尾随空白），续写时统一补一个空格；
+    # 有序列表序号递增（1. → 2.），与 Typora 等主流编辑器一致，
+    # 保证源码序号与渲染结果一致；引用块捕获完整嵌套标记（如 `> > `），
+    # 空引用行回车取消标记。
+    _MD_LIST_PREFIX_RE = re.compile(
+        r"^(?P<indent>[ \t]*)(?P<prefix>"
+        r"[-*+]\s+\[[ xX]\]"        # 任务列表：- [ ] / - [x] / - [X]
+        r"|[-*+](?:[ \t]+|$)"       # 无序列表：- / * / +（后跟空白或行尾）
+        r"|(?P<num>\d{1,9})\.(?:[ \t]+|$)"  # 有序列表：1. / 12.（后跟空白或行尾）
+        r"|(?:>(?:[ \t]+|$))+"      # 引用块：> / > >（允许嵌套）
+        r")"
+    )
 
     # 不显示缩略图的文件类型
     _NO_MINIMAP_TYPES = {'纯文本', 'Markdown'}
@@ -719,7 +735,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
     # ═══════════════════ 行宽模式 ═══════════════════
 
     def set_wrap_mode(self, mode: str):
-        """设置行宽模式"""
+        """设置行宽模式（编辑器自身；Markdown 预览的行宽是独立设置）"""
         self._wrap_mode = mode
         if mode == "limit_width":
             self.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
@@ -774,13 +790,18 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             cursor = self.textCursor()
             if cursor.hasSelection():
                 self._indent_selection(cursor, indent=True)
+            elif self._file_type == 'Markdown' and self._table_tab_next():
+                pass  # 表格内：跳到下一单元格（阶段 2 G3）
             else:
                 cursor.insertText(get_indent_unit(self.config))
             return
 
-        # Shift+Tab: 减少缩进
+        # Shift+Tab: 减少缩进（表格内则跳到上一单元格，阶段 2 G3）
         if key == Qt.Key.Key_Backtab:
             cursor = self.textCursor()
+            if not cursor.hasSelection() and self._file_type == 'Markdown' \
+                    and self._table_tab_next(backwards=True):
+                return
             self._indent_selection(cursor, indent=False)
             return
 
@@ -823,11 +844,25 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         return None
 
     def insertFromMimeData(self, source):
+        # 剪贴板含图像且为 Markdown 文档时走图片落盘分支，其余保持默认文本粘贴
+        if self.insert_image_from_mime(source):
+            return
         self._is_pasting = True
         try:
             super().insertFromMimeData(source)
         finally:
             self._is_pasting = False
+
+    def canInsertFromMimeData(self, source) -> bool:
+        """放行「仅含图像」或「仅含图片文件」的剪贴板内容，使其能进入图片落盘分支。
+
+        QPlainTextEdit 默认对无文本的图像 mime 可能判否，导致 paste() 不触发
+        insertFromMimeData；此处仅对 Markdown 文档放行，其余沿用默认判断。
+        """
+        if source is not None and self._is_markdown_document():
+            if source.hasImage() or self._local_image_paths(source):
+                return True
+        return super().canInsertFromMimeData(source)
 
     # === 拖放：本地文件 URL 放行给窗口级打开（3.5.7） ===
     #
@@ -835,6 +870,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
     # 会吞掉从文件树/资源管理器拖入的文件，导致「拖文件到编辑区打开」失效。
     # 仅拦截"本地文件"URL 拖放并 event.ignore() 冒泡给 MainWindow 打开文件；
     # 文本/纯链接拖放（如浏览器拖 URL 粘贴）保留默认行为。
+    # 例外（E4）：拖入内容**全部**为受支持的图片时，由编辑器接管为「落盘 + 插入」。
 
     @staticmethod
     def _has_local_file_urls(mime) -> bool:
@@ -843,25 +879,36 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         return any(url.isLocalFile() for url in mime.urls())
 
     def dragEnterEvent(self, event):
+        if self._local_image_paths(event.mimeData()):
+            event.acceptProposedAction()
+            return
         if self._has_local_file_urls(event.mimeData()):
             event.ignore()
             return
         super().dragEnterEvent(event)
 
     def dragMoveEvent(self, event):
+        if self._local_image_paths(event.mimeData()):
+            event.acceptProposedAction()
+            return
         if self._has_local_file_urls(event.mimeData()):
             event.ignore()
             return
         super().dragMoveEvent(event)
 
     def dropEvent(self, event):
+        image_paths = self._local_image_paths(event.mimeData())
+        if image_paths:
+            event.acceptProposedAction()
+            self.insert_images_from_paths(image_paths, origin=ORIGIN_DROP)
+            return
         if self._has_local_file_urls(event.mimeData()):
             event.ignore()
             return
         super().dropEvent(event)
 
     def _handle_enter(self):
-        """处理回车键 - 自动缩进、Python 关键词 dedent"""
+        """处理回车键 - 自动缩进、Python 关键词 dedent、Markdown 列表续写"""
         cursor = self.textCursor()
         block = cursor.block()
         text = block.text()
@@ -873,6 +920,10 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
                 indent += char
             else:
                 break
+
+        # Markdown 列表续写优先（阶段 2 F1）；非列表行回落通用缩进逻辑
+        if self._file_type == 'Markdown' and self._handle_markdown_list_enter(cursor, text):
+            return
 
         # 检查是否需要增加缩进
         stripped = text.rstrip()
@@ -899,6 +950,34 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         cursor.endEditBlock()
         self.setTextCursor(cursor)
         self.ensureCursorVisible()
+
+    def _handle_markdown_list_enter(self, cursor, text: str) -> bool:
+        """Markdown 列表/引用块回车续写（阶段 2 F1/G1）。
+
+        当前行是任务 / 无序 / 有序 / 引用块项时，换行保留同一前缀（含前导缩进
+        与嵌套标记，有序列表序号递增）；空项回车取消标记（新行只留前导缩进）。
+        非列表行返回 False，由调用方继续通用缩进逻辑。
+        """
+        m = self._MD_LIST_PREFIX_RE.match(text)
+        if not m:
+            return False
+        rest = text[m.end():]
+        if rest.strip():
+            prefix = m.group("prefix").rstrip()
+            if m.group("num") is not None:
+                # 有序列表：序号递增（1. → 2.），源码与渲染序号保持一致
+                prefix = f"{int(m.group('num')) + 1}."
+            new_prefix = m.group("indent") + prefix + " "
+        else:
+            # 空列表项：只保留前导缩进，取消列表标记
+            new_prefix = m.group("indent")
+        cursor.beginEditBlock()
+        cursor.insertBlock()
+        cursor.insertText(new_prefix)
+        cursor.endEditBlock()
+        self.setTextCursor(cursor)
+        self.ensureCursorVisible()
+        return True
 
     def _handle_closing_brace(self):
         """处理输入 } 时自动减少缩进"""

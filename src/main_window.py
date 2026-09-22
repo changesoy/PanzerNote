@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer, QEvent, QPoint, QRect, QEasingCurve
 from PyQt6.QtGui import QIcon, QCloseEvent, QAction
-from typing import Any, Callable, Dict, Optional, Tuple, cast
+from typing import Any, Callable, Dict, List, Optional, Tuple, cast
 
 from . import __version__
 from .core.document_registry import DocumentRegistry
@@ -187,6 +187,9 @@ class MainWindow(QMainWindow):
         self._init_statusbar()
         self._init_timers()
         self._register_command_palette()
+        # E6b：缺失图片提示的暂存（必须早于 _restore_state——会话恢复就在其中
+        # 打开文档并触发缺失检测）。
+        self._pending_missing_images: Dict[str, List[str]] = {}
         self._restore_state()
         self._connect_signals()
         self._apply_theme()
@@ -254,9 +257,11 @@ class MainWindow(QMainWindow):
         """
         self.game_sidebar.view_changed.connect(self._on_view_changed)
         self.file_tree.file_open_requested.connect(self._open_file)
+        self.file_tree.image_open_requested.connect(self._open_image_from_tree)
         self.file_tree.file_move_requested.connect(self._on_file_move_from_tree)
         self.file_tree.file_copy_requested.connect(self._on_file_copy_from_tree)
         self.file_tree.file_deleted.connect(self._on_file_deleted)
+        self.file_tree.file_renamed.connect(self._on_file_renamed)
         self.file_tree.untitled_save_requested.connect(self._on_untitled_save_from_tree)
         self.outline_panel.heading_clicked.connect(self._on_outline_heading_clicked)
         self.find_in_files_panel.result_clicked.connect(self._on_find_in_files_result)
@@ -274,6 +279,8 @@ class MainWindow(QMainWindow):
         self.file_tree.tree_changed.connect(
             lambda: self._plugin_event_bus.emit("file_tree.changed")
         )
+        # E6b：小秘书气泡消失后再补发此前让位的缺失图片提示
+        self.secretary.message_hidden.connect(self._flush_missing_images)
         self._connect_editor_tabs_signals(self.editor_tabs)
 
     def _connect_editor_tabs_signals(self, tabs: EditorTabWidget):
@@ -295,6 +302,10 @@ class MainWindow(QMainWindow):
         tabs.cursor_position_changed.connect(
             lambda: self._plugin_event_bus.emit("cursor.changed")
         )
+        # E6b：文档引用的本地图片缺失 → 非打断提示
+        tabs.missing_images_detected.connect(self._on_missing_images_detected)
+        # E6c2：断链恢复执行结果 → 非打断提示
+        tabs.asset_recovery_finished.connect(self._on_asset_recovery_finished)
 
     def _init_menubar(self):
         """初始化菜单栏"""
@@ -589,15 +600,13 @@ class MainWindow(QMainWindow):
         bauxite = reward["bauxite"]
 
         QTimer.singleShot(2000, lambda: self.secretary.show_message(
-            f"离线{time_str}，获得资源！\n燃料+{fuel} 弹药+{ammo}\n钢材+{steel} 铝材+{bauxite}",
-            5000
+            f"离线{time_str}，获得资源！\n燃料+{fuel} 弹药+{ammo}\n钢材+{steel} 铝材+{bauxite}"
         ))
 
     def _check_daily_checkin(self):
         if self.config.check_daily_checkin():
             QTimer.singleShot(3000, lambda: self.secretary.show_message(
-                "每日签到成功！\n燃料+100 弹药+100\n钢材+100 铝材+100",
-                5000
+                "每日签到成功！\n燃料+100 弹药+100\n钢材+100 铝材+100"
             ))
             self.resource_bar.refresh()
 
@@ -858,13 +867,37 @@ class MainWindow(QMainWindow):
 
     def keyPressEvent(self, event):
         """键盘事件"""
-        if event.key() == Qt.Key.Key_Escape and self.view_coordinator.current_view != "editor":
-            self._switch_view("editor")
-            return
+        if event.key() == Qt.Key.Key_Escape:
+            if self.view_coordinator.current_view != "editor":
+                self._switch_view("editor")
+                return
+            if self._close_side_panel_on_escape():
+                return
         if event.key() == Qt.Key.Key_F1:
             self._show_command_palette()
             return
         super().keyPressEvent(event)
+
+    def _close_side_panel_on_escape(self) -> bool:
+        """Esc 收起侧栏子面板（大纲 / 跨文件搜索），返回是否收起了。
+
+        文件树是文件窗口的一部分，不在此列；焦点不在侧栏时也不动 ——
+        用户在编辑器里按 Esc 不该把侧栏带下去。
+        """
+        host = self.side_panel_host
+        if not host.isVisible() or host.current_panel_id() in (None, "filetree"):
+            return False
+        focus = QApplication.focusWidget()
+        if focus is None:
+            return False
+        if focus is not host and not host.isAncestorOf(focus):
+            return False
+        host.hide_panel()
+        tabs = self._focused_editor_tabs() or self.editor_tabs
+        editor = tabs.current_editor()
+        if editor is not None:
+            editor.setFocus()
+        return True
 
     # === 文件操作 ===
 
@@ -886,6 +919,11 @@ class MainWindow(QMainWindow):
         filepath = self._file_action_controller.show_open_dialog(self)
         if filepath:
             self._open_file(filepath, target_tabs=target_tabs)
+
+    def _open_image_from_tree(self, filepath: str):
+        """文件树双击图片：以标签页形式打开只读查看器（读取走 FileGuard）。"""
+        tabs = self._focused_editor_tabs() or self.editor_tabs
+        tabs.open_image_tab(filepath, self.config.get_file_guard())
 
     def _open_file(self, filepath: str, target_tabs: Optional[EditorTabWidget] = None):
         """打开文件（编排委托 FileActionController）"""
@@ -1041,6 +1079,49 @@ class MainWindow(QMainWindow):
         """替换"""
         self.edit_actions.replace()
 
+    # === 插入操作 ===
+
+    def _insert_image(self):
+        """插入图片"""
+        self.edit_actions.insert_image()
+
+    def _recover_missing_images(self):
+        """恢复缺失的图片（E6c2：外部移动后的断链恢复）"""
+        self.edit_actions.recover_missing_images()
+
+    def _cleanup_orphan_images(self):
+        """清理未使用的图片：扫描 → 确认对话框 → 勾选后移入回收站。"""
+        from .editor.orphan_image_service import OrphanImageService
+        from .editor.orphan_image_dialog import OrphanImageDialog
+
+        orphans = OrphanImageService(self.config).find_orphans()
+        if not orphans:
+            QMessageBox.information(self, "清理未使用的图片", "没有找到未使用的图片。")
+            return
+        dialog = OrphanImageDialog(orphans, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        selected = dialog.selected_paths()
+        if not selected:
+            return
+        removed: list[str] = []
+        for path in selected:
+            try:
+                from send2trash import send2trash
+
+                send2trash(os.path.normpath(path))
+                removed.append(path)
+            except Exception as exc:  # noqa: BLE001 - 单项失败继续，尽量清理其余
+                get_logger(__name__).error("清理图片失败 %s: %s", path, exc)
+        if removed:
+            OrphanImageService(self.config).remove_from_ledger(removed)
+            self.file_tree.tree_changed.emit()
+        QMessageBox.information(
+            self,
+            "清理未使用的图片",
+            f"已移入回收站 {len(removed)} 张，失败 {len(selected) - len(removed)} 张。",
+        )
+
     # === 行操作 ===
 
     def _delete_current_line(self):
@@ -1074,6 +1155,56 @@ class MainWindow(QMainWindow):
 
     def _to_titlecase(self):
         self.edit_actions.to_titlecase()
+
+    # === Markdown 编辑（阶段 2：任务列表 / 表格） ===
+
+    def _toggle_task_checkbox(self):
+        self.edit_actions.toggle_task_checkbox()
+
+    def _table_insert_row_above(self):
+        self.edit_actions.table_insert_row_above()
+
+    def _table_insert_row_below(self):
+        self.edit_actions.table_insert_row_below()
+
+    def _table_delete_row(self):
+        self.edit_actions.table_delete_row()
+
+    def _table_insert_column_left(self):
+        self.edit_actions.table_insert_column_left()
+
+    def _table_insert_column_right(self):
+        self.edit_actions.table_insert_column_right()
+
+    def _table_delete_column(self):
+        self.edit_actions.table_delete_column()
+
+    def _table_format_align(self):
+        self.edit_actions.table_format_align()
+
+    def _table_align_left(self):
+        self.edit_actions.table_align_left()
+
+    def _table_align_center(self):
+        self.edit_actions.table_align_center()
+
+    def _table_align_right(self):
+        self.edit_actions.table_align_right()
+
+    def _format_bold(self):
+        self.edit_actions.format_bold()
+
+    def _format_italic(self):
+        self.edit_actions.format_italic()
+
+    def _format_inline_code(self):
+        self.edit_actions.format_inline_code()
+
+    def _format_link(self):
+        self.edit_actions.format_link()
+
+    def _set_heading_level(self, level: int):
+        self.edit_actions.set_heading_level(level)
 
     # === 书签与折叠 ===
 
@@ -1161,7 +1292,7 @@ class MainWindow(QMainWindow):
     def _register_command_palette(self):
         """注册命令面板快捷键。"""
         action = self.shortcut_manager.register(
-            "command_palette", "命令面板", "Ctrl+Shift+P",
+            "command_palette", "命令面板",
             self._show_command_palette, "帮助"
         )
         if action:
@@ -1285,6 +1416,60 @@ class MainWindow(QMainWindow):
         self.resource_bar.refresh()
         self.secretary.show_message("文件已保存！")
 
+    def _on_missing_images_detected(self, filepath: str, missing: List[str]):
+        """E6b：文档引用的本地图片缺失 → 非打断提示。
+
+        小秘书正忙（有气泡在显示、或启动问候已排期）时先暂存，等它闲下来
+        （气泡消失）再汇总补发；空闲则立即提示。只提示、不猜、不自动改动文件
+        ——真正的恢复留待 E6c2（需 ledger + 引用扫描）。
+        """
+        if not missing:
+            return
+        self._pending_missing_images[filepath] = list(missing)
+        self._flush_missing_images()
+
+    def _flush_missing_images(self) -> None:
+        """小秘书空闲时把暂存的缺失图片提示汇总为一条发出，忙则继续等。
+
+        由两处驱动：新检测到的缺失（立即尝试）、小秘书气泡消失信号（重试）。
+        """
+        if not self._pending_missing_images or self.secretary.is_busy():
+            return
+        pending = self._pending_missing_images
+        self._pending_missing_images = {}
+        self._show_missing_images(pending)
+
+    def _show_missing_images(self, notices: Dict[str, List[str]]):
+        """把缺失图片清单汇总成一条非打断提示（小秘书气泡 + 状态栏）。"""
+        total = sum(len(paths) for paths in notices.values())
+        if len(notices) == 1:
+            names = "、".join(os.path.basename(p) for p in next(iter(notices.values())))
+            message = f"有 {total} 个图片资源不存在：{names}"
+        else:
+            message = f"{len(notices)} 个文档共有 {total} 个图片资源不存在"
+        # 状态栏容易被后续消息覆盖、位置也在窗口最底部，故以小秘书气泡为主通道
+        self.secretary.show_message("⚠ " + message)
+        status_bar = self.statusBar()
+        if status_bar is not None:
+            status_bar.showMessage("⚠ " + message, 6000)
+
+    def _on_asset_recovery_finished(
+        self, filepath: str, moved: int, copied: int, remaining: int
+    ) -> None:
+        """E6c2：断链恢复执行结果 → 非打断提示（小秘书气泡）。"""
+        recovered = moved + copied
+        if not recovered and not remaining:
+            return
+        name = os.path.basename(filepath) if filepath else ""
+        prefix = f"{name}：" if name else ""
+        if recovered and remaining:
+            message = f"{prefix}已恢复 {recovered} 个图片，仍有 {remaining} 个缺失"
+        elif recovered:
+            message = f"{prefix}已恢复 {recovered} 个图片资源"
+        else:
+            message = f"{prefix}仍有 {remaining} 个图片资源缺失"
+        self.secretary.show_message(message)
+
     def _on_tab_count_changed(self, tabs: EditorTabWidget, count: int):
         """标签页数量变化
 
@@ -1323,6 +1508,11 @@ class MainWindow(QMainWindow):
         """文件树删除文件/文件夹后，同步关闭所有（含分屏）已打开的对应标签页"""
         for tabs in [self.editor_tabs, *self.view_coordinator.split_tabs]:
             tabs.close_tabs_of_deleted_path(path, is_dir)
+
+    def _on_file_renamed(self, old: str, new: str):
+        """文件树重命名后，同步更新所有（含分屏）图片标签持有的路径"""
+        for tabs in [self.editor_tabs, *self.view_coordinator.split_tabs]:
+            tabs.update_tabs_of_renamed_path(old, new)
 
     @staticmethod
     def _on_untitled_save_from_tree(source_tabs, tab_id: int, dest_folder: str):

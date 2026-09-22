@@ -7,14 +7,69 @@
 """
 
 import json
+import os
+import re
+import unicodedata
 import xml.dom.minidom as minidom
 from contextlib import contextmanager
-from typing import Generator, Optional
+from typing import Callable, Generator, Optional
 
-from PyQt6.QtGui import QTextCursor
-from PyQt6.QtWidgets import QMessageBox
+from PyQt6.QtCore import QBuffer, QIODevice, QMimeData
+from PyQt6.QtGui import QTextBlock, QImage, QPixmap, QTextCursor
+from PyQt6.QtWidgets import QFileDialog, QMessageBox
 
+from ..security.file_access_context import FileAccessContext
+from ..security.file_guard import FileGuard
 from ..utils.logger import get_logger
+from . import image_formats as _image_formats
+from .image_asset_ledger import ORIGIN_FILE, ORIGIN_PASTE, ImageAssetLedger
+from .image_asset_service import (
+    ASSETS_DIRNAME,
+    ImageAssetError,
+    ImageAssetResult,
+    ImageAssetService,
+)
+from .image_decoder import convert_to_web
+
+
+# 文件选择对话框的图片过滤器（从可插入格式派生，避免与白名单漂移；
+# 含 HEIF/TIFF 等需转码的格式）
+_IMAGE_FILE_FILTER = _image_formats.dialog_filter(
+    _image_formats.INSERTABLE, "图片"
+)
+
+
+def _to_qimage(image_data: object) -> Optional[QImage]:
+    """把 mime 的 imageData 归一化为 QImage（可能是 QImage 或 QPixmap）。"""
+    if isinstance(image_data, QPixmap):
+        return image_data.toImage()
+    if isinstance(image_data, QImage):
+        return image_data
+    return None
+
+
+def _encode_png(image: QImage) -> bytes:
+    """把 QImage 编码为 PNG 字节（剪贴板截图统一以 PNG 落盘）。"""
+    buffer = QBuffer()
+    buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+    if not image.save(buffer, "PNG"):
+        raise ImageAssetError("剪贴板图像编码失败")
+    data = buffer.data().data()
+    buffer.close()
+    return data
+
+
+# alt 文本中会破坏 ![...](...) 结构的字符，插入前需反斜杠转义
+_ALT_ESCAPES = str.maketrans({ch: "\\" + ch for ch in "\\[]`"})
+
+
+def _escape_markdown_alt(alt: str) -> str:
+    """转义 alt 中的结构字符，保证插入的图片语法始终解析为标准图片。
+
+    原始文件名可含 `[` `]`（Windows 允许），不转义会使 ![a]b](path) 退化为
+    纯文本或普通链接；反斜杠转义是 CommonMark 规定的标准做法。
+    """
+    return alt.translate(_ALT_ESCAPES)
 
 
 class EditorActionsMixin:
@@ -265,6 +320,880 @@ class EditorActionsMixin:
             cursor.setPosition(block.position())
             self.setTextCursor(cursor)
             self.centerCursor()
+
+    # ═══════════════════ 任务列表（阶段 2 F2） ═══════════════════
+
+    _TASK_ROW_RE = re.compile(r"^(\s*[-*+]\s+)\[([ xX])\](.*)$")
+    _TASK_BULLET_RE = re.compile(r"^(\s*[-*+]\s+)(?!\[)(.*)$")
+
+    def toggle_task_checkbox(self) -> None:
+        """切换当前行任务列表勾选状态（[ ] ⇄ [x]）。
+
+        已有勾选框：空 ⇄ x（原为大写 X 时恢复为 x，避免无意义的大小写翻转）。
+        普通列表项（- 内容）：补一个未勾选框 `- [ ] 内容`。
+        非列表行 / 空列表项：不做任何事。
+        """
+        cursor = self.textCursor()
+        line = cursor.block().text()
+        offset = cursor.positionInBlock()
+
+        m = self._TASK_ROW_RE.match(line)
+        if m:
+            new_line = f"{m.group(1)}[{' ' if m.group(2) != ' ' else 'x'}]{m.group(3)}"
+        else:
+            m = self._TASK_BULLET_RE.match(line)
+            if not m or not m.group(2).strip():
+                return
+            new_line = f"{m.group(1)}[ ] {m.group(2)}"
+
+        with self.programmatic_modify():
+            row_cursor = self.textCursor()
+            row_cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
+            row_cursor.movePosition(
+                QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor
+            )
+            row_cursor.insertText(new_line)
+            # 整行替换会让光标失效：按原列位置归位（标记长度变化量补上）
+            row_cursor.setPosition(
+                row_cursor.block().position()
+                + max(0, min(offset + len(new_line) - len(line), len(new_line)))
+            )
+            self.setTextCursor(row_cursor)
+
+    # ═══════════════════ Markdown 表格（阶段 2 F3） ═══════════════════
+
+    _FENCE_RE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
+
+    def _inside_fenced_code(self, block: QTextBlock) -> bool:
+        """该块是否落在未闭合的围栏代码块内部。
+
+        代码块里的 `| a | b |` 是示例文本，不该被当成可编辑表格。围栏不能嵌套，
+        从文首按出现顺序两两配对即可判定（走到目标块为止，不必扫全篇）。
+        """
+        fence: Optional[str] = None
+        target = block.blockNumber()
+        b = self.document().firstBlock()
+        while b.isValid():
+            match = self._FENCE_RE.match(b.text())
+            if match:
+                mark = match.group(1)[0]
+                fence = None if fence == mark else (fence or mark)
+            if b.blockNumber() >= target:
+                break
+            b = b.next()
+        return fence is not None
+
+    def _table_at_cursor(self) -> Optional[tuple[int, list[str]]]:
+        """光标所在 Markdown 表格的「起始块号 + 各行文本」；不在表格内返回 None。
+
+        表格判定口径：连续的 `|` 开头行、其中**含分隔行**（如 `| --- |`）、
+        且不在围栏代码块内。只看 `|` 开头会过宽——普通段落或示例文本都会被
+        当成可编辑表格，命令落到无关文本上。
+        """
+        block = self.textCursor().block()
+        if not block.text().lstrip().startswith("|"):
+            return None
+        if self._inside_fenced_code(block):
+            return None
+
+        rows: list[str] = []
+        first = block
+        b = block
+        while b.isValid() and b.text().lstrip().startswith("|"):
+            first = b
+            rows.append(b.text())
+            b = b.previous()
+        rows.reverse()
+        b = block.next()
+        while b.isValid() and b.text().lstrip().startswith("|"):
+            rows.append(b.text())
+            b = b.next()
+
+        if len(rows) < 2 or not any(
+            self._is_table_separator(row) for row in rows[1:]
+        ):
+            return None
+        return first.blockNumber(), rows
+
+    def _table_rows_at_cursor(self) -> Optional[list[str]]:
+        """返回光标所在 Markdown 表格的各行文本（含分隔行）。
+
+        光标不在表格内时返回 None。
+        """
+        found = self._table_at_cursor()
+        return None if found is None else found[1]
+
+    def _table_start_block(self) -> QTextBlock:
+        """光标所在表格的起始块（向上回溯连续的 `|` 开头行）。"""
+        # PyQt6 stub 里 textCursor().block() 被标成 Any，这里显式标注回落类型
+        block: QTextBlock = self.textCursor().block()
+        while block.previous().isValid() and \
+                block.previous().text().lstrip().startswith("|"):
+            block = block.previous()
+        return block
+
+    @staticmethod
+    def _table_cells(row: str) -> list[str]:
+        """拆分表格行为单元格（去掉首尾定界符；转义 `\\|` 暂不支持，见 docstring）。"""
+        return row.strip().strip("|").split("|")
+
+    @staticmethod
+    def _table_render_row(cells: list[str]) -> str:
+        return "|" + "|".join(cells) + "|"
+
+    def _table_current_cell_index(self, row: str) -> int:
+        """光标在当前行第几个单元格（0 起），行尾 clamp 到最后一个单元格。"""
+        pos = self.textCursor().positionInBlock()
+        delimiters = row.count("|", 0, pos)
+        if row.lstrip().startswith("|"):
+            delimiters -= 1
+        cells = self._table_cells(row)
+        return max(0, min(delimiters, len(cells) - 1))
+
+    def _table_edit(self, rebuild: Callable[[list[str]], list[str]]) -> None:
+        """表格编辑公共骨架：定位表格 → 逐行重建 → 替换原文本 → 光标归位。
+
+        整块替换会让光标失效（不显式归位就会漂到行首或过期位置），故按
+        「原行号 + 原单元格」把光标放回重建后的对应单元格。
+        """
+        found = self._table_at_cursor()
+        if found is None:
+            return
+        start_no, rows = found
+        row_idx = self._cursor_row_index()
+        col_idx = self._table_current_cell_index(rows[row_idx])
+        updated = rebuild(rows)
+        start_block = self.document().findBlockByNumber(start_no)
+        if start_block is None or not start_block.isValid():
+            return
+
+        with self.programmatic_modify():
+            sel = self.textCursor()
+            sel.setPosition(start_block.position())
+            end = self.document().findBlockByNumber(start_no + len(rows) - 1)
+            sel.setPosition(end.position() + end.length() - 1,
+                            QTextCursor.MoveMode.KeepAnchor)
+            sel.insertText("\n".join(updated))
+
+        if updated:
+            self._table_cell_cursor(
+                start_no + min(row_idx, len(updated) - 1),
+                updated[min(row_idx, len(updated) - 1)],
+                col_idx,
+            )
+
+    def table_insert_row_below(self) -> None:
+        """在光标行下方插入空行；若当前是表头则插到分隔行之后。"""
+        def rebuild(rows: list[str]) -> list[str]:
+            cols = len(self._table_cells(rows[0]))
+            empty = self._table_render_row(["  "] * cols)
+            # 表头行 → 空行插到分隔行之后，否则插到当前行之后
+            idx = self._cursor_row_index()
+            if idx == 0 and len(rows) > 1 and self._is_table_separator(rows[1]):
+                idx = 1
+            out = list(rows)
+            out.insert(idx + 1, empty)
+            return out
+        self._table_edit(rebuild)
+
+    def table_insert_row_above(self) -> None:
+        """在光标行上方插入空行；表头行上方不插（表格不允许顶到表头之上）。"""
+        def rebuild(rows: list[str]) -> list[str]:
+            cols = len(self._table_cells(rows[0]))
+            empty = self._table_render_row(["  "] * cols)
+            idx = self._cursor_row_index()
+            if idx == 0:
+                return rows  # 表头上方不插
+            out = list(rows)
+            out.insert(idx, empty)
+            return out
+        self._table_edit(rebuild)
+
+    def table_delete_row(self) -> None:
+        """删除光标所在行；表头与分隔行不可删。"""
+        def rebuild(rows: list[str]) -> list[str]:
+            idx = self._cursor_row_index()
+            if idx <= (1 if len(rows) > 1 and self._is_table_separator(rows[1]) else 0):
+                return rows  # 表头 / 分隔行不可删
+            out = list(rows)
+            del out[idx]
+            return out
+        self._table_edit(rebuild)
+
+    def table_insert_column_left(self) -> None:
+        """在光标所在单元格左侧插入一列（含分隔行补齐）。"""
+        def rebuild(rows: list[str]) -> list[str]:
+            idx = self._table_current_cell_index(rows[self._cursor_row_index()])
+            out = []
+            for row in rows:
+                cells = self._table_cells(row)
+                if self._is_table_separator(row):
+                    cells.insert(idx, " --- ")
+                else:
+                    cells.insert(idx, "  ")
+                out.append(self._table_render_row(cells))
+            return out
+        self._table_edit(rebuild)
+
+    def table_insert_column_right(self) -> None:
+        """在光标所在单元格右侧插入一列（含分隔行补齐）。"""
+        def rebuild(rows: list[str]) -> list[str]:
+            idx = self._table_current_cell_index(rows[self._cursor_row_index()])
+            out = []
+            for row in rows:
+                cells = self._table_cells(row)
+                if self._is_table_separator(row):
+                    cells.insert(idx + 1, " --- ")
+                else:
+                    cells.insert(idx + 1, "  ")
+                out.append(self._table_render_row(cells))
+            return out
+        self._table_edit(rebuild)
+
+    def table_delete_column(self) -> None:
+        """删除光标所在列（含分隔行对应段）；仅一列时不可删。"""
+        def rebuild(rows: list[str]) -> list[str]:
+            idx = self._table_current_cell_index(rows[self._cursor_row_index()])
+            if len(self._table_cells(rows[0])) <= 1:
+                return rows
+            out = []
+            for row in rows:
+                cells = self._table_cells(row)
+                if idx < len(cells):
+                    del cells[idx]
+                out.append(self._table_render_row(cells))
+            return out
+        self._table_edit(rebuild)
+
+    def _cursor_row_index(self) -> int:
+        """光标所在行在表格里的下标：按块号定位，不用文本反查。
+
+        表格里两行内容可能完全相同（例如两条同样的空数据行），按文本 `index()`
+        反查只会拿到第一次出现的位置，行命令就会落到错误行上。
+        """
+        block: QTextBlock = self.textCursor().block()
+        return (
+            block.blockNumber()
+            - self._table_start_block().blockNumber()
+        )
+
+    @staticmethod
+    def _is_table_separator(row: str) -> bool:
+        cells = row.strip().strip("|").split("|")
+        return bool(cells) and all(
+            re.fullmatch(r"\s*:?-{1,}:?\s*", c) for c in cells
+        )
+
+    # ═══════════════════ 行内格式（阶段 2 G2） ═══════════════════
+
+    def _wrap_inline(self, prefix: str, suffix: str,
+                     link: bool = False,
+                     strip_guard: Optional[Callable[[str], bool]] = None) -> None:
+        """行内格式 toggle：选中且已被该标记包裹 → 剥掉标记；否则包裹。
+
+        选中内容的**首尾空白留在标记之外**：`** 文字 **` 因定界符不满足
+        CommonMark 的 flanking 规则而整体退化成正文（预览里只会看到字面星号），
+        故标记只包住去空白后的核心。
+        选区外侧紧贴本标记时把标记一并纳入判定 —— 只选内部文字再按一次键即可剥壳。
+        无选中 → 若光标正贴在成对标记上（含着正好落在空标记对 `**|**` 之间）
+        则剥掉该对；否则插入 `标记标记` 骨架、光标落在标记之间直接输入内容。
+        link=True 时插入 `[文本]()` 并把光标移到括号内；选中 `[文本](url)`
+        整体时还原为 `文本`。strip_guard 用于排除会误剥的相邻标记
+        （如斜体不应剥掉 `**` 粗体的半个标记）。
+        """
+        cursor = self.textCursor()
+        selected = cursor.selectedText()
+        with self.programmatic_modify():
+            if link:
+                m = re.fullmatch(r"\[([^\]]*)\]\([^)]*\)", selected)
+                if m is not None:
+                    cursor.insertText(m.group(1))
+                else:
+                    cursor.insertText(f"[{selected}]()")
+                    cursor.movePosition(QTextCursor.MoveOperation.Left)
+            else:
+                if selected:
+                    selected = self._absorb_outer_markers(
+                        cursor, prefix, suffix)
+                core = selected.strip()
+                lead = selected[:len(selected) - len(selected.lstrip())]
+                trail = selected[len(selected.rstrip()):]
+                stripped = (
+                    len(core) >= len(prefix) + len(suffix)
+                    and core.startswith(prefix)
+                    and core.endswith(suffix)
+                    and (strip_guard is None or strip_guard(core))
+                )
+                if stripped:
+                    inner = core[len(prefix):len(core) - len(suffix)]
+                    cursor.insertText(f"{lead}{inner}{trail}")
+                    if inner:
+                        # 保留选区：再按一次键即重新包裹（toggle 闭环）
+                        self._select_inserted_tail(cursor, len(trail), len(inner))
+                elif core:
+                    cursor.insertText(f"{lead}{prefix}{core}{suffix}{trail}")
+                    # 选中核心（跳过闭标记与尾部空白）：再按一次键即剥壳
+                    self._select_inserted_tail(cursor,
+                                               len(suffix) + len(trail),
+                                               len(core))
+                elif not selected and self._strip_adjacent_markers(
+                        cursor, prefix, suffix):
+                    pass  # 光标处的成对标记已剥掉
+                else:
+                    cursor.insertText(f"{lead}{prefix}{suffix}{trail}")
+                    if not core:
+                        # 没有实质内容（无选中，或选中的只是空白）：光标移到标记
+                        # 之间，直接输入内容。判据用 core 而非 selected —— 纯空白
+                        # 选区的 core 为空、selected 不为空，用后者会漏掉这一步；
+                        # 落点要把尾部空白与闭标记都退掉，否则选中的是空白时会把
+                        # 光标留在尾部空白里。
+                        cursor.setPosition(
+                            cursor.position() - len(trail) - len(suffix))
+            self.setTextCursor(cursor)
+
+    @staticmethod
+    def _absorb_outer_markers(cursor: QTextCursor, prefix: str,
+                              suffix: str) -> str:
+        """选区外侧紧贴本标记时把标记纳入选区，返回新的选中文本。
+
+        只选 `文字` 而标记在选区外侧时，若不做这一步就只能手动把星号一起选中
+        才能剥壳；纳入后即可与「选整体」走同一条剥壳判定。
+        吸收的是**整段同类标记串**：`**粗体**` 里只选 `粗体` 必须吃进整对 `**`，
+        只吃最近一个 `*` 会让斜体把粗体削成 `*粗体*`（与「选整体按斜体」的
+        strip_guard 语义冲突）。
+        """
+        doc = cursor.document()
+        if doc is None:
+            return cursor.selectedText()
+        start = cursor.selectionStart()
+        end = cursor.selectionEnd()
+        text_len = doc.characterCount() - 1
+        if start < len(prefix) or end + len(suffix) > text_len:
+            return cursor.selectedText()
+        marker = prefix[0]
+        if marker != suffix[-1]:
+            return cursor.selectedText()
+        run_start = start
+        while run_start > 0 and doc.characterAt(run_start - 1) == marker:
+            run_start -= 1
+        run_end = end
+        while run_end < text_len and doc.characterAt(run_end) == marker:
+            run_end += 1
+        if start - run_start < len(prefix) or run_end - end < len(suffix):
+            return cursor.selectedText()
+        cursor.setPosition(run_start)
+        cursor.setPosition(run_end, QTextCursor.MoveMode.KeepAnchor)
+        return cursor.selectedText()
+
+    @staticmethod
+    def _select_inserted_tail(cursor: QTextCursor, tail_len: int,
+                              length: int) -> None:
+        """回选刚插入内容里、末尾 tail_len 个字符之前的 length 个字符。"""
+        end = cursor.position() - tail_len
+        cursor.setPosition(end - length)
+        cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+
+    @staticmethod
+    def _strip_adjacent_markers(cursor: QTextCursor, prefix: str,
+                               suffix: str) -> bool:
+        """无选中时剥掉光标紧贴的成对标记，返回是否真的剥掉了。
+
+        只认「光标紧贴在开标记之后、或闭标记之前」的成对标记：这是 `**|**`
+        与 `**文字|**` 两种「刚包好、想立刻取消」的姿态。判定只用光标所在块
+        的文本（行内格式不跨段落），并排除更长同类标记串的一半
+        （斜体不应把 `**粗体**` 削成 `*粗体*`）。
+
+        标记对是**从左往右两两配对**得到的，只认包住光标的那一对。不能直接
+        取「光标前最近的标记 + 光标后最近的标记」：那样上一段的闭标记与下一段
+        的开标记会被凑成一对，把相邻两段同类格式合并
+        （`**a** **b**` 光标贴中间按一次加粗 → `**a b**`）。
+        """
+        block = cursor.block()
+        line = block.text()
+        base = block.position()
+        col = cursor.position() - base
+        pair = None
+        search = 0
+        while True:
+            start = line.find(prefix, search)
+            if start < 0:
+                break
+            end = line.find(suffix, start + len(prefix))
+            if end < 0:
+                break
+            if col == start + len(prefix) or col == end:
+                pair = (start, end)
+                break
+            search = end + len(suffix)
+        if pair is None:
+            return False
+        prefix_start, suffix_start = pair
+        if prefix_start > 0 and line[prefix_start - 1] == prefix[0]:
+            return False
+        after_suffix = suffix_start + len(suffix)
+        if after_suffix < len(line) and line[after_suffix] == suffix[0]:
+            return False
+        cursor.setPosition(base + prefix_start)
+        cursor.setPosition(base + after_suffix,
+                           QTextCursor.MoveMode.KeepAnchor)
+        cursor.insertText(line[prefix_start + len(prefix):suffix_start])
+        cursor.setPosition(base + col - len(prefix))
+        return True
+
+    def format_bold(self) -> None:
+        self._wrap_inline("**", "**")
+
+    def format_italic(self) -> None:
+        # 斜体剥壳须排除 `**` 开头/结尾：`**粗体**` 按斜体应转粗斜体而非剥成 `*粗体*`；
+        # 粗斜体 `***x***` 例外——剥一层斜体恰好还原为 `**x**`
+        def guard(s: str) -> bool:
+            if s.startswith("***") and s.endswith("***"):
+                return True
+            return not s.startswith("**") and not s.endswith("**")
+        self._wrap_inline("*", "*", strip_guard=guard)
+
+    def format_inline_code(self) -> None:
+        # 剥壳只认「单反引号定界、内容里没有反引号」的简单代码段：
+        # ``a`b`` 这类多反引号定界剥一层会把内容里的反引号露成非法标记
+        self._wrap_inline(
+            "`", "`", strip_guard=lambda s: s[1] != "`" and s[-2] != "`"
+        )
+
+    def format_link(self) -> None:
+        self._wrap_inline("", "", link=True)
+
+    # ═══════════════════ 标题级别（阶段 2 G5） ═══════════════════
+
+    _HEADING_RE = re.compile(r"^(#{1,6})(\s|$)")
+
+    def set_heading_level(self, level: int) -> None:
+        """把当前行设为 level 级标题（0 = 清除标题标记）。
+
+        已是目标级别则清除（二次按同键 = 取消）；替换既有 `#` 前缀。
+        """
+        cursor = self.textCursor()
+        line = cursor.block().text()
+        offset = cursor.positionInBlock()
+        m = self._HEADING_RE.match(line)
+        stripped = line[m.end():] if m else line
+        if m and len(m.group(1)) == level:
+            new_line = stripped
+        else:
+            hashes = "#" * level + " " if level else ""
+            new_line = f"{hashes}{stripped}"
+        with self.programmatic_modify():
+            row_cursor = self.textCursor()
+            row_cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
+            row_cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock,
+                                    QTextCursor.MoveMode.KeepAnchor)
+            row_cursor.insertText(new_line)
+            # 整行替换会让光标失效：按原列位置归位（`#` 前缀长度变化量补上）
+            row_cursor.setPosition(
+                row_cursor.block().position()
+                + max(0, min(offset + len(new_line) - len(line), len(new_line)))
+            )
+            self.setTextCursor(row_cursor)
+
+    def _table_cell_cursor(self, row_no: int, row_text: str, col: int) -> bool:
+        """把光标定位到指定行的第 col 个单元格内容起点（跳过前导空白）。"""
+        pipes = [i for i, ch in enumerate(row_text) if ch == "|"]
+        lead = 1 if row_text.lstrip().startswith("|") else 0
+        p = col + lead
+        if p >= len(pipes):
+            return False
+        block = self.document().findBlockByNumber(row_no)
+        if not block.isValid():
+            return False
+        # 单元格内容位于 pipes[p-1] 与 pipes[p] 之间；无前导管道的首格从行首起
+        pos = block.position() + (pipes[p - 1] + 1 if p > 0 else 0)
+        doc = self.document()
+        end = block.position() + block.length() - 1
+        while pos < end and doc.characterAt(pos) == " ":
+            pos += 1
+        cursor = self.textCursor()
+        cursor.setPosition(pos)
+        self.setTextCursor(cursor)
+        return True
+
+    def _table_append_row(self, rows: list[str]) -> tuple[int, str]:
+        """表尾追加空行（列数取表头），返回 (行号, 新行文本)。"""
+        cols = len(self._table_cells(rows[0]))
+        new_row = self._table_render_row(["  "] * cols)
+        self._table_edit(lambda rs: rs + [new_row])
+        return len(rows), new_row
+
+    def _table_tab_next(self, backwards: bool = False) -> bool:
+        """表格内 Tab 导航（阶段 2 G3）。
+
+        跳到下一个 / 上一个可编辑单元格（自动跳过分隔行）；正向越过最后一格
+        时在表尾新建一行并落到其首格；反向越过表头返回 False（回落减缩进）。
+        返回是否处理了按键。
+        """
+        rows = self._table_rows_at_cursor()
+        if not rows:
+            return False
+        block = self.textCursor().block()
+        row_idx = self._cursor_row_index()
+        col_idx = self._table_current_cell_index(block.text())
+        start_no = self._table_start_block().blockNumber()
+
+        editable_cells = [
+            (r, c)
+            for r, row in enumerate(rows)
+            if not self._is_table_separator(row)
+            for c in range(len(self._table_cells(row)))
+        ]
+        cur = (row_idx, col_idx)
+        idx = editable_cells.index(cur) if cur in editable_cells else -1
+
+        if backwards:
+            if idx <= 0:
+                return False
+            r, c = editable_cells[idx - 1]
+            return self._table_cell_cursor(start_no + r, rows[r], c)
+
+        if idx == -1:
+            # 光标不在可编辑单元格上（例如停在分隔行）：跳到其后最近的单元格。
+            # 必须先于下面的 target 判断——idx 为 -1 时 target 会算成 0，
+            # 那是表格第一格，不是"光标之后的下一格"。
+            nxt = [x for x in editable_cells if x > cur]
+            if not nxt:
+                return False
+            r, c = nxt[0]
+            return self._table_cell_cursor(start_no + r, rows[r], c)
+
+        target = idx + 1
+        if target < len(editable_cells):
+            r, c = editable_cells[target]
+            return self._table_cell_cursor(start_no + r, rows[r], c)
+
+        # 已在最后一格：表尾新建一行并落到首格
+        r, new_row = self._table_append_row(rows)
+        return self._table_cell_cursor(start_no + r, new_row, 0)
+
+    # ═══════════════════ 表格对齐（阶段 2 G4） ═══════════════════
+
+    @staticmethod
+    def _display_width(text: str) -> int:
+        """按终端显示宽计算（East Asian Wide/Fullwidth 记 2），保证中文对齐。"""
+        return sum(
+            2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+            for ch in text
+        )
+
+    def table_format_align(self) -> None:
+        """按最宽单元格对齐管道符；分隔行保持各列原有的对齐标记。"""
+        def rebuild(rows: list[str]) -> list[str]:
+            grid = [self._table_cells(row) for row in rows]
+            ncols = max(len(cells) for cells in grid)
+            widths = [3] * ncols
+            aligns = ["left"] * ncols
+            for r_i, row in enumerate(rows):
+                if self._is_table_separator(row):
+                    for c, cell in enumerate(grid[r_i]):
+                        if c < ncols:
+                            aligns[c] = self._separator_alignment(cell)
+                    continue
+                for c, cell in enumerate(grid[r_i]):
+                    widths[c] = max(widths[c], self._display_width(cell.strip()))
+
+            out = []
+            for r_i, row in enumerate(rows):
+                if self._is_table_separator(row):
+                    cells = [
+                        " " + self._separator_cell(aligns[c], widths[c]) + " "
+                        for c in range(ncols)
+                    ]
+                else:
+                    cells = []
+                    for c in range(ncols):
+                        cell = grid[r_i][c].strip() if c < len(grid[r_i]) else ""
+                        pad = widths[c] - self._display_width(cell)
+                        cells.append(f" {cell}{' ' * (pad + 1)}")
+                out.append(self._table_render_row(cells))
+            return out
+        self._table_edit(rebuild)
+
+    @staticmethod
+    def _separator_alignment(cell: str) -> str:
+        """分隔单元格 → 对齐方式（left / center / right；无标记按 left）。"""
+        match = re.fullmatch(r"\s*(:?)-+(:?)\s*", cell)
+        if match is None:
+            return "left"
+        left, right = match.group(1), match.group(2)
+        if left and right:
+            return "center"
+        if right:
+            return "right"
+        return "left"
+
+    @staticmethod
+    def _separator_cell(alignment: str, width: int) -> str:
+        """对齐方式 + 列宽 → 分隔单元格文本（宽度不含对齐用的冒号）。"""
+        dashes = "-" * max(3, width)
+        if alignment == "center":
+            return f":{dashes}:"
+        if alignment == "right":
+            return f"{dashes}:"
+        return dashes
+
+    def table_align_left(self) -> None:
+        self._set_table_column_alignment("left")
+
+    def table_align_center(self) -> None:
+        self._set_table_column_alignment("center")
+
+    def table_align_right(self) -> None:
+        self._set_table_column_alignment("right")
+
+    def _set_table_column_alignment(self, alignment: str) -> None:
+        """设置光标所在列的对齐标记（只改分隔行那一格，其余原样保留）。"""
+        def rebuild(rows: list[str]) -> list[str]:
+            sep_idx = next(
+                (i for i in range(1, len(rows)) if self._is_table_separator(rows[i])),
+                -1,
+            )
+            if sep_idx < 0:
+                return rows
+            col = self._table_current_cell_index(rows[self._cursor_row_index()])
+            cells = self._table_cells(rows[sep_idx])
+            if col >= len(cells):
+                return rows
+            original = cells[col]
+            markers = self._separator_cell(alignment, original.count("-"))
+            # 保留该格原有的首尾空白，避免对齐命令把整齐的分隔行改成参差状
+            lead = original[: len(original) - len(original.lstrip())]
+            trail = original[len(original.rstrip()):]
+            cells[col] = f"{lead}{markers}{trail}"
+            out = list(rows)
+            out[sep_idx] = self._table_render_row(cells)
+            return out
+        self._table_edit(rebuild)
+
+    # ═══════════════════ 插入图片 ═══════════════════
+
+    def insert_image_from_file(self) -> None:
+        """选择本地图片，落盘到文档同级 PanzerNote_assets/ 后插入 Markdown 图片语法。
+
+        落盘与安全写入统一委托 ImageAssetService（经 FileGuard 原子写）。
+        """
+        if self._image_insert_document_path() is None:
+            return
+
+        source_path, _ = QFileDialog.getOpenFileName(
+            self, "插入图片", "", _IMAGE_FILE_FILTER
+        )
+        if not source_path:
+            return
+
+        self.insert_images_from_paths([source_path])
+
+    def insert_images_from_paths(
+        self, paths: list[str], origin: str = ORIGIN_FILE
+    ) -> None:
+        """把本地图片文件按序落盘到文档同级 PanzerNote_assets/ 并插入 Markdown 图片语法。
+
+        - 已是当前文档资源目录内的图片：零拷贝，只新增引用。
+        - 预览渲染不了的格式（HEIF/HEIC、TIFF 等）：**先转码**成 PNG/JPEG
+          再落盘，保证插入后预览能显示；源文件只读、绝不改写。
+        - 单个文件失败只告警并跳过，不阻断其余文件（拖入多图时保持其余可用）。
+        - origin 仅用于索引里的来路标记（文件对话框 / 拖入）。
+        """
+        document_path = self._image_insert_document_path()
+        if document_path is None:
+            return
+
+        file_guard = self.config.get_file_guard()
+        service = ImageAssetService(file_guard, ledger=self._open_image_ledger())
+        for source_path in paths:
+            original_name = os.path.basename(source_path)
+            # 来源已是当前文档自己的资源：零拷贝，只新增引用（文件管理器复制
+            # PanzerNote_assets 里的图片再粘贴进同一文档时，期望是引用而非副本）
+            local_ref = self._reference_if_own_asset(document_path, source_path)
+            if local_ref is not None:
+                alt = os.path.splitext(original_name)[0]
+                self._insert_markdown_image(alt, local_ref)
+                continue
+            try:
+                if _image_formats.needs_conversion(original_name):
+                    result = self._save_converted_image(
+                        service, document_path, source_path, original_name,
+                        file_guard, origin,
+                    )
+                else:
+                    data = file_guard.safe_read_bytes(
+                        source_path, context=FileAccessContext.USER_DOCUMENT_READ
+                    )
+                    result = service.save_image(
+                        document_path, data, original_name, origin=origin
+                    )
+            except ImageAssetError as exc:
+                QMessageBox.warning(self, "插入图片", str(exc))
+                continue
+            except Exception as exc:
+                QMessageBox.warning(self, "插入图片", f"插入图片失败: {exc}")
+                continue
+
+            alt = os.path.splitext(original_name)[0]
+            self._insert_markdown_image(alt, result.relative_path)
+
+    @staticmethod
+    def _save_converted_image(
+        service: ImageAssetService,
+        document_path: str,
+        source_path: str,
+        original_name: str,
+        file_guard: FileGuard,
+        origin: str,
+    ) -> ImageAssetResult:
+        """把非渲染格式（HEIF/TIFF…）解码后转码落盘，返回落盘结果。
+
+        转码目标是 PNG（带透明通道）或 JPEG（照片）；落盘名沿用原主干，
+        扩展名换成转码后的真实格式，避免 `x.heic` 里其实是 PNG 的错位。
+        """
+        encoded, reason = convert_to_web(source_path, file_guard)
+        if encoded is None:
+            raise ImageAssetError(reason or "图片转码失败")
+        stem = _image_formats.file_stem(original_name) or "image"
+        return service.save_image(
+            document_path,
+            encoded.data,
+            original_name=f"{stem}{encoded.extension}",
+            extension=encoded.extension,
+            origin=origin,
+        )
+
+    def _open_image_ledger(self) -> Optional[ImageAssetLedger]:
+        """打开图片资源隐藏索引；不可用时返回 None（插图照常，只是不留线索）。"""
+        try:
+            ledger = ImageAssetLedger(
+                self.config.get_path_resolver(), self.config.get_file_guard()
+            )
+            ledger.load()
+            return ledger
+        except Exception as exc:  # noqa: BLE001
+            get_logger(__name__).debug("图片资源索引不可用，本次跳过登记: %s", exc)
+            return None
+
+    @staticmethod
+    def _reference_if_own_asset(document_path: str, source_path: str) -> Optional[str]:
+        """来源文件位于当前文档的 PanzerNote_assets/ 内时，返回可直接插入的相对引用。
+
+        仅限「当前文档自己的资源目录」：其他文档 / 其他位置的图片仍走落盘复制，
+        保持各文档资源自包含。来源不在资源目录内时返回 None。
+        """
+        doc_dir = os.path.dirname(os.path.abspath(document_path))
+        assets_dir = os.path.join(doc_dir, ASSETS_DIRNAME)
+        source_abs = os.path.abspath(source_path)
+        if os.path.dirname(source_abs) != assets_dir:
+            return None
+        if not os.path.isfile(source_abs):
+            return None
+        return f"{ASSETS_DIRNAME}/{os.path.basename(source_abs)}"
+
+    @staticmethod
+    def _local_image_paths(mime: Optional[QMimeData]) -> list[str]:
+        """mime 中「全部为受支持的本地图片文件」时返回路径列表，否则返回空列表。
+
+        供拖入（E4）与剪贴板粘贴（E3）共用：任一 URL 非本地文件、或存在非图片
+        扩展名时返回空列表，调用方据此回退默认行为（拖放=冒泡打开、粘贴=纯文本）。
+        """
+        if mime is None or not mime.hasUrls():
+            return []
+        paths = []
+        for url in mime.urls():
+            if not url.isLocalFile():
+                return []
+            path = url.toLocalFile()
+            if not ImageAssetService.is_supported_image(path):
+                return []
+            paths.append(path)
+        return paths
+
+    def _is_markdown_document(self) -> bool:
+        """当前共享文档是否为 Markdown（不弹窗，供插入/粘贴/拖放前置判断复用）。"""
+        shared = getattr(self, "shared_doc", None)
+        return shared is not None and bool(getattr(shared, "is_markdown", False))
+
+    def _markdown_document_path(self) -> Optional[str]:
+        """Markdown 共享文档的路径；非 Markdown 或文档未保存时返回 None（不弹窗）。"""
+        shared = getattr(self, "shared_doc", None)
+        if shared is None or not getattr(shared, "is_markdown", False):
+            return None
+        filepath = getattr(shared, "filepath", None)
+        return str(filepath) if filepath else None
+
+    def _image_insert_document_path(self) -> Optional[str]:
+        """插入图片前置校验：返回可落盘的文档路径；不满足时提示并返回 None。"""
+        if not self._is_markdown_document():
+            QMessageBox.information(self, "插入图片", "仅 Markdown 文档支持插入图片。")
+            return None
+        document_path = self._markdown_document_path()
+        if document_path is None:
+            QMessageBox.information(self, "插入图片", "请先保存文档，再插入图片。")
+            return None
+        return document_path
+
+    def _insert_markdown_image(self, alt: str, relative_path: str) -> None:
+        """在当前光标插入 Markdown 图片语法（alt 经结构字符转义）。"""
+        cursor = self.textCursor()
+        cursor.beginEditBlock()
+        with self.programmatic_modify():
+            cursor.insertText(f"![{_escape_markdown_alt(alt)}]({relative_path})")
+        cursor.endEditBlock()
+        self.setTextCursor(cursor)
+        self.ensureCursorVisible()
+
+    def insert_image_from_mime(self, source: Optional[QMimeData]) -> bool:
+        """剪贴板来源的 mime 含图像时，落盘到 PanzerNote_assets/ 并插入相对路径。
+
+        支持两种剪贴板形态：图像数据（截图/位图）与图片文件 URL（文件管理器
+        复制文件）。仅 Markdown 文档处理；其余情况返回 False，交由默认文本粘贴。
+        未保存文档无落盘基准目录，提示后中止（不静默失败）。
+
+        Returns:
+            True 表示已按图片处理（调用方不应再走默认粘贴）；
+            False 表示未处理，应回退默认行为。
+        """
+        if source is None:
+            return False
+        if not self._is_markdown_document():
+            return False
+
+        # 文件管理器复制的图片文件：剪贴板是 text/uri-list、没有图像数据，
+        # 默认粘贴只会把文件路径当纯文本写进正文；此处与拖入（E4）保持一致。
+        image_paths = self._local_image_paths(source)
+        if image_paths:
+            self.insert_images_from_paths(image_paths)
+            return True
+
+        if not source.hasImage():
+            return False
+
+        document_path = self._markdown_document_path()
+        if document_path is None:
+            QMessageBox.information(self, "插入图片", "请先保存文档，再粘贴图片。")
+            return True
+
+        image = _to_qimage(source.imageData())
+        if image is None or image.isNull():
+            return False
+
+        try:
+            png_bytes = _encode_png(image)
+            file_guard = self.config.get_file_guard()
+            result = ImageAssetService(
+                file_guard, ledger=self._open_image_ledger()
+            ).save_image(
+                document_path, png_bytes, extension=".png", origin=ORIGIN_PASTE
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "插入图片", f"粘贴图片失败: {exc}")
+            return True
+
+        # 剪贴板无原始文件名，alt 留空
+        self._insert_markdown_image("", result.relative_path)
+        return True
 
     # ═══════════════════ 文档格式化 ═══════════════════
 

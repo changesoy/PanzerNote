@@ -19,14 +19,14 @@ from PyQt6.QtWidgets import (
     QInputDialog, QLabel, QDialog, QHBoxLayout, QComboBox,
     QPushButton, QLineEdit, QApplication, QToolButton
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QMimeData, QPoint
+from PyQt6.QtCore import Qt, pyqtSignal, QMimeData, QPoint, QEventLoop, QTimer
 from PyQt6.QtGui import QColor, QDrag, QAction, QImage, QPainter, QPixmap
 
 from ..core.config import Config
 from ..core import workspace_entries
 from ..core.document_registry import DocumentRegistry
 from ..core.document_view_binding import DocumentViewBinding
-from ..core.shared_document import ViewState
+from ..core.shared_document import SaveStatus, ViewState
 from ..utils.logger import get_logger
 from ..utils.error_handler import ErrorHandler, ErrorCategory
 from ..utils.feature_flags import is_enabled
@@ -40,7 +40,15 @@ from .find_replace import FindReplaceBar
 from .save_task_manager import SaveTaskManager, SaveState
 from .temp_session_manager import TempSessionManager
 from .eol_utils import detect_eol_from_bytes
-
+from .image_reference_scanner import find_missing_local_images, rewrite_local_refs
+from .asset_migration_service import (
+    MODE_COPY,
+    MODE_MOVE,
+    AssetMigrationPlan,
+    AssetMigrationService,
+)
+from .asset_recovery_dialog import AssetRecoveryDialog
+from .asset_recovery_service import AssetRecoveryService
 
 # ════════════════════════════════════════════════════════
 #  另存为对话框
@@ -182,19 +190,29 @@ class DraggableTabBar(QTabBar):
             return
 
         widget = tab_widget.widget(self._drag_tab_index)
-        tab_id = getattr(widget, 'tab_id', None) if widget else None
-        if tab_id is None:
+        if widget is None:
+            super().mouseMoveEvent(event)
+            return
+        # 图片标签按设计不带 tab_id（不参与保存状态机），但同样应可拖拽跨分屏迁移：
+        # 用 image_path 作身份标记塞进 MIME_TAB_ID（接收方只判「存在该格式」，不解析内容）。
+        tab_id = getattr(widget, 'tab_id', None)
+        identity = tab_id if tab_id is not None else getattr(widget, 'image_path', None)
+        if identity is None:
             super().mouseMoveEvent(event)
             return
 
-        filepath = tab_widget._get_filepath_for_index(self._drag_tab_index) or ""
+        # 图片标签不携带文件路径：否则拖到文件树会触发「移动图片文件」这类副作用
+        # （本版未定义该行为，保持与迁移一致的纯内部搬动）。
+        filepath = ""
+        if tab_id is not None:
+            filepath = tab_widget._get_filepath_for_index(self._drag_tab_index) or ""
 
         # 发起 QDrag
         # 注意：MIME_TAB_FILEPATH 仅对已保存文件设置——空数据格式在平台拖拽协议中
         # 可能被丢弃，导致目标 hasFormat 判断失败；未命名标签靠 MIME_TAB_ID 识别。
         drag = QDrag(self)
         mime = QMimeData()
-        mime.setData(MIME_TAB_ID, str(tab_id).encode('utf-8'))
+        mime.setData(MIME_TAB_ID, str(identity).encode('utf-8'))
         if filepath:
             mime.setData(MIME_TAB_FILEPATH, filepath.encode('utf-8'))
         drag.setMimeData(mime)
@@ -313,6 +331,10 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     # Batch 4：文档打开/关闭事件（filepath；未命名文档不触发）
     document_opened = pyqtSignal(str)
     document_closed = pyqtSignal(str)
+    # E6b：文档引用的本地图片缺失（filepath, 缺失资源的规范化绝对路径列表）
+    missing_images_detected = pyqtSignal(str, list)
+    # E6c2：断链恢复执行完成（filepath, 已恢复并删源数, 已复制恢复数, 仍未恢复数）
+    asset_recovery_finished = pyqtSignal(str, int, int, int)
 
     def __init__(
         self,
@@ -508,6 +530,10 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         widget = source_tabs.widget(index)
         if widget is None:
             return False
+        # 图片标签无 Document / 无 tab_id，走独立分支：只搬 widget 本身
+        image_path = getattr(widget, 'image_path', None)
+        if image_path is not None:
+            return self._migrate_image_tab_from(source_tabs, index, str(image_path))
         tab_id = getattr(widget, 'tab_id', None)
         if tab_id is None:
             return False
@@ -572,6 +598,29 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         # 关键：每个面板 _next_tab_id 独立计数，提升避免未来生成重复 tab_id
         self._next_tab_id = max(self._next_tab_id, tab_id + 1)
         self._update_tab_tooltip(self.indexOf(widget))
+        self.tab_count_changed.emit(self.count())
+        return True
+
+    def _migrate_image_tab_from(
+        self, source_tabs: "EditorTabWidget", index: int, image_path: str
+    ) -> bool:
+        """图片标签跨分屏迁移：无 Document / 无 tab_id，只搬 widget 本身。
+
+        不涉及保存状态机与 Document 注册表（图片标签本就不在两者中）；
+        迁移后 `_close_tab` 仍走「无 tab_id」分支直接移除，不弹保存确认。
+        tooltip 需显式设为图片路径——`_update_tab_tooltip` 对无 Document 的
+        标签会写「未保存」，对图片标签是错的。
+        """
+        if source_tabs is self:
+            return False
+        widget = source_tabs.widget(index)
+        if widget is None:
+            return False
+        title = source_tabs.tabText(index)
+        source_tabs.removeTab(index)
+        source_tabs.tab_count_changed.emit(source_tabs.count())
+        new_index = self.addTab(widget, title)
+        self.setTabToolTip(new_index, image_path)
         self.tab_count_changed.emit(self.count())
         return True
 
@@ -778,6 +827,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         self._update_tab_tooltip(index)
         # Batch 4：文档打开事件（仅带路径文档）
         self.document_opened.emit(filepath)
+        if is_md:
+            self._notify_missing_images(widget, filepath)
 
         # 恢复书签
         saved_bookmarks = self.config.get_bookmarks(filepath)
@@ -880,6 +931,34 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         # Batch 4：跨面板共享视图打开同一文档也视为 document.opened
         if shared_doc.filepath:
             self.document_opened.emit(shared_doc.filepath)
+            if is_md:
+                self._notify_missing_images(widget, shared_doc.filepath)
+        return int(index)
+
+    def open_image_tab(self, filepath: str, file_guard, *, activate: bool = True) -> int:
+        """以标签页形式打开图片（只读查看器）。
+
+        图片标签与文档标签同族但无 Document：不带 `tab_id` / `shared_doc`，
+        因此关闭走 `_close_tab` 的「无 tab_id」分支（直接移除，不涉及保存/脏确认）；
+        编辑类命令经 `current_editor()` 返回 None 自然失效。
+        同一张图片已打开时聚焦既有标签，不重复开。
+        """
+        from .image_viewer import ImageViewerWidget
+
+        target = os.path.abspath(filepath)
+        for i in range(self.count()):
+            widget = self.widget(i)
+            if getattr(widget, "image_path", None) == target:
+                if activate:
+                    self.setCurrentIndex(i)
+                return i
+
+        viewer = ImageViewerWidget(target, file_guard)
+        index = self.addTab(viewer, os.path.basename(target))
+        self.setTabToolTip(index, target)
+        if activate:
+            self.setCurrentIndex(index)
+        self.tab_count_changed.emit(self.count())
         return int(index)
 
     def save_current(self) -> Tuple[bool, int]:
@@ -950,6 +1029,20 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
         # D3b：is_new 语义 = filepath is None；编号/副本判定读 Document
         is_new = shared_doc is None or shared_doc.filepath is None
+
+        # 副本另存为：副本引用的图片资源要一并落到目标目录（COPY 语义）。
+        # 预检放在写盘之前——此时 .md 尚未落位，冲突仍可整体中止；
+        # Copy 语义不排除源文档，因此源笔记的图不会被搬走。
+        migration: Optional[AssetMigrationPlan] = None
+        if not is_new and shared_doc is not None and shared_doc.filepath:
+            migration = self._plan_asset_migration(shared_doc.filepath, filepath, MODE_COPY)
+            if migration is not None and not migration.ok:
+                self._warn_asset_conflict("另存为", migration.conflicts)
+                self._document_registry.cancel_reservation(
+                    shared_doc.document_id, filepath
+                )
+                return False, 0
+
         success, chars = self._save_file(
             widget, filepath, encoding, is_copy=not is_new
         )
@@ -964,6 +1057,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                                        if is_new else None,
                     # 已有文件另存为 = 副本保存：当前标签保持指向原文件
                     "is_copy": not is_new,
+                    # 副本落盘成功后才执行（CLEAN 回调），失败不迁移
+                    "migration": migration,
                 }
 
         return success, chars
@@ -1692,19 +1787,40 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         stripped = self._strip_tab_suffix(title)
         self.setTabText(index, name + title[len(stripped):])
 
-    @staticmethod
-    def _on_view_path_changed(widget, path: str) -> None:
+    def _notify_missing_images(self, widget, filepath: str) -> None:
+        """E6b：扫描文档引用的本地图片，缺失则发出信号（提示形态由接收方决定）。
+
+        只读检测，不与渲染循环绑定；触发点为文档打开与资源根（base_path）变化。
+        检测失败不得影响打开 / 渲染，故异常仅记 debug 日志。
+        """
+        if not filepath or not self._is_markdown_file(filepath):
+            return
+        editor = self._get_editor_from_widget(widget)
+        if editor is None:
+            return
+        base_dir = os.path.dirname(os.path.abspath(filepath))
+        try:
+            missing = find_missing_local_images(base_dir, editor.toPlainText())
+        except Exception as exc:
+            get_logger(__name__).debug("图片引用缺失检测失败: %s", exc)
+            return
+        if missing:
+            self.missing_images_detected.emit(filepath, missing)
+
+    def _on_view_path_changed(self, widget, path: str) -> None:
         """Document.pathChanged → 本 View 预览基准跟随（规格 2.8）。
 
         D3b：路径 authority 在 Document——pathChanged 由 bind_path 广播给所有
         View 时无需再回写状态（路径读点全部走 Document）。
-        仅保留预览 widget 的 base_path / invalidate 副作用。
+        保留预览 widget 的 base_path / invalidate 副作用；
+        E6b：资源根变化后按新基准复核图片引用缺失。
         """
         if not isinstance(widget, MarkdownPreviewWidget):
             return
         base = os.path.dirname(os.path.abspath(path)) if path else "."
         widget.set_base_path(base)
         widget.invalidate_preview()  # 下次激活/内容变化时以新基准重渲染
+        self._notify_missing_images(widget, path)
 
     @staticmethod
     def _close_md_preview(widget) -> None:
@@ -2064,6 +2180,14 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 self._document_registry.cancel_reservation(
                     shared_doc.document_id, save_as_info["filepath"]
                 )
+                # 副本已落盘 → 迁移其引用的图片资源（COPY，源笔记的图不动）
+                self._apply_asset_migration(save_as_info.get("migration"))
+                # 目标同名冲突已改名 → 只改写这份副本（标签仍指向原文件，不动缓冲区）
+                self._rewrite_asset_refs(
+                    save_as_info.get("migration"),
+                    save_as_info["filepath"],
+                    save_as_info.get("encoding"),
+                )
                 # 恢复标题（去除 SAVING 阶段追加的 ⏳ 后缀）
                 self.setTabText(index, base_title)
                 if tab_id in self._pending_close_tab_ids:
@@ -2409,6 +2533,13 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         for editor in self._iter_editors():
             editor.set_wrap_mode(mode)
 
+    def set_preview_wrap_mode_all(self, mode: str):
+        """把「预览行宽」设置广播到所有 Markdown 预览（与编辑区行宽互不影响）。"""
+        for i in range(self.count()):
+            widget = self.widget(i)
+            if isinstance(widget, MarkdownPreviewWidget):
+                widget.set_preview_wrap_mode(mode)
+
     def toggle_md_preview(self):
         """切换当前MD标签的预览"""
         widget = self.currentWidget()
@@ -2500,9 +2631,187 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
     # === 文件移动（供标签拖拽使用） ===
 
+    def _document_text(self, filepath: str) -> Optional[str]:
+        """已打开文档的**编辑器当前内容**（未打开返回 None，回落到磁盘）。
+
+        预检必须看到用户眼里的内容：保存是异步的，刚插入的引用此刻可能还没落盘。
+        """
+        for i in range(self.count()):
+            widget = self.widget(i)
+            w_doc = getattr(widget, "shared_doc", None)
+            if w_doc is None or w_doc.filepath != filepath:
+                continue
+            editor = self._get_editor_from_widget(widget)
+            if editor is None:
+                return None
+            return editor.toPlainText()
+        return None
+
+    def _plan_asset_migration(
+        self, source_md: str, dest_md: str, mode: str
+    ) -> Optional[AssetMigrationPlan]:
+        """E6c1a：资源迁移预检；服务不可用时返回 None（不阻断文档移动本身）。"""
+        if not self._is_markdown_file(source_md):
+            return None
+        try:
+            return AssetMigrationService(self.config).plan(
+                source_md, dest_md, mode,
+                markdown_text=self._document_text(source_md),
+            )
+        except Exception as exc:  # noqa: BLE001
+            get_logger(__name__).warning("图片资源迁移预检失败，按不迁移处理: %s", exc)
+            return None
+
+    def _apply_asset_migration(self, plan: Optional[AssetMigrationPlan]) -> None:
+        """执行资源迁移：`copy → verify → delete`；失败只记日志，源文件不丢。
+
+        迁移失败的引用会变成断链，由 E6b 的缺失检测在下次打开 / 基准变化时提示。
+        """
+        if plan is None or not plan.ok or not plan.items:
+            return
+        try:
+            result = AssetMigrationService(self.config).apply(plan)
+        except Exception as exc:  # noqa: BLE001
+            get_logger(__name__).error("图片资源迁移执行失败: %s", exc)
+            return
+        if result.failed:
+            get_logger(__name__).warning(
+                "有 %d 个图片资源未能迁移（源文件保留）", len(result.failed)
+            )
+
+    @staticmethod
+    def _decode_document_bytes(
+        raw: bytes, encoding: Optional[str]
+    ) -> Optional[Tuple[str, str]]:
+        """解码文档字节：优先已知编码，未知时按打开文档的同一顺序兜底。"""
+        candidates: List[str] = []
+        for name in ([encoding] if encoding else []) + ["utf-8", "gbk", "utf-16"]:
+            if name and name.lower() not in [item.lower() for item in candidates]:
+                candidates.append(name)
+        for candidate in candidates:
+            try:
+                return raw.decode(candidate), candidate
+            except (UnicodeDecodeError, LookupError):
+                continue
+        return None
+
+    def _rewrite_asset_refs(
+        self,
+        plan: Optional[AssetMigrationPlan],
+        doc_path: str,
+        encoding: Optional[str] = None,
+        *,
+        shared_doc=None,
+    ) -> None:
+        """冲突改名后，把这一篇文档里的引用改写到新文件名（E6c1b2）。
+
+        只动 `doc_path` 这一篇：Move = 已搬到目标的 `.md`，Copy / Save As = 新写出的
+        副本，源文档逐字不动。读写走字节级（解码 → 只替换目标串区间 → 原编码写回），
+        BOM / 行尾 / 未改动内容都逐字节保留。
+        """
+        renames = plan.renames() if plan is not None else {}
+        if not renames:
+            return
+        if shared_doc is not None and shared_doc.dirty:
+            # 缓冲区与磁盘不一致（保存未落地）：改写任何一侧都可能丢用户改动。
+            # 交给 E6b 缺失检测兜底，不在这里赌。
+            get_logger(__name__).warning(
+                "文档尚有未保存改动，跳过图片引用改写: %s", doc_path
+            )
+            return
+
+        guard = self.config.get_file_guard()
+        try:
+            raw = guard.safe_read_bytes(
+                doc_path, context=FileAccessContext.USER_DOCUMENT_READ
+            )
+        except Exception as exc:  # noqa: BLE001
+            get_logger(__name__).warning("读取文档以改写图片引用失败: %s", exc)
+            return
+
+        decoded = self._decode_document_bytes(raw, encoding)
+        if decoded is None:
+            get_logger(__name__).warning("文档编码无法识别，跳过图片引用改写: %s", doc_path)
+            return
+        text, used_encoding = decoded
+
+        updated, count = rewrite_local_refs(
+            text, os.path.dirname(os.path.abspath(doc_path)), renames
+        )
+        if not count:
+            return
+
+        try:
+            guard.safe_write_bytes(
+                doc_path,
+                updated.encode(used_encoding),
+                context=FileAccessContext.USER_DOCUMENT_SAVE,
+            )
+        except Exception as exc:  # noqa: BLE001
+            get_logger(__name__).warning("改写文档图片引用失败: %s", exc)
+            return
+
+        if shared_doc is not None:
+            # 缓冲区必须与磁盘一致，否则标签里的引用仍是旧文件名（D21）。
+            # 编辑器内部一律用 LF 表示，故按 LF 归一化后回写 Document。
+            from .eol_utils import normalize_eol
+            shared_doc.set_content(normalize_eol(updated, "\n"))
+
+    def _warn_asset_conflict(self, title: str, conflicts: List[str]) -> None:
+        shown = "、".join(os.path.basename(path) for path in conflicts[:5])
+        more = f" 等 {len(conflicts)} 个" if len(conflicts) > 5 else ""
+        QMessageBox.warning(
+            self, title,
+            "目标目录已有同名但内容不同的图片，本次未做任何改动：\n\n"
+            f"{shown}{more}\n\n请先处理同名文件后重试。",
+        )
+
+    @staticmethod
+    def _is_same_folder(filepath: str, dest_folder: str) -> bool:
+        """目标文件夹是否就是文件自身所在目录（拖到自身目录 = 原地不动）。"""
+        return os.path.normcase(os.path.abspath(dest_folder)) == os.path.normcase(
+            os.path.abspath(os.path.dirname(filepath))
+        )
+
+    def _await_save_settled(self, shared_doc, timeout_ms: int = 5000) -> bool:
+        """等待该 Document 的在途保存落地；返回是否已无在途保存。
+
+        移动 / 复制前必须等：在途保存任务持有的是**旧路径**，文件被移走后它会把
+        旧路径重新写出来（幽灵文件 + 新旧位置内容错位）。判定用 Document 级保存
+        状态，可一并覆盖分屏中另一面板正在保存同一文档的情形。
+        """
+        if shared_doc is None or shared_doc.save_status != SaveStatus.SAVING:
+            return True
+
+        loop = QEventLoop()
+        timer = QTimer()
+        timer.setSingleShot(True)
+        timer.timeout.connect(loop.quit)
+
+        def _check(_state: str) -> None:
+            if shared_doc.save_status != SaveStatus.SAVING:
+                loop.quit()
+
+        shared_doc.saveStateChanged.connect(_check)
+        timer.start(timeout_ms)
+        try:
+            if shared_doc.save_status == SaveStatus.SAVING:
+                loop.exec()
+        finally:
+            timer.stop()
+            try:
+                shared_doc.saveStateChanged.disconnect(_check)
+            except TypeError:
+                pass
+        return bool(shared_doc.save_status != SaveStatus.SAVING)
+
     def move_file_to_folder(self, filepath: str, dest_folder: str) -> bool:
-        """将文件移动到目标文件夹，更新对应标签页"""
+        """将文件移动到目标文件夹，更新对应标签页（含图片资源迁移）"""
         if not os.path.isfile(filepath) or not os.path.isdir(dest_folder):
+            return False
+        # 目标是文件自己所在的文件夹：原地不动。否则会弹「文件已存在，是否覆盖？」
+        # 这种自问自答；copy_file_to_folder 更会走到 shutil 的 SameFileError。
+        if self._is_same_folder(filepath, dest_folder):
             return False
 
         filename = os.path.basename(filepath)
@@ -2517,6 +2826,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             if msg != QMessageBox.StandardButton.Yes:
                 return False
 
+        # 资源预检放在「先保存」之后、`.md` 落位之前：预检读的是磁盘内容，
+        # 若文档有未保存的改动，必须先落盘才能看到最新引用；冲突则整体中止。
+        migration: Optional[AssetMigrationPlan] = None
         try:
             # 先保存再移动（3.5.8 R2：共享 Document 以 Document 侧 dirty 为准）
             shared_doc = None
@@ -2531,6 +2843,12 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                         self._save_file(widget, filepath, shared_doc.encoding)
                     break
 
+            # 在途保存落地前不得移动文件：保存任务持有旧路径，移动后会把旧路径
+            # 重新写出来（幽灵文件 + 新旧位置内容错位）。
+            if not self._await_save_settled(shared_doc):
+                QMessageBox.warning(self, "无法移动", "文档正在保存，请稍后再试。")
+                return False
+
             # 3.5.8：共享 Document 移动前检查目标路径未被其它 Document 占用
             # （否则移动后两个 Document 指向同一路径，编辑/保存错乱）
             if (shared_doc is not None
@@ -2540,6 +2858,11 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                     self, "无法移动",
                     f"目标文件已在其他面板打开，不能移动：\n{new_path}",
                 )
+                return False
+
+            migration = self._plan_asset_migration(filepath, new_path, MODE_MOVE)
+            if migration is not None and not migration.ok:
+                self._warn_asset_conflict("无法移动", migration.conflicts)
                 return False
 
             shutil.move(filepath, new_path)
@@ -2554,6 +2877,16 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                     self._document_registry.move_path(w_doc, new_path)
                     break
 
+            # .md 已落位后再迁移资源：迁移本身有 copy → verify 保底（源不丢），
+            # 万一失败只是新文档断链，不会让原笔记丢图。
+            self._apply_asset_migration(migration)
+            # 目标同名冲突已改名 → 改写这份文档的引用，并同步编辑器缓冲区
+            self._rewrite_asset_refs(
+                migration,
+                new_path,
+                shared_doc.encoding if shared_doc is not None else None,
+                shared_doc=shared_doc,
+            )
             return True
         except Exception as e:
             get_logger(__name__).error("移动文件失败: %s", e)
@@ -2563,6 +2896,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     def copy_file_to_folder(self, filepath: str, dest_folder: str) -> bool:
         """将文件复制到目标文件夹（标签已打开且已修改则先保存再复制，不改动原标签）"""
         if not os.path.isfile(filepath) or not os.path.isdir(dest_folder):
+            return False
+        # 复制到文件自己所在的文件夹没有意义，且 shutil.copy2 会抛 SameFileError。
+        if self._is_same_folder(filepath, dest_folder):
             return False
 
         filename = os.path.basename(filepath)
@@ -2577,18 +2913,43 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             if msg != QMessageBox.StandardButton.Yes:
                 return False
 
+        # 资源预检放在「先保存」之后、副本落位之前：预检读磁盘内容，
+        # 未保存的改动必须先落盘才能被看到；冲突则整体中止。
+        migration: Optional[AssetMigrationPlan] = None
         try:
             # 若标签打开且已修改，先保存再复制，保证副本包含最新内容
+            shared_doc = None
             for i in range(self.count()):
                 widget = self.widget(i)
                 # D3b：路径读 Document
                 w_doc = getattr(widget, "shared_doc", None)
                 if w_doc is not None and w_doc.filepath == filepath:
+                    shared_doc = w_doc
                     if w_doc.dirty:
                         self._save_file(widget, filepath, w_doc.encoding)
                     break
 
+            # 在途保存落地前不得复制：保存任务持有旧路径，源文件内容随后才更新，
+            # 副本会拿到保存前的旧内容。
+            if not self._await_save_settled(shared_doc):
+                QMessageBox.warning(self, "无法复制", "文档正在保存，请稍后再试。")
+                return False
+
+            migration = self._plan_asset_migration(filepath, new_path, MODE_COPY)
+            if migration is not None and not migration.ok:
+                self._warn_asset_conflict("无法复制", migration.conflicts)
+                return False
+
             shutil.copy2(filepath, new_path)
+            # 副本已落位后再迁移资源；Copy 语义下源文档仍引用同一张图，
+            # 独占判定因此天然得出 COPY（不会把源笔记的图搬走）。
+            self._apply_asset_migration(migration)
+            # 目标同名冲突已改名 → 只改写这份副本，源文档与打开的标签都不动
+            self._rewrite_asset_refs(
+                migration,
+                new_path,
+                shared_doc.encoding if shared_doc is not None else None,
+            )
             return True
         except Exception as e:
             get_logger(__name__).error("复制文件失败: %s", e)
@@ -2601,11 +2962,21 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         - 未修改的标签直接关闭；
         - 已修改的标签弹确认（关闭 = 放弃未保存的修改，不重新保存）。
         这是删除语义：此时"保存"只会把已删除的文件重新创建回来。
+        图片标签没有 Document，按 `image_path` 匹配后同样关闭（否则会留一个
+        指向已不存在文件的空白/报错标签）。
         """
         norm = os.path.normpath(path)
         indices = []
         for i in range(self.count()):
             widget = self.widget(i)
+            image_path = getattr(widget, "image_path", None)
+            if image_path:
+                matched = os.path.normpath(image_path) == norm or (
+                    is_dir and os.path.normpath(image_path).startswith(norm + os.sep)
+                )
+                if matched:
+                    indices.append(i)
+                continue
             # D3b：路径读 Document
             w_doc = getattr(widget, "shared_doc", None)
             if w_doc is None or not w_doc.filepath:
@@ -2621,6 +2992,25 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         # 从后往前关闭，避免索引随 removeTab 偏移
         for i in reversed(indices):
             self._close_deleted_tab(i)
+
+    def update_tabs_of_renamed_path(self, old: str, new: str) -> None:
+        """文件树重命名后，同步更新图片标签持有的路径、标题与显示内容。
+
+        只处理图片标签：文档标签的路径由 Document 持有，改名走保存/另存为链路。
+        """
+        from .image_viewer import ImageViewerWidget
+
+        old_norm = os.path.normpath(old)
+        for i in range(self.count()):
+            widget = self.widget(i)
+            if not isinstance(widget, ImageViewerWidget):
+                continue
+            image_path = widget.image_path
+            if not image_path or os.path.normpath(image_path) != old_norm:
+                continue
+            widget.reload_to(new)
+            self.setTabText(i, os.path.basename(new))
+            self.setTabToolTip(i, os.path.abspath(new))
 
     def _close_deleted_tab(self, index: int) -> None:
         """关闭单个标签（文件已被删除，不提供"保存"选项）。"""
@@ -2781,6 +3171,70 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if editor:
             editor.move_line_down()
 
+    # === 插入图片代理 ===
+
+    def insert_image_from_file(self):
+        """插入图片：委托当前编辑器写入 PanzerNote_assets/ 并插入相对路径。"""
+        editor = self.current_editor()
+        if editor:
+            editor.insert_image_from_file()
+
+    # === 图片恢复代理（E6c2） ===
+
+    def recover_missing_images(self) -> bool:
+        """恢复当前文档断链的图片。
+
+        流程：预检（ledger 线索 + 可证明范围独占判定）→ 对话框确认 → 执行。
+        执行沿用迁移服务的 `copy → verify → delete` 保底，失败不丢源文件。
+        """
+        widget = self.currentWidget()
+        if widget is None:
+            return False
+        shared_doc = getattr(widget, "shared_doc", None)
+        filepath = shared_doc.filepath if shared_doc is not None else None
+        editor = self._get_editor_from_widget(widget)
+        if editor is None or not filepath or not self._is_markdown_file(filepath):
+            QMessageBox.information(
+                self, "恢复缺失的图片", "仅已保存的 Markdown 文档支持图片恢复。"
+            )
+            return False
+
+        # 预检读编辑器当前内容：保存是异步的，刚插入的引用此刻可能还没落盘
+        if shared_doc is not None and shared_doc.dirty:
+            self._save_file(widget, filepath, shared_doc.encoding)
+            if not self._await_save_settled(shared_doc):
+                QMessageBox.warning(self, "无法恢复", "文档正在保存，请稍后再试。")
+                return False
+
+        service = AssetRecoveryService(self.config)
+        try:
+            plan = service.plan(filepath, editor.toPlainText())
+        except Exception as exc:  # noqa: BLE001
+            get_logger(__name__).warning("图片恢复预检失败: %s", exc)
+            return False
+        if not plan.items:
+            QMessageBox.information(
+                self, "恢复缺失的图片", "当前文档没有缺失的图片资源。"
+            )
+            return False
+
+        dialog = AssetRecoveryDialog(plan, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return False
+
+        try:
+            result = service.apply(plan)
+        except Exception as exc:  # noqa: BLE001
+            get_logger(__name__).error("图片恢复执行失败: %s", exc)
+            return False
+
+        # 汇总仍缺失的项：本就判为需人工 + 执行时失败 / 目标被占用的
+        remaining = len(plan.needs_user) + result.failed + result.skipped
+        self.asset_recovery_finished.emit(
+            filepath, result.moved, result.copied, remaining
+        )
+        return True
+
     # === 大小写转换代理 ===
 
     def toggle_case(self):
@@ -2802,6 +3256,90 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         editor = self.current_editor()
         if editor:
             editor.to_titlecase()
+
+    # === Markdown 编辑代理（阶段 2：任务列表 / 表格） ===
+
+    def toggle_task_checkbox(self):
+        editor = self.current_editor()
+        if editor:
+            editor.toggle_task_checkbox()
+
+    def table_insert_row_above(self):
+        editor = self.current_editor()
+        if editor:
+            editor.table_insert_row_above()
+
+    def table_insert_row_below(self):
+        editor = self.current_editor()
+        if editor:
+            editor.table_insert_row_below()
+
+    def table_delete_row(self):
+        editor = self.current_editor()
+        if editor:
+            editor.table_delete_row()
+
+    def table_insert_column_left(self):
+        editor = self.current_editor()
+        if editor:
+            editor.table_insert_column_left()
+
+    def table_insert_column_right(self):
+        editor = self.current_editor()
+        if editor:
+            editor.table_insert_column_right()
+
+    def table_delete_column(self):
+        editor = self.current_editor()
+        if editor:
+            editor.table_delete_column()
+
+    def table_format_align(self):
+        editor = self.current_editor()
+        if editor:
+            editor.table_format_align()
+
+    def table_align_left(self):
+        editor = self.current_editor()
+        if editor:
+            editor.table_align_left()
+
+    def table_align_center(self):
+        editor = self.current_editor()
+        if editor:
+            editor.table_align_center()
+
+    def table_align_right(self):
+        editor = self.current_editor()
+        if editor:
+            editor.table_align_right()
+
+    # === 行内格式 / 标题代理（阶段 2 G2/G5） ===
+
+    def format_bold(self):
+        editor = self.current_editor()
+        if editor:
+            editor.format_bold()
+
+    def format_italic(self):
+        editor = self.current_editor()
+        if editor:
+            editor.format_italic()
+
+    def format_inline_code(self):
+        editor = self.current_editor()
+        if editor:
+            editor.format_inline_code()
+
+    def format_link(self):
+        editor = self.current_editor()
+        if editor:
+            editor.format_link()
+
+    def set_heading_level(self, level: int):
+        editor = self.current_editor()
+        if editor:
+            editor.set_heading_level(level)
 
     # === 转到行 ===
 

@@ -14,22 +14,30 @@ from typing import Optional
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QTreeView, QLabel, QMenu,
     QInputDialog, QMessageBox,
-    QFrame, QAbstractItemView
+    QFrame, QAbstractItemView, QStyleOptionViewItem
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QModelIndex, QMimeData, QTimer
-from PyQt6.QtGui import QFont, QAction, QFileSystemModel
+from PyQt6.QtGui import (
+    QColor, QFont, QAction, QFileSystemModel, QDragLeaveEvent, QPainter,
+)
 
 from ..core.config import Config
 from ..utils.logger import get_logger
 from ..utils.error_handler import ErrorHandler, ErrorCategory
 from ..security.input_validator import FilenameValidationError
 from ..themes.theme_aware_mixin import ThemeAwareMixin
-from ..themes.theme_v2.consumer import v2_token
+from ..themes.theme_v2.consumer import v2_token, v2_color_qcolor
+from .image_formats import VIEWABLE, filter_patterns, is_viewable
 
 
 MIME_TAB_FILEPATH = "application/x-panzernote-tab-filepath"
 # 3.5.11：与 editor_tabs.py 同值；未命名标签（无 filepath）落盘保存时定位源标签
 MIME_TAB_ID = "application/x-panzernote-tab-id"
+
+# 落点高亮的不透明度（0-255）。主题的 drop_indicator 是纯色强调色（默认取
+# focus），整行铺满会过于抢眼；高亮又只能压在该行文字之上（见 drawRow），
+# 取约 16% 既能让整行看得出被点亮，文字观感也基本不变。
+_DROP_HIGHLIGHT_ALPHA = 40
 
 
 class AlwaysExpandableModel(QFileSystemModel):
@@ -40,6 +48,22 @@ class AlwaysExpandableModel(QFileSystemModel):
         if self.isDir(parent):
             return True
         return False
+
+    def canDropMimeData(self, data, action, row, column, parent):
+        """让「标签拖拽」在模型侧也被视为可接受。
+
+        标签拖拽只带自定义 MIME（刻意不带 text/uri-list），基类拖拽循环会因
+        模型拒绝而给不出「可放置」的光标反馈。放行仅为这一件事：落点提示本身
+        已改由 DroppableTreeView 自绘（见 drawRow），实际落盘也由它的 dropEvent
+        接管，都不走模型的 dropMimeData。
+        """
+        if data is not None and (
+            data.hasFormat(MIME_TAB_FILEPATH) or data.hasFormat(MIME_TAB_ID)
+        ):
+            if action == Qt.DropAction.IgnoreAction or not parent.isValid():
+                return False
+            return self.isDir(parent)
+        return super().canDropMimeData(data, action, row, column, parent)
 
 
 class ExternalFileLabel(QLabel):
@@ -70,9 +94,43 @@ class DroppableTreeView(QTreeView):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAcceptDrops(True)
-        # B6（8.1 拖拽视觉）：显示拖拽落点指示线（颜色由全局 tree_item
-        # recipe 的 drop_indicator 控制）
-        self.setDropIndicatorShown(True)
+        # 落点提示改由本视图自绘（见 set_drop_highlight_color / drawRow）：
+        # 原生指示器画的是系统调色板色的整圈边框、不随主题走，且同一张表上
+        # 「拖标签」与「树内拖拽」的观感还会因光标落在行中央 / 行边缘而不同
+        # （整行框 vs 一条线）。自绘后两者共用同一条路径，只剩整行浅色高亮。
+        self.setDropIndicatorShown(False)
+        self._drop_target = QModelIndex()
+        self._drop_highlight = QColor("#2196F3")
+
+    def _update_viewport(self) -> None:
+        """重绘树视图区（PyQt 的 viewport() 返回 Optional，需显式判空）。"""
+        viewport = self.viewport()
+        if viewport is not None:
+            viewport.update()
+
+    def set_drop_highlight_color(self, color: QColor) -> None:
+        """设置落点高亮色（主题 drop_indicator，通常带透明通道）。"""
+        self._drop_highlight = color
+        self._update_viewport()
+
+    def _set_drop_target(self, index: QModelIndex) -> None:
+        """记录当前落点行并重绘（落点提示只有这一个来源）。"""
+        if index == self._drop_target:
+            return
+        self._drop_target = index
+        self._update_viewport()
+
+    def drawRow(self, painter: Optional[QPainter], option: QStyleOptionViewItem,
+                index: QModelIndex) -> None:
+        super().drawRow(painter, option, index)
+        # 落点高亮只能画在条目之后：QTreeView 在画条目之前会用底色整行铺一次，
+        # 画在之前必然被盖掉（实测 drawRow 里先 fillRect，整行像素毫无变化）；
+        # 而想插进「底色已铺、图标文字尚未画」那一层，得给视图换一个 style
+        # 代理，代价与收益不成比例。代价是该行文字会带上一点高亮色，故高亮
+        # 取较低不透明度（见 _DROP_HIGHLIGHT_ALPHA）。
+        if painter is not None and self._drop_target.isValid() \
+                and index == self._drop_target:
+            painter.fillRect(self.visualRect(index), self._drop_highlight)
 
     def _ask_move_or_copy(self, filename: str, dest_folder: str) -> Optional[str]:
         """询问用户移动还是复制文件。返回 "move" / "copy" / None（取消）。"""
@@ -93,13 +151,62 @@ class DroppableTreeView(QTreeView):
             return "copy"
         return None
 
-    def _handle_saved_tab_drop(self, src_filepath: str, dest_folder: str):
+    def _schedule_drop(self, src_filepath: str, dest_folder: str) -> None:
+        """拖放结束后再异步询问：模态对话框不能嵌在（Windows 原生）拖拽事件循环里。"""
+        QTimer.singleShot(
+            0, lambda: self._ask_and_request_drop(src_filepath, dest_folder))
+
+    def _ask_and_request_drop(self, src_filepath: str, dest_folder: str):
         """拖放结束后（异步）询问移动/复制并发出对应请求。"""
         action = self._ask_move_or_copy(os.path.basename(src_filepath), dest_folder)
         if action == "move":
             self.file_move_requested.emit(src_filepath, dest_folder)
         elif action == "copy":
             self.file_copy_requested.emit(src_filepath, dest_folder)
+
+    @staticmethod
+    def _can_drop_into(src_filepath: str, dest_folder: str) -> bool:
+        """目标文件夹能否接收该条目。
+
+        排除「原地放下」（父目录就是目标）与「文件夹放进自己的子孙目录」——
+        后者会把自己的父链搬断。
+        """
+        src = os.path.abspath(src_filepath)
+        dest = os.path.abspath(dest_folder)
+        if os.path.dirname(src) == dest or src == dest:
+            return False
+        return not dest.startswith(src + os.sep)
+
+    def _dest_folder_index_at(self, pos) -> QModelIndex:
+        """落点对应的目标文件夹行：命中文件夹用它本身，命中文件用其父目录，
+        空白处用树根。
+
+        落盘判定（_dest_folder_at）与落点高亮（_set_drop_target）共用这一份
+        判定，避免两处各写一套后「高亮的行」与「实际落到的文件夹」不一致。
+        """
+        model = self.model()
+        if not isinstance(model, QFileSystemModel):
+            return QModelIndex()
+        index = self.indexAt(pos)
+        if index.isValid():
+            if model.isDir(index):
+                return index
+            parent_idx = index.parent()
+            if parent_idx.isValid():
+                return parent_idx
+        root = self.rootIndex()
+        if root.isValid():
+            return root
+        root_path = model.rootPath()
+        return model.index(root_path) if root_path else QModelIndex()
+
+    def _dest_folder_at(self, pos) -> Optional[str]:
+        """落点对应的目标文件夹路径（判定规则见 _dest_folder_index_at）。"""
+        model = self.model()
+        index = self._dest_folder_index_at(pos)
+        if isinstance(model, QFileSystemModel) and index.isValid():
+            return model.filePath(index)
+        return None
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -123,61 +230,44 @@ class DroppableTreeView(QTreeView):
             super().dragEnterEvent(event)
 
     def dragMoveEvent(self, event):
+        # 落点高亮：拖标签与树内拖拽共用同一处判定 —— 这正是「两种拖拽观感
+        # 统一」的落点。先前完全交给基类的原生指示器，于是同一张表上会出现
+        # 「整行框」与「一条线」两种结果，拖标签还曾因模型拒绝自定义 MIME
+        # 而完全画不出来。
+        self._set_drop_target(self._dest_folder_index_at(event.position().toPoint()))
         if self._is_tab_drag(event.mimeData()):
-            # PyQt6 拖拽事件没有 pos()（仅 position() 返回 QPointF）
-            index = self.indexAt(event.position().toPoint())
-            model = self.model()
-            if index.isValid() and model:
-                if isinstance(model, QFileSystemModel) and model.isDir(index):
-                    event.acceptProposedAction()
-                    return
-                parent_idx = index.parent()
-                if parent_idx.isValid():
-                    event.acceptProposedAction()
-                    return
+            super().dragMoveEvent(event)
             event.acceptProposedAction()
         else:
             super().dragMoveEvent(event)
 
+    def dragLeaveEvent(self, event: Optional[QDragLeaveEvent]):
+        # 拖拽离开视图（含拖到窗口外松开）后必须清掉落点，否则高亮会挂在
+        # 上一次经过的行上。
+        self._set_drop_target(QModelIndex())
+        super().dragLeaveEvent(event)
+
     def dropEvent(self, event):
-        if self._is_tab_drag(event.mimeData()):
-            data = event.mimeData().data(MIME_TAB_FILEPATH)
+        self._set_drop_target(QModelIndex())
+        mime = event.mimeData()
+        pos = event.position().toPoint()
+        if self._is_tab_drag(mime):
+            data = mime.data(MIME_TAB_FILEPATH)
             src_filepath = bytes(data).decode('utf-8')
             # 3.5.11：未命名标签无 filepath，通过 tab_id 定位源标签
             tab_id = None
-            tab_id_data = event.mimeData().data(MIME_TAB_ID)
+            tab_id_data = mime.data(MIME_TAB_ID)
             if tab_id_data and not tab_id_data.isEmpty():
                 try:
                     tab_id = int(bytes(tab_id_data).decode('utf-8'))
                 except (ValueError, UnicodeDecodeError):
                     tab_id = None
 
-            index = self.indexAt(event.position().toPoint())
-            model = self.model()
-            dest_folder = None
-
-            if index.isValid() and model and isinstance(model, QFileSystemModel):
-                if model.isDir(index):
-                    dest_folder = model.filePath(index)
-                else:
-                    parent_idx = index.parent()
-                    if parent_idx.isValid():
-                        dest_folder = model.filePath(parent_idx)
-                    else:
-                        dest_folder = model.rootPath()
-            else:
-                if model and isinstance(model, QFileSystemModel):
-                    dest_folder = model.rootPath()
-
+            dest_folder = self._dest_folder_at(pos)
             if dest_folder:
                 if src_filepath:
-                    if os.path.dirname(os.path.abspath(src_filepath)) != os.path.abspath(dest_folder):
-                        # 先完成拖放事件，再异步弹窗询问：
-                        # 模态对话框不能嵌套在（Windows 原生）拖拽事件循环内。
-                        QTimer.singleShot(
-                            0,
-                            lambda: self._handle_saved_tab_drop(src_filepath, dest_folder),
-                        )
+                    if self._can_drop_into(src_filepath, dest_folder):
+                        self._schedule_drop(src_filepath, dest_folder)
                 elif tab_id is not None:
                     # 未命名标签拖到文件树 = 落盘保存（源面板从拖拽发起者父级取）
                     source = event.source()
@@ -186,17 +276,47 @@ class DroppableTreeView(QTreeView):
                         self.untitled_save_requested.emit(source_tabs, tab_id, dest_folder)
 
             event.acceptProposedAction()
-        else:
-            super().dropEvent(event)
+            return
+
+        if event.source() is self:
+            # 树内拖拽：必须由本视图接管。QFileSystemModel 在 readOnly 放开后能自己
+            # 完成落盘（rename/copy），那条默认路径既不询问用户、也不做图片资源
+            # 迁移，直接跳过会让两种拖拽行为不一致。
+            # 例外：拖的是**文件夹**时仍交回模型 —— 应用层入口只支持文件
+            # （move_file_to_folder / copy_file_to_folder 首行要求 os.path.isfile），
+            # 接管会让「拖文件夹」变成问完就静默无动作（弹窗收不到任何结果），
+            # 而模型本来就能完成目录 rename，这是本次接管前就有的能力。落点守卫
+            # （原地放下 / 拖进自己的子孙）仍由这里先判，模型那侧不认这些。
+            dest_folder = self._dest_folder_at(pos)
+            if dest_folder:
+                droppable = [
+                    path for path in (url.toLocalFile() for url in mime.urls())
+                    if path and self._can_drop_into(path, dest_folder)
+                ]
+                if droppable:
+                    if any(os.path.isdir(path) for path in droppable):
+                        super().dropEvent(event)
+                        return
+                    self._schedule_drop(droppable[0], dest_folder)
+                    event.acceptProposedAction()
+                    return
+            event.ignore()
+            return
+
+        super().dropEvent(event)
 
 
 class FileTreeWidget(ThemeAwareMixin, QWidget):
 
     file_open_requested = pyqtSignal(str)
+    # 图片文件双击时打开查看器
+    image_open_requested = pyqtSignal(str)
     file_move_requested = pyqtSignal(str, str)
     file_copy_requested = pyqtSignal(str, str)
     # (filepath, is_dir)：删除成功后通知外部同步关闭已打开的标签页
     file_deleted = pyqtSignal(str, bool)
+    # (old_path, new_path)：重命名成功后通知外部同步更新图片标签持有的路径
+    file_renamed = pyqtSignal(str, str)
     # 3.5.11：(source_tabs, tab_id, dest_folder) 未命名标签落盘保存
     untitled_save_requested = pyqtSignal(object, int, str)
     # Batch 4：文件树变化（刷新/移动/复制/删除成功后触发）
@@ -234,12 +354,16 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
 
         self.model.setNameFilters([
             "*.txt", "*.md", "*.py", "*.c", "*.cpp", "*.h", "*.hpp",
-            "*.java", "*.js", "*.json", "*.html", "*.css", "*.xml"
+            "*.java", "*.js", "*.json", "*.html", "*.css", "*.xml",
+            # 图片也进文件树：双击由查看器打开（含 HEIF/AVIF 等，见 image_formats）
+            *filter_patterns(VIEWABLE),
         ])
         self.model.setNameFilterDisables(False)
 
-        # QFileSystemModel.readOnly 默认为 True，会导致 dropMimeData 直接返回 False，
-        # 树内拖拽（不同子文件夹之间移动/复制）完全无反应。放开只读以启用拖放。
+        # QFileSystemModel.readOnly 默认为 True 时条目不接受拖放（ItemIsDropEnabled
+        # 不置位），树内拖拽连落点指示都不会画。放开只读仅为「接受拖放」这件事：
+        # 实际落盘由 DroppableTreeView.dropEvent 接管（询问移动/复制 + 资源迁移），
+        # 不再复用模型的 dropMimeData。
         self.model.setReadOnly(False)
 
         self.tree_view = DroppableTreeView()
@@ -256,7 +380,7 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
 
         self.tree_view.setDragEnabled(True)
         self.tree_view.setAcceptDrops(True)
-        self.tree_view.setDropIndicatorShown(True)
+        # 落点高亮色由 _apply_theme_colors 按主题设置（见 set_drop_highlight_color）
         # setReadOnly(False) 后文件获得 ItemIsEditable，双击会进入行内重命名；
         # 重命名走右键菜单（QInputDialog），禁用行内编辑避免与双击打开冲突。
         self.tree_view.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -297,6 +421,13 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
         surface = v2_token(self._theme_engine, "surface_primary", "#F5F5F5")
         border = v2_token(self._theme_engine, "border_muted", "#E0E0E0")
         text_primary = v2_token(self._theme_engine, "text_primary", "#212121")
+        # 拖拽落点高亮：色值仍由 tree_item recipe 的 drop_indicator 决定
+        # （主题作者一侧不变），只是在代码里铺成半透明整行高亮，而不是交给
+        # 原生指示器画边框（原生画法不认这个 recipe，见 DroppableTreeView）。
+        self.tree_view.set_drop_highlight_color(v2_color_qcolor(
+            self._theme_engine, "tree_item", "drop_indicator",
+            "#2196F3", alpha=_DROP_HIGHLIGHT_ALPHA,
+        ))
 
         self.setStyleSheet(f"""
             QWidget#FileTreeWidget {{
@@ -385,7 +516,10 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
     def _on_double_click(self, index: QModelIndex):
         if not self.model.isDir(index):
             filepath = self.model.filePath(index)
-            self.file_open_requested.emit(filepath)
+            if is_viewable(filepath):
+                self.image_open_requested.emit(filepath)
+            else:
+                self.file_open_requested.emit(filepath)
 
     def _add_external_file(self):
         from PyQt6.QtWidgets import QFileDialog
@@ -459,6 +593,11 @@ class FileTreeWidget(ThemeAwareMixin, QWidget):
             except Exception as e:
                 get_logger(__name__).error("重命名失败: %s", e)
                 ErrorHandler.show_from_exception(e, ErrorCategory.FILE, "重命名失败")
+            else:
+                # 重命名成功后再通知外部（同步更新已打开图片标签的路径）
+                self.file_renamed.emit(os.path.normpath(filepath),
+                                       os.path.normpath(new_path))
+                self.tree_changed.emit()
 
     def _delete_item(self, filepath: str, is_dir: bool):
         name = os.path.basename(filepath)

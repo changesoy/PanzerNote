@@ -136,7 +136,7 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
         self._resource_root: str | None = None
         self._pending_html: str | None = None
         self._pending_scripts: list[str] = []
-        self._pending_export: tuple[str, Callable[[bytes], None]] | None = None
+        self._pending_export: tuple[str, str, Callable[[bytes], None]] | None = None
         self._nav_event: asyncio.Event | None = None
         # 页面异步渲染（图表）就绪标志：本轮导航的文档是否声明了 pn-async，
         # 以及页面是否已回传就绪信号
@@ -148,11 +148,15 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
         self._nav_token: object | None = None
         # close() 幂等标志：导出完成后与预览 teardown 都可能触发释放
         self._closed = False
-        # 导航归属标记（M5）：NavigationCompleted 是所有导航的完成通知（含
+        # 导航归属计数（M5）：NavigationCompleted 是所有导航的完成通知（含
         # controller 创建时的初始空白文档），只有本适配器经 _navigate 发起的
         # 导航才 emit load_finished —— 否则消费方会在模板尚未 set_html 时
-        # 永久置位，预览静默空白
-        self._navigating = False
+        # 永久置位，预览静默空白。
+        # 用**计数**而不是布尔标志：上一轮空壳尚未完成时又发起一轮（开文件后
+        # 立刻输入 / 切主题）时，布尔标志会让第一轮完成就把它清掉，真正上屏的
+        # 第二轮反被当成「非本适配器发起」而不 emit，消费方因此失去唯一的补推
+        # 时机（预览一直空白）。计数到 0 才算「最后一轮完成」。
+        self._outstanding_nav = 0
         # L5：就绪前的 set_visible 期望值（初始化完成时按它显示）
         self._pending_visible = True
 
@@ -199,7 +203,7 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
         if self._ready and root:
             self._apply_resource_root()
 
-    def export_pdf(self, html: str, on_done: Callable[[bytes], None]) -> None:
+    def export_pdf(self, shell_html: str, content_js: str, on_done: Callable[[bytes], None]) -> None:
         if self._failed:
             # 已定失败：按接口约定立即回调 b""，不让调用方空等
             on_done(b"")
@@ -208,10 +212,10 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
             # 同一实例只服务一次导出。前一次尚未补发时先把它按失败兑现，
             # 否则会被静默覆盖、那个调用方永远收不到回调。
             if self._pending_export is not None:
-                self._pending_export[1](b"")
-            self._pending_export = (html, on_done)
+                self._pending_export[2](b"")
+            self._pending_export = (shell_html, content_js, on_done)
             return
-        self._schedule(self._export_async(html, on_done))
+        self._schedule(self._export_async(shell_html, content_js, on_done))
 
     # ── 协程调度 ────────────────────────────────────────────────────────
     async def _execute_script(self, script: str) -> None:
@@ -280,7 +284,7 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
         self._show_hint(message)
         pending, self._pending_export = self._pending_export, None
         if pending is not None:
-            pending[1](b"")
+            pending[2](b"")
 
     def _show_hint(self, message: str) -> None:
         if self._hint_label is not None:
@@ -345,25 +349,26 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
 
     def _flush_pending(self) -> None:
         """初始化完成后补发就绪前积压的调用，保持调用顺序。"""
-        html, on_done = None, None
+        shell, content_js, on_done = None, "", None
         if self._pending_export is not None:
-            html, on_done = self._pending_export
+            shell, content_js, on_done = self._pending_export
             self._pending_export = None
             # L4：导出优先 —— 排队中的预览 html 让位（语义：两者并存时导出
             # 用的文档更完整，预览随后会因内容更新重新 set_html）
             self._pending_html = None
-        if html is None and self._pending_html is not None:
-            html = self._pending_html
+        if shell is None and self._pending_html is not None:
+            shell = self._pending_html
             self._pending_html = None
 
-        if html is not None:
+        if shell is not None:
             if on_done is not None:
                 # 必须复用 _export_async（而非直接 _navigate）：导出前的资源准备
-                # （图表库注入）都在那里。export_pdf 几乎总在适配器就绪前被调用，
-                # 因此这条补发路径才是常规路径，绕过它会让注入静默失效。
-                self._schedule(self._export_async(html, on_done))
+                # （图表库与正文的文档级脚本注入）都在那里。export_pdf 几乎总在
+                # 适配器就绪前被调用，因此这条补发路径才是常规路径，
+                # 绕过它会让注入静默失效。
+                self._schedule(self._export_async(shell, content_js, on_done))
             else:
-                self._navigate(html)
+                self._navigate(shell)
 
         scripts, self._pending_scripts = self._pending_scripts, []
         for s in scripts:
@@ -428,7 +433,7 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
         # 每轮导航重置异步就绪门：图表文档要等页面回传就绪信号才打印
         self._async_ready = False
         self._await_async_render = needs_async_render(html)
-        self._navigating = True
+        self._outstanding_nav += 1
         _log.debug("WebView2 导航：html %d 字符，资源根=%s", len(html), self._resource_root)
         self._webview.navigate_to_string(self._inject(html))
 
@@ -466,7 +471,7 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
             ok = bool(args.is_success)
         except Exception:  # noqa: BLE001
             ok = True
-        if not self._navigating:
+        if self._outstanding_nav <= 0:
             # 非本适配器发起的导航（controller 创建时的初始空白文档、页面内
             # 导航等）：只驱动导出的导航门，不 emit —— 消费方收到 ok=True 会
             # 永久置位「模板已加载」，届时预览静默空白（M5）
@@ -474,23 +479,32 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
             if self._nav_event is not None:
                 self._nav_event.set()
             return
-        self._navigating = False
+        self._outstanding_nav -= 1
+        if self._outstanding_nav > 0:
+            # 还有更晚发起的导航在飞：此时 emit 会让消费方把正文写进即将被替换
+            # 的文档，而真正上屏的那一轮完成时不再 emit，预览就一直空着。
+            # 等最后一轮完成再 emit（消费方的补推时机只有这一次）。
+            _log.debug("WebView2 导航完成（仍有 %d 轮在飞）: success=%s",
+                       self._outstanding_nav, ok)
+            return
         _log.debug("WebView2 导航完成: success=%s", ok)
         if self._nav_event is not None:
             self._nav_event.set()
         self.load_finished.emit(ok)
 
     # ── PDF 导出 ────────────────────────────────────────────────────────
-    async def _export_async(self, html: str, on_done: Callable[[bytes], None]) -> None:
-        """导出全程：前置准备（视口 / 图表库 / 导航）→ 打印。
+    async def _export_async(
+        self, shell_html: str, content_js: str, on_done: Callable[[bytes], None]
+    ) -> None:
+        """导出全程：前置准备（视口 / 图表库与正文注入 / 导航空壳）→ 打印。
 
         前置阶段失败也必须兑现 on_done，否则本次导出会静默卡死（打印阶段由
         ``_print_current`` 自己兜底，这里补上前置阶段）。
         """
         try:
             self._size_viewport_for_print()
-            await self._provide_external_vendor(html)
-            self._navigate(html)
+            await self._provide_document_scripts(shell_html, content_js)
+            self._navigate(shell_html)
         except Exception:  # noqa: BLE001
             _log.error("PDF 导出前置阶段失败", exc_info=True)
             on_done(b"")
@@ -534,27 +548,47 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
         self._container.resize(width, height)
         self._apply_bounds()
 
-    async def _provide_external_vendor(self, html: str) -> None:
-        """文档声明「图表库外置」时，经文档级脚本注入提供 vendor。
+    async def _provide_document_scripts(self, shell_html: str, content_js: str) -> None:
+        """导航空壳前注册文档级脚本：按需图表库 vendor + 正文注入。
 
-        为什么不内联进文档：NavigateToString 对文档有 2 MB 上限（官方文档
-        "may not be larger than 2 MB"），内联 Mermaid（约 5.6 MB）会以
-        E_INVALIDARG 直接失败。文档级注入没有该上限（实测 5.6 MB 可用），
-        且脚本在页面自身脚本之前执行，页面里的 pnMermaidBoot 照常工作。
+        为什么不把正文/vendor 内联进文档：NavigateToString 对文档有 2 MB 上限
+        （官方文档 "may not be larger than 2 MB"），内联 Mermaid（约 5.6 MB）
+        或大正文会以 E_INVALIDARG 直接失败。文档级注入没有该上限（实测 5.6 MB
+        可用），且脚本在页面自身脚本之前执行。
 
-        注入失败不致命：脚本缺失时页面渲染无产出，就绪门等超时后降级打印，
-        图表位置留空但正文照常导出（见 _await_page_render 的超时兜底）。
+        注册顺序即执行顺序：先 vendor（图表库定义），再正文注入脚本（挂
+        DOMContentLoaded，注入 #content 并渲染公式/图表、回传就绪）。
+
+        两次注册各自独立兜底，**不共用一个 try**：vendor 注册失败（约 5.6 MB
+        载荷走 WinRT RPC，失败并非不可能）时若连带跳过正文注册，导航出来的
+        空壳会一直空着 —— 有图表时表现为「就绪门超时、提示可能缺图表」的
+        空文档，无图表时连提示都没有，用户只看到「已导出」加一份空白 PDF。
+        vendor 缺失本身只影响图表：图表位置留空、正文照常；正文注册失败才
+        是正文区空白。
         """
         webview = self._webview
-        if webview is None or not needs_vendor_injection(html):
+        if webview is None:
             return
-        vendor = mermaid_render.vendor_js()
-        if not vendor:
-            return
-        try:
-            await webview.add_script_to_execute_on_document_created_async(vendor)
-        except Exception:  # noqa: BLE001
-            _log.warning("图表库注入失败，导出的 PDF 可能缺少图表", exc_info=True)
+        if needs_vendor_injection(shell_html):
+            try:
+                vendor = mermaid_render.vendor_js()
+                if vendor:
+                    await webview.add_script_to_execute_on_document_created_async(
+                        vendor
+                    )
+            except Exception:  # noqa: BLE001
+                _log.warning(
+                    "图表库注入失败，导出的 PDF 可能缺少图表", exc_info=True
+                )
+        if content_js:
+            try:
+                await webview.add_script_to_execute_on_document_created_async(
+                    content_js
+                )
+            except Exception:  # noqa: BLE001
+                _log.error(
+                    "正文注入脚本注册失败，导出的 PDF 正文区将为空", exc_info=True
+                )
 
     async def _print_current(self, on_done: Callable[[bytes], None]) -> None:
         """等待当前导航完成 → 导出 PDF → 以 bytes 回调 → 释放自身。"""

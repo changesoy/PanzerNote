@@ -72,6 +72,7 @@ class ConfigImportService:
             "show_line_numbers": ((bool,), None),
             "auto_wrap": ((bool,), None),
             "wrap_mode": ((str,), None),
+            "preview_wrap_mode": ((str,), None),
             "highlight_current_line": ((bool,), None),
             "auto_save_interval": ((int,), (0, 3600)),
             "max_history_count": ((int,), (0, 1000)),

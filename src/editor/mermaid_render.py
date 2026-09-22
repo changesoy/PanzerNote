@@ -206,6 +206,19 @@ def script_fragment(is_dark: bool = False, include_vendor: bool = True) -> str:
     return f"<script>{script}{boot}window.pnMermaidBoot();</script>"
 
 
+def bootstrap_script_fragment(is_dark: bool = False) -> str:
+    """只含引导脚本的片段（无 vendor、无 eager pnMermaidBoot()）。
+
+    供 WebView2 导出空壳使用：vendor 由宿主经文档级脚本注入（避开 2 MB 导航
+    上限），正文与就绪信号由宿主的内容注入脚本驱动 —— 空壳里不能立刻调用
+    ``pnMermaidBoot()``，否则就绪信号会在正文注入之前回传，PDF 打印出空白。
+    """
+    boot = _BOOTSTRAP_JS.replace(
+        "__PN_DARK__", "true" if is_dark else "false"
+    )
+    return f"<script>{boot}</script>"
+
+
 def lazy_load_js(is_dark: bool = False) -> str:
     """预览侧懒注入载荷（去掉 <script> 外壳，供 run_javascript 直接执行）。"""
     fragment = script_fragment(is_dark)

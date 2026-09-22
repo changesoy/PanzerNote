@@ -50,6 +50,10 @@ _BASE_ASPECT_RATIO = 210 / 380
 _MARGIN_RIGHT = 10
 _MARGIN_BOTTOM = 5
 
+# 气泡提示的默认显示时长（ms）：寒暄与各类提示统一走它，
+# 避免各处写死不同数值导致有的提示明显更长/更短。
+DEFAULT_MESSAGE_DURATION_MS = 3000
+
 # 气泡内边距（SpeechBubble 布局的 contentsMargins）与 QSS 边框宽度
 # （见 apply_theme_colors 的 `border: 2px solid`）—— 两者共同决定文字的可用宽度
 _PAD_H = 14
@@ -138,7 +142,7 @@ class SpeechBubble(QFrame):
         text_h = self.label.heightForWidth(label_w)
         self.setFixedHeight(max(_MIN_BUBBLE_HEIGHT, text_h + _PAD_Y + 2 * _BORDER_W))
 
-    def show_message(self, text: str, duration: int = 3000):
+    def show_message(self, text: str, duration: int = DEFAULT_MESSAGE_DURATION_MS):
         """显示消息"""
         self.label.setText(text)
         self._fit_to_text()
@@ -169,6 +173,12 @@ class SecretaryWidget(ThemeAwareMixin, QWidget):
       悬浮在主窗口之上、不进任务栏、随主窗口最小化。
       代价是它不再随父控件自动显隐/移动，需自行对齐（见 sync_visibility）。
     """
+
+    # 气泡提示消失（定时到期或显式隐藏）：供外部「避让后补发」使用
+    message_hidden = pyqtSignal()
+
+    # 构造后多久开始启动问候
+    _GREETING_DELAY_MS = 500
 
     DEFAULT_LINES = {
         "启动": [
@@ -267,6 +277,8 @@ class SecretaryWidget(ThemeAwareMixin, QWidget):
         self._init_ui()
         # 气泡隐藏后收回窗口高度（多行台词期间被 _ensure_bubble_room 撑高）
         self.bubble.hidden.connect(self._on_bubble_hidden)
+        # 同时对外广播：调用方据此补发此前让位的提示
+        self.bubble.hidden.connect(self.message_hidden.emit)
 
         if theme_engine is None:
             raise RuntimeError("SecretaryWidget 必须传入 theme_engine，不允许为 None")
@@ -278,7 +290,13 @@ class SecretaryWidget(ThemeAwareMixin, QWidget):
             if self._owner_window is not None and self._owner_window is not parent:
                 self._owner_window.installEventFilter(self)
 
-        QTimer.singleShot(500, self._initial_setup)
+        # 启动问候用实例定时器（非 singleShot 静态版）：既随控件销毁自动清理，
+        # 也能被 is_busy() 查询到「已排期、尚未显示」的状态。
+        self._greeting_timer = QTimer(self)
+        self._greeting_timer.setSingleShot(True)
+        self._greeting_timer.setInterval(self._GREETING_DELAY_MS)
+        self._greeting_timer.timeout.connect(self._initial_setup)
+        self._greeting_timer.start()
 
     def _apply_theme_colors(self):
         # B3：小秘书归记事本侧 UI，主题感知（无 v1 回退，B8：字面量 = v1 light 值）
@@ -603,10 +621,18 @@ class SecretaryWidget(ThemeAwareMixin, QWidget):
         if self._parent_alive():
             self._update_position()
 
-    def show_message(self, text: str, duration: int = 3000):
+    def show_message(self, text: str, duration: int = DEFAULT_MESSAGE_DURATION_MS):
         """显示消息"""
         self.bubble.show_message(text, duration)
         self._ensure_bubble_room()
+
+    def is_busy(self) -> bool:
+        """是否有气泡**正在显示或已排期**（供调用方避让，避免提示互相顶掉）。
+
+        含「已排期但尚未显示」的启动问候——否则调用方刚提示完就被问候覆盖。
+        调用方可在 message_hidden 信号到来后重试。
+        """
+        return self.bubble.hide_timer.isActive() or self._greeting_timer.isActive()
 
     def show_event_message(self, event: str):
         """显示事件相关的台词"""

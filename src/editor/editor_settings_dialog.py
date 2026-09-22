@@ -347,6 +347,20 @@ class EditorSettingsDialog(QDialog):
         self.wrap_mode_combo.addItem("限制行宽", "limit_width")
         editor_layout.addRow("行宽模式:", self.wrap_mode_combo)
 
+        # 预览行宽与编辑区行宽模式**互不影响**：编辑区的开关是 QPlainTextEdit 的
+        # 换行行为，预览是网页排版（长代码行 / 宽表格是否折行），两者想要的取值
+        # 未必一致，故各给一个选项、各自持久化。
+        self.preview_wrap_combo = QComboBox()
+        self.preview_wrap_combo.addItem("限制行宽", "limit_width")
+        self.preview_wrap_combo.addItem("不限制行宽", "no_wrap")
+        self.preview_wrap_combo.setToolTip(
+            "Markdown 预览的行宽：\n"
+            "限制行宽 —— 长代码行与宽表格按预览面板宽度折行（不出现横向滚动）；\n"
+            "不限制行宽 —— 代码块内可横向滚动，宽表格会撑宽整页。\n"
+            "与上方「行宽模式」（编辑器自身）互不影响。"
+        )
+        editor_layout.addRow("预览行宽:", self.preview_wrap_combo)
+
         self.autosave_spin = QSpinBox()
         self.autosave_spin.setRange(10, 300)
         self.autosave_spin.setSuffix(" 秒")
@@ -440,6 +454,7 @@ class EditorSettingsDialog(QDialog):
             self.font_family_combo,
             self.code_font_combo,
             self.wrap_mode_combo,
+            self.preview_wrap_combo,
             self.motion_level_combo,
         )
 
@@ -524,6 +539,12 @@ class EditorSettingsDialog(QDialog):
         if index >= 0:
             self.wrap_mode_combo.setCurrentIndex(index)
 
+        preview_wrap_mode = self.config.get_editor_setting(
+            "preview_wrap_mode", "limit_width")
+        index = self.preview_wrap_combo.findData(preview_wrap_mode)
+        if index >= 0:
+            self.preview_wrap_combo.setCurrentIndex(index)
+
         self.autosave_spin.setValue(
             self.config.get_editor_setting("auto_save_interval", 30)
         )
@@ -572,6 +593,7 @@ class EditorSettingsDialog(QDialog):
                 "code_line_spacing": round(self.code_line_spacing_spin.value(), 2),
                 "code_font_family": self.code_font_combo.currentFont().family(),
                 "wrap_mode": self.wrap_mode_combo.currentData(),
+                "preview_wrap_mode": self.preview_wrap_combo.currentData(),
                 "auto_save_interval": self.autosave_spin.value(),
                 "auto_pair_brackets": self.auto_pair_brackets_cb.isChecked(),
                 "indent_size": self.indent_size_spin.value(),

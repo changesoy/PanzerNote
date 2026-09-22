@@ -63,12 +63,6 @@ from .highlight_themes import highlight_code_html
 #  正则 / 常量
 # ════════════════════════════════════════════════════════
 
-# 匹配 <img src="..."> 标签中的 src 属性
-_IMG_SRC_RE = re.compile(
-    r'(<img\s[^>]*?)src="([^"]*)"',
-    re.IGNORECASE,
-)
-
 from .secure_markdown_renderer import (
     CODEBLOCK_RE as _CODEBLOCK_RE,
     MARKDOWN_LAYOUT_CSS as _MARKDOWN_LAYOUT_CSS,
@@ -78,6 +72,7 @@ from .secure_markdown_renderer import (
     strip_dangerous_html as _strip_dangerous_html,
 )
 from .document_render_cache import _DOC_RENDER_CACHE, clear_document_render_cache
+from .markdown_extras import strip_end_matter
 from . import math_render as _math_render
 from . import mermaid_render as _mermaid_render
 
@@ -188,6 +183,26 @@ body {{
     min-height: calc(var(--code-line-spacing) * 1em);
     white-space: pre;
     background: transparent !important;
+}}
+
+/* ========== 预览行宽：「记事本设置 → 预览行宽」 ========== */
+/* 编辑区「限制行宽」把一切内容严格限制在面板宽度内（不出现横向滚动）；预览默认
+   只让正文折行，长代码行只在代码块内横向滚动、宽表格会把整页顶宽。预览行宽与
+   编辑区行宽模式**各自独立**（各有选项，用户可自主组合），class 由 Python 侧按
+   设置写入（见 _wrap_mode_js）。 */
+body.limit-width .code-pre {{
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    overflow-x: hidden;
+}}
+body.limit-width .code-block,
+body.limit-width .code-line {{
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}}
+body.limit-width td,
+body.limit-width th {{
+    overflow-wrap: anywhere;
 }}
 .code-copy-btn {{
     display: none;
@@ -605,6 +620,21 @@ def _css_vars_update_js(vars_map: dict[str, str]) -> str:
     )
 
 
+def _wrap_mode_js(mode: str) -> str:
+    """生成「把预览行宽写到 body class」的 JS。
+
+    取值与编辑区同形（"limit_width" / "no_wrap"），但来自**预览自己的设置**
+    （记事本设置 →「预览行宽」，默认限制行宽），与编辑区行宽模式互不影响：
+    编辑区的开关是 QPlainTextEdit 的换行行为，预览这一侧是网页排版 —— 长代码行
+    默认只在代码块内横向滚动、宽表格会把整页顶宽，「限制行宽」下改为按面板宽度
+    折行。模板里以 body.limit-width 承载对应 CSS（见 PREVIEW_HTML_TEMPLATE）。
+    """
+    return (
+        "document.body.classList.toggle('limit-width',"
+        f" {json.dumps(mode)} === 'limit_width');"
+    )
+
+
 # ════════════════════════════════════════════════════════
 #  MarkdownPreviewWidget
 # ════════════════════════════════════════════════════════
@@ -634,6 +664,11 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self._pending_async_task: Optional[str] = None
         self._last_render_text: str = ""
         self._last_render_html: str = ""
+        # 空壳导航时登记的内容，供 _on_load_finished 补推（见 _push_to_preview）
+        self._pending_shell_content: str = ""
+        # 预览行宽（自己的设置，与编辑区行宽模式互不影响），见 _wrap_mode_js
+        self._preview_wrap_mode: str = self.config.get_editor_setting(
+            "preview_wrap_mode", "limit_width")
         self._md_parser = self._create_md_parser()
         self._reset_template_state()
         self._preview_dirty = True
@@ -675,12 +710,13 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         if not ok:
             return
         self._html_template_loaded = True
-        # 整页灌入这条路（见 _push_to_preview 的 else 分支）不注入图表库，而
-        # 「首次推送就带着图表」恰好走它：会话恢复时内容在模板加载完成前就推了进来，
-        # 之后没有内容更新，图表便一直以源码文本留在页面上。故「模板已加载」这一
-        # 事实本身就要补齐一次能力 —— 注入载荷自带当前 #content 的渲染，
-        # 不需要再推一次内容（_mermaid_loaded 保证同一 JS 上下文只注入一次）。
-        self._ensure_mermaid_capability(self._last_render_html)
+        # 首屏现在是空壳（见 _push_to_preview 的 else 分支）：模板加载完成后
+        # 必须把已有内容补推一次。会话恢复时内容在模板加载完成前就推了进来，
+        # 之后没有内容更新，若不补推正文区就一直空白。补推走模板已加载分支：
+        # 注入载荷自带当前 #content 的渲染（正文 + 公式 + 图表一次到位），
+        # 与后续内容更新脚本互为幂等（_mermaid_loaded 保证同一 JS 上下文只注入一次）。
+        self._push_to_preview(
+            self._pending_shell_content or self._last_render_html)
 
     def _reset_template_state(self) -> None:
         """整页（重新）加载前作废「模板已加载」与「图表库已注入」两项状态。
@@ -690,6 +726,8 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         """
         self._html_template_loaded = False
         self._mermaid_loaded = False
+        # 待补推内容同样属于上一轮上下文，一并作废（新的空壳导航会重新登记）
+        self._pending_shell_content = ""
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
@@ -804,6 +842,17 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         # 折叠状态变更 → 同步预览（3.5.8 批次 5：监听编辑器转发的有效折叠信号，
         # attach 共享 Document 后仍指向 Document 级 FoldingManager，连接不漂移）
         self.editor.fold_state_changed.connect(self._sync_folds_to_preview)
+        # 注意：**不**监听 editor.wrap_mode_changed —— 预览行宽是自己的设置，
+        # 由「记事本设置 →「预览行宽」」经 set_preview_wrap_mode 广播（见
+        # EditorTabWidget.set_preview_wrap_mode_all），跟随编辑区会剥夺用户
+        # 单独选择的权利。
+
+    def set_preview_wrap_mode(self, mode: str) -> None:
+        """应用「预览行宽」设置：模板未加载时不用管，首次推送会带上。"""
+        self._preview_wrap_mode = mode
+        if not self._html_template_loaded:
+            return
+        self.preview.run_javascript(_wrap_mode_js(mode))
 
     def refresh_preview_now(self) -> None:
         """文件装载/主题重建后强制刷新预览，不依赖 textChanged 防抖。"""
@@ -889,8 +938,6 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         else:
             html_content = self._process_code_blocks(html_content)
 
-        html_content = self._resolve_local_images(html_content)
-
         # 包裹折叠 section（编辑器的折叠状态同步到预览；产物仅依赖 text）
         html_content = self._wrap_fold_sections(html_content, text)
 
@@ -907,14 +954,21 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         """
         if self._html_template_loaded:
             self._ensure_mermaid_capability(html_content)
-            escaped = json.dumps(html_content)
+            escaped = json.dumps(html_content, ensure_ascii=False)
+            # 恢复基准取编辑器**当前**顶部行，而非上一次同步留下的旧值：预览侧
+            # 滚动会反向驱动编辑器（该路径带抑制、不更新旧值），此后一旦因编辑
+            # 触发内容更新，沿用旧值会把预览拽回用户已经滚过的那一段。
+            frac, at_top, at_bottom = self._editor_top_fractional_line()
+            self._last_sync_frac = frac
+            self._last_at_top = at_top
+            self._last_at_bottom = at_bottom
             doc = self.editor.document()
             assert doc is not None
             total_lines = doc.blockCount()
-            frac = getattr(self, '_last_sync_frac', 1.0)
-            at = "true" if getattr(self, '_last_at_top', True) else "false"
-            ab = "true" if getattr(self, '_last_at_bottom', False) else "false"
+            at = "true" if at_top else "false"
+            ab = "true" if at_bottom else "false"
             js = (
+                f"{_wrap_mode_js(self._preview_wrap_mode)}"
                 f"document.getElementById('content').innerHTML = {escaped};"
                 "_nodesVersion = null; _cachedNodes = null;"
                 # 公式与图表都是客户端展开（不经 Python），内容变换后各自重跑
@@ -933,40 +987,62 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
             )
             self.preview.run_javascript(js)
         else:
-            css_vars = _build_preview_css_vars(
-                self._theme_engine,
-                self.config.get_code_font_family(),
-                self.config.get_line_spacing(),
-                self.config.get_code_line_spacing(),
+            # B 阶段 1′ 方案 A：首屏只导航空壳（正文区为空），内容由
+            # _on_load_finished 在模板加载完成后经 run_javascript 更新脚本补推。
+            # 空壳远小于 WebView2 NavigateToString 的 2 MB 上限，大文档不再被
+            # 1.8 MB 阈值卡死；之后的每次更新走同一条 run_javascript 路径，
+            # 不做大小阈值切换。
+            self.preview.set_resource_root(self._base_path or None)
+            # 记下本次要显示的内容：补推只能靠 _on_load_finished，而它拿
+            # _last_render_html 是不完整的 —— 异步高亮完成早于空壳加载时会走
+            # 本分支，其结果不进 _last_render_html，按旧值补推会把高亮结果丢掉
+            # （代码块一直无配色）。存最近一次请求的内容即可覆盖该情形。
+            self._pending_shell_content = html_content
+            self.preview.set_html(self._build_full_html(""))
+
+        # 同步当前折叠状态到预览
+        self._sync_folds_to_preview()
+
+    def _build_full_html(self, html_content: str) -> str:
+        """构建预览整页 HTML（空壳与整页共用：传空串即空壳）。
+
+        模板只在首屏加载一次，之后仅换 #content 内容，故公式库始终内联一次。
+        """
+        css_vars = _build_preview_css_vars(
+            self._theme_engine,
+            self.config.get_code_font_family(),
+            self.config.get_line_spacing(),
+            self.config.get_code_line_spacing(),
+        )
+        template = PREVIEW_HTML_TEMPLATE
+        try:
+            return template.format(
+                content=html_content,
+                layout_css=_MARKDOWN_LAYOUT_CSS,
+                math_style=_math_render.style_fragment(),
+                math_script=_math_render.script_fragment(
+                    "document.getElementById('content')"
+                ),
+            ).replace(
+                "</style>", css_vars + "\n</style>", 1
             )
-            template = PREVIEW_HTML_TEMPLATE
-            try:
-                full_html = template.format(
-                    content=html_content,
-                    layout_css=_MARKDOWN_LAYOUT_CSS,
-                    # 模板只加载一次，之后仅换 #content 内容，故公式库始终内联一次
-                    math_style=_math_render.style_fragment(),
-                    math_script=_math_render.script_fragment(
-                        "document.getElementById('content')"
-                    ),
-                ).replace(
-                    "</style>", css_vars + "\n</style>", 1
-                )
-            except Exception as exc:
-                get_logger(__name__).error(
-                    "Markdown preview template format failed: %s",
-                    exc,
-                    exc_info=True,
-                )
+        except Exception as exc:
+            get_logger(__name__).error(
+                "Markdown preview template format failed: %s",
+                exc,
+                exc_info=True,
+            )
 
-                # B2：模板格式失败时的降级 HTML（B8：字面量 = v1 light 值，无 v1 回退）
-                fallback_bg = "#FFFFFF"
-                fallback_text = "#212121"
-                fallback_code_bg = "#EDF3FA"
-                fallback_border = "#D8DEE9"
-                fallback_link = "#2196F3"
+            # B2：模板格式失败时的降级 HTML（B8：字面量 = v1 light 值，无 v1 回退）
+            fallback_bg = "#FFFFFF"
+            fallback_text = "#212121"
+            fallback_code_bg = "#EDF3FA"
+            fallback_border = "#D8DEE9"
+            fallback_link = "#2196F3"
 
-                full_html = f"""<!DOCTYPE html>
+            # 内容放进 #content 容器：模板已加载后的更新脚本固定改 #content，
+            # 降级文档若没有该容器，正文更新会因 getElementById 落空而失效
+            return f"""<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -999,14 +1075,11 @@ a {{
 </style>
 </head>
 <body>
+<div id="content">
 {html_content}
+</div>
 </body>
 </html>"""
-            self.preview.set_resource_root(self._base_path or None)
-            self.preview.set_html(full_html)
-
-        # 同步当前折叠状态到预览
-        self._sync_folds_to_preview()
 
     @staticmethod
     def _create_md_parser():
@@ -1014,20 +1087,16 @@ a {{
             return None
         md = _MarkdownIt("commonmark", {"html": False})
         md.enable(["table", "strikethrough"])
-        try:
-            from mdit_py_plugins.deflist import deflist_plugin
-            from mdit_py_plugins.tasklists import tasklists_plugin
-            deflist_plugin(md)
-            tasklists_plugin(md)
-        except ImportError:
-            get_logger(__name__).debug("mdit_py_plugins 未安装，扩展语法（定义列表/任务列表）不可用")
+        # 定义列表 / 任务列表 / 脚注 / 前辅文：与导出共用同一注册点（markdown_extras）
+        from .markdown_extras import register_markdown_extras
+        register_markdown_extras(md)
         _math_render.register(md)
         return md
 
     def _render_markdown(self, text: str) -> str:
         if self._md_parser is not None:
             try:
-                result = self._md_parser.render(text)
+                result = self._md_parser.render(strip_end_matter(text))
                 return _strip_dangerous_html(result)
             except Exception:
                 get_logger(__name__).debug("markdown-it 渲染失败，回退到 python-markdown")
@@ -1062,12 +1131,30 @@ a {{
             return self._render_markdown(text)
 
         try:
-            tokens = self._md_parser.parse(text)
+            # 末尾 YAML 后辅文在渲染前剥离（不参与源码行号：它只占文档末尾，
+            # 前面正文的行号不变，滚动同步不受影响）
+            tokens = self._md_parser.parse(strip_end_matter(text))
 
-            self._code_block_source_lines: list[int] = []
+            self._code_block_source_lines: list[Optional[int]] = []
             injected_count = 0
 
+            # 脚注定义区会被 markdown-it-footnote 移到**文档末尾**渲染，但其内部
+            # token 仍带着「定义写在源文件第几行」的 map。照常注入会让锚点数组出现
+            # 「行号靠前、位置靠后」的反序项（例：定义写在第 3 行、渲染却在文末）；
+            # 预览→编辑器同步是在按行号排序的锚点里按 top 插值，一个反序项就会把
+            # 整段正文压进「定义行 ~ 其后一行」——实测表现为预览滚过脚注引用位置后
+            # 左侧编辑器不再跟随。故脚注区一律不注入源码行锚点（该区域位于文档
+            # 末尾，由 EOF 哨兵覆盖）。
+            in_footnote_tail = False
+
             for token in tokens:
+                if token.type == "footnote_block_open":
+                    in_footnote_tail = True
+                    continue
+                if token.type == "footnote_block_close":
+                    in_footnote_tail = False
+                    continue
+
                 if token.type in ("fence", "code_block") and token.map:
                     # 图表围栏稍后转成图表容器 div，不占代码块序号：
                     # 否则 _code_block_source_lines 与真实代码块索引错位
@@ -1075,9 +1162,13 @@ a {{
                         getattr(token, "info", "") or ""
                     ):
                         continue
-                    self._code_block_source_lines.append(token.map[0] + 1)
+                    # 脚注区里的代码块仍要占位（索引必须与渲染顺序对齐），
+                    # 但行号置空：它和脚注区其它内容一样落在文档末尾
+                    self._code_block_source_lines.append(
+                        None if in_footnote_tail else token.map[0] + 1
+                    )
 
-                if not token.map:
+                if in_footnote_tail or not token.map:
                     continue
 
                 if token.nesting == -1:
@@ -1107,46 +1198,6 @@ a {{
                 exc_info=True,
             )
             return self._render_markdown(text)
-
-    # ──────────── 本地图片路径解析 ────────────
-
-    def _resolve_local_images(self, html: str) -> str:
-        """将 HTML 中的相对图片路径转换为 file:// 绝对路径
-
-        处理 <img src="./img.png"> 和 <img src="img.png"> 等形式。
-        绝对路径、http(s):// 链接不受影响。
-
-        v1.5.4 新增
-        """
-        if not self._base_path:
-            return html
-
-        def _resolve_src(m):
-            prefix = m.group(1)
-            src = m.group(2)
-
-            if src.startswith(('http://', 'https://', 'file://', 'data:')):
-                return m.group(0)
-
-            if os.path.isabs(src):
-                return m.group(0)
-
-            abs_path = os.path.normpath(os.path.join(self._base_path, src))
-            try:
-                real_base = os.path.realpath(self._base_path)
-                real_abs = os.path.realpath(abs_path)
-                if not (real_abs == real_base or real_abs.startswith(real_base + os.sep)):
-                    return m.group(0)
-            except (OSError, ValueError):
-                return m.group(0)
-
-            if os.path.exists(abs_path):
-                file_url = QUrl.fromLocalFile(abs_path).toString()
-                return f'{prefix}src="{file_url}"'
-
-            return m.group(0)
-
-        return _IMG_SRC_RE.sub(_resolve_src, html)
 
     # ──────────── 折叠 section 包裹 ────────────
 
@@ -1340,7 +1391,6 @@ a {{
             return result
 
         html_content = _CODEBLOCK_RE.sub(_replace_and_count, html_content)
-        html_content = self._resolve_local_images(html_content)
         html_content = self._wrap_fold_sections(html_content, text)
         self._push_to_preview(html_content)
 

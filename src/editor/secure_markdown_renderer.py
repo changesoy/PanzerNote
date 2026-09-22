@@ -26,6 +26,7 @@ from ..core.settings_store import (
 from ..utils.logger import get_logger
 from . import math_render
 from . import mermaid_render
+from .markdown_extras import register_markdown_extras, strip_end_matter
 
 try:
     from markdown_it import MarkdownIt as _MarkdownIt
@@ -213,15 +214,13 @@ def render_markdown_to_safe_html(
             md = _MarkdownIt("commonmark", {"html": False})
             # commonmark preset 不含表格/删除线（GFM 扩展），与预览渲染保持一致
             md.enable(["table", "strikethrough"])
-            try:
-                from mdit_py_plugins.tasklists import tasklists_plugin
-                tasklists_plugin(md)
-            except ImportError:
-                get_logger(__name__).debug("mdit_py_plugins 未安装，任务列表语法不可用")
+            # 定义列表 / 任务列表 / 脚注 / 前辅文：与预览共用同一注册点（markdown_extras）
+            register_markdown_extras(md)
             # 公式语法与预览用同一套规则（math_render.register 是唯一注册点）
             if enable_math:
                 math_render.register(md)
-            return _finish(md.render(markdown_text))
+            # 末尾 YAML 后辅文在渲染前剥离（预览与导出一致）
+            return _finish(md.render(strip_end_matter(markdown_text)))
         except Exception:
             get_logger(__name__).debug("markdown-it 渲染失败，回退到 python-markdown")
 
@@ -231,10 +230,10 @@ def render_markdown_to_safe_html(
             'attr_list', 'def_list', 'sane_lists',
         ]
         try:
-            result = _md_lib.markdown(markdown_text, extensions=extensions)
+            result = _md_lib.markdown(strip_end_matter(markdown_text), extensions=extensions)
         except Exception:
             try:
-                result = _md_lib.markdown(markdown_text)
+                result = _md_lib.markdown(strip_end_matter(markdown_text))
             except Exception:
                 get_logger(__name__).warning("python-markdown 渲染失败")
                 return html_module.escape(markdown_text)
@@ -306,7 +305,7 @@ h6 { font-size: 1em; color: var(--text-muted); }
 /* ========== 段落 / 文本 ========== */
 p { margin: 8px 0; }
 strong { font-weight: 700; }
-em { font-style: italic; }
+em { font-style: italic; padding-right: 0.15em; }
 
 /* ========== 代码字体与行距（--code-font / --code-line-spacing 由预览/导出各自注入） ========== */
 pre, pre code {
@@ -371,6 +370,35 @@ li input[type="checkbox"] {
     margin-right: 6px;
     vertical-align: middle;
 }
+
+/* ========== 脚注（markdown-it-footnote 渲染产物，预览与导出共用） ========== */
+sup.footnote-ref a {
+    color: var(--primary);
+    text-decoration: none;
+    font-size: 0.8em;
+    margin-left: 2px;
+}
+sup.footnote-ref a:hover { text-decoration: underline; }
+hr.footnotes-sep {
+    margin: 24px 0 6px 0;
+    border: none;
+    border-top: 1px solid var(--border-soft);
+}
+section.footnotes { margin-top: 2px; }
+ol.footnotes-list {
+    font-size: 0.92em;
+    color: var(--text-secondary);
+    padding-left: 26px;
+    margin: 4px 0;
+}
+.footnote-item { margin: 2px 0; }
+.footnote-backref {
+    color: var(--text-muted);
+    text-decoration: none;
+    margin-left: 4px;
+    font-size: 0.9em;
+}
+.footnote-backref:hover { text-decoration: underline; }
 """
 
 
@@ -382,6 +410,7 @@ def build_export_html_document(
     line_spacing: float = DEFAULT_LINE_SPACING,
     code_line_spacing: float = DEFAULT_CODE_LINE_SPACING,
     inline_mermaid: bool = True,
+    shell_only: bool = False,
 ) -> str:
     """构建完整的导出 HTML 文档
 
@@ -396,6 +425,11 @@ def build_export_html_document(
         用户浏览器打开）用 True 保持单文件自包含；PDF 导出必须用 False ——
         WebView2 的 NavigateToString 有 2 MB 上限，内联后会直接失败，
         此时文档改声明 EXTERNAL_VENDOR_META_TAG，由适配器注入 vendor。
+      shell_only：只产导出空壳（PDF 导出路径）。正文区换成空的
+        `<div id="content"></div>`，mermaid 尾随脚本换成不含 eager
+        pnMermaidBoot() 的引导片段；公式/图表的按需资源与 meta 声明仍按
+        真实 body_html 判定（正文随后经文档级脚本注入，见
+        build_export_content_script）。仅配合 inline_mermaid=False 使用。
 
     返回：完整的 HTML 文档字符串
 
@@ -422,11 +456,16 @@ def build_export_html_document(
     # 导出文档恒用亮色变体（打印在白底上），图表主题同样取 default(light)。
     # vendor 缺失且需自包含时 fragment 为空 → 此时也不该声明异步（等不到就绪信号）
     has_mermaid = mermaid_render.has_mermaid(body_html)
-    mermaid_tail = (
-        mermaid_render.script_fragment(False, include_vendor=inline_mermaid)
-        if has_mermaid
-        else ""
-    )
+    if has_mermaid:
+        if shell_only:
+            # 空壳：只带引导定义，正文注入与就绪信号由宿主脚本驱动
+            mermaid_tail = mermaid_render.bootstrap_script_fragment(False)
+        else:
+            mermaid_tail = mermaid_render.script_fragment(
+                False, include_vendor=inline_mermaid
+            )
+    else:
+        mermaid_tail = ""
     vendor_meta = mermaid_render.EXTERNAL_VENDOR_META_TAG if mermaid_tail and not inline_mermaid else ""
     async_meta = mermaid_render.ASYNC_META_TAG if mermaid_tail else ""
     root_vars = f""":root {{
@@ -472,6 +511,7 @@ pre code {
     padding: 10px;
 }
 """
+    content_block = '<div id="content"></div>' if shell_only else body_html
     return f"""<!DOCTYPE html>
 <html>
 <head>
@@ -487,8 +527,75 @@ pre code {
 {math_head}
 </head>
 <body>
-{body_html}
+{content_block}
 {math_tail}
 {mermaid_tail}
 </body>
 </html>"""
+
+
+def build_export_shell(
+    body_html: str,
+    theme_colors: dict[str, str],
+    title: str = "",
+    code_font: str = DEFAULT_CODE_FONT_FAMILY,
+    line_spacing: float = DEFAULT_LINE_SPACING,
+    code_line_spacing: float = DEFAULT_CODE_LINE_SPACING,
+) -> str:
+    """WebView2 PDF 导出的空壳文档。
+
+    结构同 build_export_html_document，但正文区是空的 ``#content`` 容器、
+    不内联图表库：正文与 vendor 随后经文档级脚本注入（见
+    build_export_content_script），避开 NavigateToString 的 2 MB 上限。
+    公式/图表的资源与 meta 声明按真实 body_html 判定。
+    """
+    return build_export_html_document(
+        body_html,
+        theme_colors,
+        title,
+        code_font,
+        line_spacing,
+        code_line_spacing,
+        inline_mermaid=False,
+        shell_only=True,
+    )
+
+
+def build_export_content_script(body_html: str) -> str:
+    """导出空壳的正文注入脚本（文档创建期注册，DOMContentLoaded 后执行）。
+
+    在导航空壳前经 ``add_script_to_execute_on_document_created_async`` 注册：
+    文档创建期脚本先于 DOM 解析运行，此时 ``#content`` 尚不存在，故挂在
+    ``DOMContentLoaded`` 上真正注入正文并渲染公式 / 图表 —— 比 mermaid 引导脚本
+    （body 末尾）晚，但早于打印；含图表的文档（pn-async 声明）在图表渲染完成
+    后才回传就绪信号，vendor 注入失败时不回传（让就绪门超时走 M4 降级提示）。
+    导出恒为亮色：图表主题由空壳引导脚本里的 __PN_DARK__=false 决定。
+    """
+    import json as _json
+
+    payload = _json.dumps(body_html, ensure_ascii=False)
+    return f"""(function() {{
+  function done() {{
+    if (!document.querySelector('meta[name="pn-async"]')) {{ return; }}
+    try {{
+      if (window.chrome && window.chrome.webview) {{
+        window.chrome.webview.postMessage('{mermaid_render.READY_MESSAGE}');
+      }}
+    }} catch (e) {{}}
+  }}
+  function boot() {{
+    var el = document.getElementById('content');
+    if (!el) {{ return; }}
+    el.innerHTML = {payload};
+    if (window.pnRenderMath) {{ window.pnRenderMath(el); }}
+    if (window.pnRenderMermaid && window.mermaid) {{
+      window.pnRenderMermaid(el).then(done, done);
+    }}
+  }}
+  if (document.readyState === 'loading') {{
+    document.addEventListener('DOMContentLoaded', boot);
+  }} else {{
+    boot();
+  }}
+}})();
+"""

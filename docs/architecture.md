@@ -506,6 +506,12 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 - 为什么不再把正文放进导航载荷：`NavigateToString` 有 **2 MB 文档上限**（官方文档 + 真机 `E_INVALIDARG` 复现），模板恒内联 KaTeX 后正文可用额度只剩约 1.1 MB，正文稍大便整页导航失败（表现为预览空白）。脚本通道没有该限制（实测外置注入 5.6 MB Mermaid vendor 正常）
 - 切换文档（`base_path` 变化）时经 `_reset_template_state()` 作废「模板已加载 / 图表库已注入」——两者都只在同一个 JS 上下文内成立
 
+**预览行宽（独立设置）**：
+
+- 取值 `limit_width` / `no_wrap`，来自**预览自己的设置**（`editor.preview_wrap_mode`，「设置 → 记事本设置 →「预览行宽」」，默认限制行宽），与编辑区行宽模式（`editor.wrap_mode`）**互不影响**：编辑区那个开关是 `QPlainTextEdit` 的换行行为，预览这一侧是网页排版，两者想要的取值未必一致
+- 设置写入后经 `EditorTabWidget.set_preview_wrap_mode_all()` 广播到每个 `MarkdownPreviewWidget.set_preview_wrap_mode()`：模板已加载时用 `_wrap_mode_js` 给 `body` 加 / 去 `limit-width` class，未加载则只记值、由首屏推送带上（推送脚本首行即该 JS）。模板 CSS 让代码块折行（`.code-pre` / `.code-block` / `.code-line` 换行 + `overflow-wrap:anywhere`）、表格单元格可断行；`no_wrap` 下长代码行只在代码块内横向滚动、宽表格会撑宽整页
+- **滚动恢复基准取编辑器实时顶部行**：编辑触发预览重渲染后恢复滚动时，基准是 `_editor_top_fractional_line()`（编辑器**当前**顶部行），并把结果写回 `_last_sync_frac`。此前一律沿用上一次**正向**同步留下的旧值，而「预览滚动反向驱动编辑器」那条路径带抑制、不写该值 —— 「先滚编辑器 → 再滚预览 → 应用行内格式」这条链上旧值停在第一步，重渲染后预览会被拽回用户已经滚过的那一段
+
 **主题切换就地更新**：
 
 - `_preview_css_vars()` 是预览 CSS 变量的单一真相源（首屏模板注入与运行时更新同源），首屏经 `_build_preview_css_vars()` 写入 `--css-*` 变量
@@ -1025,11 +1031,14 @@ idle_reward_timer (每60秒，由 TimerManager 管理)
      → resource_bar.refresh()
 ```
 
-### 6.3 标签拖拽移动文件
+### 6.3 拖拽移动文件（标签页 / 文件树内）
+
+两条拖拽来源 —— 标签页拖出标签栏（`DraggableTabBar` 发起 `QDrag`，只带自有 MIME，刻意不带 `text/uri-list`，否则标签会被拖进资源管理器 / 编辑器产生副作用）与文件树内拖动条目（`QFileSystemModel` 给出的 `text/uri-list`）—— 都在 `DroppableTreeView` 收口为同一条链路：
 
 ```
-DraggableTabBar.mouseMoveEvent (鼠标离开标签栏)
-  → QDrag(MIME_TAB_FILEPATH = filepath UTF-8)
+DraggableTabBar.mouseMoveEvent (鼠标离开标签栏) / 树内拖动条目
+  → QDrag(MIME_TAB_FILEPATH = filepath UTF-8) / QFileSystemModel.mimeData
+  → DroppableTreeView.dragMoveEvent → 落点行 = _dest_folder_index_at(pos)（自绘整行高亮）
   → DroppableTreeView.dropEvent
      → 解析 MIME → 确定目标文件夹
      → FileTreeWidget.file_move_requested(src, dest)
@@ -1038,6 +1047,10 @@ DraggableTabBar.mouseMoveEvent (鼠标离开标签栏)
            → 保存最新内容 → shutil.move → DocumentRegistry.move_path re-key + bind_path 广播
         → secretary.show_message("已移动...")
 ```
+
+- **树内拖拽必须由视图接管**：`QFileSystemModel` 在 `readOnly(False)` 后能自行完成 rename / copy，那条默认路径既不询问用户、也不做图片资源迁移，与标签拖拽行为不一致。`readOnly(False)` 保留，但作用收窄为「让条目带 `ItemIsDropEnabled`、能被接受」。
+- **落点判定单一来源**：`_dest_folder_index_at(pos)` —— 命中文件夹用该行、命中文件用其父目录、空白处用树根；落盘判定（`_dest_folder_at`）与落点高亮（`_set_drop_target`）共用它，避免「高亮的行」与「实际落到的文件夹」不一致。原地放下、把文件夹拖进自己的子孙目录一律拦掉。
+- **落点提示自绘**：Qt 没有可样式化的 `drop-indicator` 子控件（QSS 里写了不生效，原生指示器按系统调色板画整圈边框），且会随光标落在行中央 / 边缘在「整行框」与「一条线」之间跳。故关闭原生指示器（`setDropIndicatorShown(False)`），由 `drawRow` 在落点行铺一层半透明高亮（色值取自 `tree_item.drop_indicator`，不透明度见 `_DROP_HIGHLIGHT_ALPHA`）；`dragLeaveEvent` / `dropEvent` 负责清空落点，两种拖拽因此只剩同一条浅色高亮。
 
 ---
 

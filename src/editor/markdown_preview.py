@@ -184,6 +184,25 @@ body {{
     white-space: pre;
     background: transparent !important;
 }}
+
+/* ========== 行宽模式：跟随编辑区「限制行宽」 ========== */
+/* 编辑区在「限制行宽」下把一切内容严格限制在面板宽度内（不出现横向滚动）；
+   预览此前只有正文会折行，长代码行只在代码块内横向滚动、宽表格会把整页顶宽，
+   两边观感不一致。class 由 Python 侧写入（见 _wrap_mode_js）。 */
+body.limit-width .code-pre {{
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    overflow-x: hidden;
+}}
+body.limit-width .code-block,
+body.limit-width .code-line {{
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}}
+body.limit-width td,
+body.limit-width th {{
+    overflow-wrap: anywhere;
+}}
 .code-copy-btn {{
     display: none;
     position: absolute;
@@ -600,6 +619,19 @@ def _css_vars_update_js(vars_map: dict[str, str]) -> str:
     )
 
 
+def _wrap_mode_js(mode: str) -> str:
+    """生成「把行宽模式写到预览 body class」的 JS。
+
+    编辑区的「限制行宽 / 不换行」是 QPlainTextEdit 的换行开关，预览侧没有等价
+    开关 —— 长代码行此前只在代码块内横向滚动，与编辑区「限制行宽」下处处折行
+    的观感不一致。模板里以 body.limit-width 承载对应 CSS（见 PREVIEW_HTML_TEMPLATE）。
+    """
+    return (
+        "document.body.classList.toggle('limit-width',"
+        f" {json.dumps(mode)} === 'limit_width');"
+    )
+
+
 # ════════════════════════════════════════════════════════
 #  MarkdownPreviewWidget
 # ════════════════════════════════════════════════════════
@@ -799,6 +831,14 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         # 折叠状态变更 → 同步预览（3.5.8 批次 5：监听编辑器转发的有效折叠信号，
         # attach 共享 Document 后仍指向 Document 级 FoldingManager，连接不漂移）
         self.editor.fold_state_changed.connect(self._sync_folds_to_preview)
+        # 行宽模式（菜单「换行 → 不换行 / 限制行宽」、编辑器设置）→ 预览跟随
+        self.editor.wrap_mode_changed.connect(self._on_wrap_mode_changed)
+
+    def _on_wrap_mode_changed(self, mode: str) -> None:
+        """同步行宽模式到预览：模板未加载时不用管，首次推送会带上。"""
+        if not self._html_template_loaded:
+            return
+        self.preview.run_javascript(_wrap_mode_js(mode))
 
     def refresh_preview_now(self) -> None:
         """文件装载/主题重建后强制刷新预览，不依赖 textChanged 防抖。"""
@@ -901,13 +941,20 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         if self._html_template_loaded:
             self._ensure_mermaid_capability(html_content)
             escaped = json.dumps(html_content, ensure_ascii=False)
+            # 恢复基准取编辑器**当前**顶部行，而非上一次同步留下的旧值：预览侧
+            # 滚动会反向驱动编辑器（该路径带抑制、不更新旧值），此后一旦因编辑
+            # 触发内容更新，沿用旧值会把预览拽回用户已经滚过的那一段。
+            frac, at_top, at_bottom = self._editor_top_fractional_line()
+            self._last_sync_frac = frac
+            self._last_at_top = at_top
+            self._last_at_bottom = at_bottom
             doc = self.editor.document()
             assert doc is not None
             total_lines = doc.blockCount()
-            frac = getattr(self, '_last_sync_frac', 1.0)
-            at = "true" if getattr(self, '_last_at_top', True) else "false"
-            ab = "true" if getattr(self, '_last_at_bottom', False) else "false"
+            at = "true" if at_top else "false"
+            ab = "true" if at_bottom else "false"
             js = (
+                f"{_wrap_mode_js(self.editor.get_wrap_mode())}"
                 f"document.getElementById('content').innerHTML = {escaped};"
                 "_nodesVersion = null; _cachedNodes = null;"
                 # 公式与图表都是客户端展开（不经 Python），内容变换后各自重跑

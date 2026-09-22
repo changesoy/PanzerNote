@@ -3,7 +3,16 @@
 对应设计稿第十节（Golden Paths + Theme Coverage Matrix）的逐格验收成文。
 状态图例：✅ = 已通过（测试/自动化）；⏳ = 待人工 UI 过一遍（B5-2，用户侧确认）。
 
-## 0.1 分支级代码审查结论（2026-09-09，pre-merge）
+> **覆盖范围与时效**：本文件只记录 **Wave 8 主题体系重构**（截至 2026-09-09，B5 验收时点）的
+> 覆盖情况，表内的数字（pytest / mypy 计数、源文件数）也是当时快照。v2.4 / v2.5 新增的界面
+> （图片查看器、图片工作流对话框、预览行宽设置、文件树拖拽落点自绘等）**不在此表的覆盖范围内**，
+> 它们的验证证据在各版本 [CHANGELOG](../../CHANGELOG.md) 与对应测试中。持续性的配色治理规则见
+> [color_audit.md](color_audit.md)。
+
+## 0.1 附：分支级代码审查结论（2026-09-09，pre-merge，历史上下文）
+
+> 本小节记录的是**合并前**对主题分支的代码审查结论，用于解释 F-3 / F-4 为何延后到 B8；
+> 它不是验收证据的一部分。
 
 分支 review（`feat20260816-theme_foundation` vs main，40 commit / 119 文件）结论 **READY WITH NOTES
 （无 Blocker / 无 High）**。已当轮修复：
@@ -30,42 +39,43 @@
     = **52 passed**（含 B7 test-only renderer 的 L0/L1 验证、激活事务回滚、Safe Switch pending）
 - 全量 mypy：**124 源文件零错误**
 - offscreen 冒烟：QSS 无累积、行高随字体更新、主题加载 dark/light 双变体
-- 深色遗漏像素探针：`scripts/check_dark_theme_gaps.py`（本地维护，gitignored）A/B/C/D 四组全绿
-- 切换性能基准：`scripts/bench_theme_switch.py`（见 color_audit.md 性能审计段）
+- 深色遗漏像素探针：`scripts/check_dark_theme_gaps.py` A/B/C/D 四组全绿
+  （**该脚本被 `.gitignore` 排除、不在仓库与发布包内**，故此项结论无法从 clone 复现，仅作当时记录）
+- 切换性能基准：`scripts/bench_theme_switch.py`（**随仓库提供，可复跑**；数值见 color_audit.md 性能审计段）
 
 ## 1. Golden Paths
 
-| # | Golden Path | 状态 | 证据 |
-| --- | --- | --- | --- |
-| 1 | Default Dark / Default Density | ✅ 自动化 / ⏳ 目视 | v2 双变体加载 + 深色像素探针通过；目视外观待 B5-2 |
-| 2 | Default Light / Default Density | ✅ 自动化 / ⏳ 目视 | 同 #1 |
-| 3 | Second Theme Dark | 不适用 | 第二视觉语言（B8）已延后，仓库仅 default 单包 |
-| 4 | Second Theme Light | 不适用 | 同 #3 |
-| 5 | Default / Compact | ⏳ 目视 | density 档位存在（design.json），UI 侧未做自动断言 |
-| 6 | Large File Mode | ✅ 自动化 | LFM 相关测试通过（全量 pytest 覆盖该模块） |
-| 7 | Split View | ✅ 自动化 | 分屏相关测试通过（含重置分屏均分比例修复 commit 5a39867） |
-| 8 | Theme L0 Switch | ✅ | L0 同包变体切换测试通过 + 基准 0.04ms（color_audit 性能审计段） |
-| 9 | Theme L1 Switch | ✅（测试级） | B7 test-only renderer A→B 验证 host identity/signals/state（测试内，非产品路径；生产注册 0 宿主） |
+| #   | Golden Path                     | 状态                | 证据                                                                                              |
+| --- | ------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------- |
+| 1   | Default Dark / Default Density  | ✅ 自动化 / ⏳ 目视 | v2 双变体加载 + 深色像素探针通过；目视外观待 B5-2                                                 |
+| 2   | Default Light / Default Density | ✅ 自动化 / ⏳ 目视 | 同 #1                                                                                             |
+| 3   | Second Theme Dark               | 不适用              | 第二视觉语言（B8）已延后，仓库仅 default 单包                                                     |
+| 4   | Second Theme Light              | 不适用              | 同 #3                                                                                             |
+| 5   | Default / Compact               | ⏳ 目视             | density 档位存在（design.json），UI 侧未做自动断言                                                |
+| 6   | Large File Mode                 | ✅ 自动化           | LFM 相关测试通过（全量 pytest 覆盖该模块）                                                        |
+| 7   | Split View                      | ✅ 自动化           | 分屏相关测试通过（含重置分屏均分比例修复 commit 5a39867）                                         |
+| 8   | Theme L0 Switch                 | ✅                  | L0 同包变体切换测试通过 + 基准 0.04ms（color_audit 性能审计段）                                   |
+| 9   | Theme L1 Switch                 | ✅（测试级）        | B7 test-only renderer A→B 验证 host identity/signals/state（测试内，非产品路径；生产注册 0 宿主） |
 
 ## 2. Theme Coverage Matrix
 
-| Surface | Default Dark | Default Light | Theme Recipe | Renderer 可变 | 验收 | 证据 |
-| --- | --- | --- | --- | --- | --- | --- |
-| Bootstrap / Pre-Main | ✓ | ✓ | Bootstrap | - | ✅ | `test_bootstrap_appearance.py` + FirstRunDialog 接入记录（color_audit 补漏 B） |
-| Editor | ✓ | ✓ | ✓ | 部分 | ✅ 自动化 / ⏳ 目视 | B2 垂直切片测试 + 深色探针；目视待 B5-2 |
-| Tabs | ✓ | ✓ | ✓ | ✓ | ✅ 自动化 / ⏳ 目视 | tab 相关测试 + 补漏 C recipe 收敛 |
-| File Tree | ✓ | ✓ | ✓ | 部分 | ✅ 自动化 / ⏳ 目视 | B4 接入 + 拖拽测试 |
-| Menu | ✓ | ✓ | ✓ | ✓ | ⏳ 目视 | 全局 QSS 驱动（B3） |
-| Context Menu | ✓ | ✓ | ✓ | ✓ | ⏳ 目视 | 同 Menu |
-| ComboBox | ✓ | ✓ | ✓ | ✓ | ⏳ 目视 | B3 Core Controls |
-| Combo Popup | ✓ | ✓ | ✓ | ✓ | ⏳ 目视 | 全局 QSS + qt6_combo_popup workaround |
-| Tooltip | ✓ | ✓ | ✓ | 部分 | ⏳ 目视 | 全局 QToolTip QSS |
-| Dialog | ✓ | ✓ | ✓ | 部分 | ✅ 自动化 / ⏳ 目视 | 主题管理/快捷键/帮助等弹窗接入记录 |
-| Settings | ✓ | ✓ | ✓ | - | ✅ 自动化 / ⏳ 目视 | B5 接入 + 深色探针 |
-| Plugin Manager | ✓ | ✓ | ✓ | - | ✅ 自动化 / ⏳ 目视 | B5 接入 + 补漏 A/C |
-| Secondary Window | ✓ | ✓ | ✓ | - | ✅ 自动化 / ⏳ 目视 | NativeTitleBarThemeFilter + 顶层窗口 DWM |
-| Native File Dialog | OS | OS | - | - | OS | 原生 backend 走 OS 外观（设计稿 4.8 规则） |
-| Game UI | 独立 | 独立 | - | - | 单独 | game_palette.json 独立配色（D13/D24，测试覆盖 game_palette） |
+| Surface              | Default Dark | Default Light | Theme Recipe | Renderer 可变 | 验收                | 证据                                                                           |
+| -------------------- | ------------ | ------------- | ------------ | ------------- | ------------------- | ------------------------------------------------------------------------------ |
+| Bootstrap / Pre-Main | ✓            | ✓             | Bootstrap    | -             | ✅                  | `test_bootstrap_appearance.py` + FirstRunDialog 接入记录（color_audit 补漏 B） |
+| Editor               | ✓            | ✓             | ✓            | 部分          | ✅ 自动化 / ⏳ 目视 | B2 垂直切片测试 + 深色探针；目视待 B5-2                                        |
+| Tabs                 | ✓            | ✓             | ✓            | ✓             | ✅ 自动化 / ⏳ 目视 | tab 相关测试 + 补漏 C recipe 收敛                                              |
+| File Tree            | ✓            | ✓             | ✓            | 部分          | ✅ 自动化 / ⏳ 目视 | B4 接入 + 拖拽测试                                                             |
+| Menu                 | ✓            | ✓             | ✓            | ✓             | ⏳ 目视             | 全局 QSS 驱动（B3）                                                            |
+| Context Menu         | ✓            | ✓             | ✓            | ✓             | ⏳ 目视             | 同 Menu                                                                        |
+| ComboBox             | ✓            | ✓             | ✓            | ✓             | ⏳ 目视             | B3 Core Controls                                                               |
+| Combo Popup          | ✓            | ✓             | ✓            | ✓             | ⏳ 目视             | 全局 QSS + qt6_combo_popup workaround                                          |
+| Tooltip              | ✓            | ✓             | ✓            | 部分          | ⏳ 目视             | 全局 QToolTip QSS                                                              |
+| Dialog               | ✓            | ✓             | ✓            | 部分          | ✅ 自动化 / ⏳ 目视 | 主题管理/快捷键/帮助等弹窗接入记录                                             |
+| Settings             | ✓            | ✓             | ✓            | -             | ✅ 自动化 / ⏳ 目视 | B5 接入 + 深色探针                                                             |
+| Plugin Manager       | ✓            | ✓             | ✓            | -             | ✅ 自动化 / ⏳ 目视 | B5 接入 + 补漏 A/C                                                             |
+| Secondary Window     | ✓            | ✓             | ✓            | -             | ✅ 自动化 / ⏳ 目视 | NativeTitleBarThemeFilter + 顶层窗口 DWM                                       |
+| Native File Dialog   | OS           | OS            | -            | -             | OS                  | 原生 backend 走 OS 外观（设计稿 4.8 规则）                                     |
+| Game UI              | 独立         | 独立          | -            | -             | 单独                | game_palette.json 独立配色（D13/D24，测试覆盖 game_palette）                   |
 
 ## 3. B5-2 人工 UI 回归清单（待用户过一遍后勾选）
 

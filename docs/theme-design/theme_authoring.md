@@ -3,6 +3,10 @@
 > 状态：2026-09-09 定稿（对应 Wave 8 B1 Foundation 设计文档与 `src/themes/theme_v2/` 实现）。
 > 本文档描述 Theme v2 主题包格式与校验规则，供开发第二/第三方视觉语言参考。
 > v1 主题机制（外部 JSON/YAML）已随 Wave 8 删除，**v2 是唯一主题运行时**。
+>
+> 主题设计文档共三份，分工如下：**本文件**＝主题包格式与校验规则（面向主题作者）；
+> [color_audit.md](color_audit.md)＝配色治理规则与硬编码色审计（面向贡献者）；
+> [wave8_acceptance.md](wave8_acceptance.md)＝Wave 8 重构的逐格验收证据（历史快照，非现行规则）。
 
 ## 1. 主题包目录结构
 

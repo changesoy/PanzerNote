@@ -19,40 +19,44 @@ PanzerNote 是一款以已停服二次元游戏《战车少女》（PanzerMaiden
 
 ## 2. 模块状态总览
 
-| 模块                 | 状态      | 说明                                                                                                                                                         |
-| -------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 多标签文本编辑器     | ✅ 完成   | 行号、语法高亮、自动缩进、括号配对、括号匹配高亮、行操作、大小写转换、转到行、JSON/XML 格式化                                                                |
-| 缩进/行尾配置        | ✅ 完成   | indent_size/use_tabs 配置；LF/CRLF 探测与规范化；状态栏切换行尾格式                                                                                          |
-| 文本统计             | ✅ 完成   | CJK 按字计数 + 拉丁按词计数；状态栏信号驱动统计                                                                                                              |
-| Markdown 分屏预览    | ✅ 完成   | 实时渲染 + 代码块高亮 + 一键复制 + 本地图片 + 源码行号同步 + 折叠同步                                                                                        |
-| 代码缩略图 (Minimap) | ✅ 完成   | 鸟瞰图、点击/拖拽导航、块级缓存增量失效、跳过折叠隐藏块                                                                                                      |
-| 大文件性能优化       | ✅ 完成   | Wave 4 E：运行时探针埋点（perf_probe）、lazy 高亮 Document 级多 View 协作（visibleRanges = ∪）、Large File Mode 达阈值自动降级（可配置可回退）、阈值自动启用 |
-| Markdown 标题折叠    | ✅ 完成   | 标题层级折叠 + 代码缩进折叠 + 工作区持久化 + 跳转自动展开                                                                                                    |
-| Markdown 大纲导航    | ✅ 完成   | 解析标题树、点击跳转、按文件类型显隐                                                                                                                         |
-| 命令面板             | ✅ 完成   | Ctrl+Shift+P / F1 唤起、搜索执行命令、位置记忆                                                                                                               |
-| 跨文件搜索           | ✅ 完成   | 后台线程遍历 + 正则/纯文本匹配 + 按文件分组 + 双击跳转                                                                                                       |
-| 文档缓冲区自动补全   | ✅ 完成   | 词频匹配 + Enter/Tab 接受 + IME 组字期间不弹出                                                                                                               |
-| 增强型查找替换       | ✅ 完成   | 正则、大小写敏感、全词匹配、匹配计数、ExtraSelections 高亮                                                                                                   |
-| 侧栏面板宿主         | ✅ 完成   | 多面板注册/切换/宽度记忆                                                                                                                                     |
-| 文件树               | ✅ 完成   | 文件树 + 外部文件区 + 右键菜单 + 接受标签拖拽移动文件                                                                                                        |
-| 标签页拖拽           | ✅ 完成   | 标签内排序 + 拖拽到文件树移动文件                                                                                                                            |
-| 分屏多视图           | ✅ 完成   | 分屏布局/状态持久化、方向切换、跨分屏标签拖拽、共享 Document 跨面板联动编辑（同一文档多视图）                                                                |
-| 资源栏               | ✅ 完成   | 四资源显示 + 打字统计                                                                                                                                        |
-| 在线/离线挂机        | ✅ 完成   | 在线每分钟 +5/+5/+5、铝材每3分钟+5；离线 1/3 向大取整，上限 24h                                                                                              |
-| 打字奖励             | ✅ 完成   | textChanged 接入 → 递减收益算法 → 资源奖励（1:1:1:0.2）                                                                                                      |
-| 每日签到             | ✅ 完成   | 每日首次启动发放奖励（各+100）                                                                                                                               |
-| 小秘书               | ✅ 完成   | 立绘 + 台词气泡 + 事件台词 + 自定义角色/皮肤/状态                                                                                                            |
-| 书签持久化           | ✅ 完成   | 书签保存到 workspace.json，关闭重开后恢复                                                                                                                    |
-| 设置系统             | ✅ 完成   | settings.json + workspace.json + savegame.json，首次运行对话框                                                                                               |
-| 安全防护体系         | ✅ 完成   | 路径验证/文件操作安全/输入验证/拖放白名单                                                                                                                    |
-| 插件系统             | ✅ 完成   | 能力声明制（capabilities→权限映射）/命名空间式 PluginContext/主线程模型/数据与事件能力/热加载，2 个示例插件 + API 文档                                       |
-| 主题系统             | ✅ 完成   | Theme v2（default 主题包/recipe 组件库/双变体）/全局 QSS 生成/预览/ThemeAwareMixin 全局生效/原生标题栏深色                                                   |
-| 集中式版本管理       | ✅ 完成   | `src/__init__.py` 唯一真相源 + `verify_version.py` 一致性验证                                                                                                |
-| 帮助中心             | ✅ 完成   | 帮助对话框（使用说明 + 新手攻略双页签）；内容存于 `data/help/*.md`，安全渲染；主题跟随 Theme v2 token（深浅色自适应）                                        |
-| 建造系统             | 🔲 规划中 | 详见 [roadmap.md](roadmap.md)                                                                                                                                |
-| 图鉴系统             | 🔲 规划中 | 详见 [roadmap.md](roadmap.md)                                                                                                                                |
-| 车库系统             | 🔲 规划中 | 详见 [roadmap.md](roadmap.md)                                                                                                                                |
-| 游戏设置界面         | 🔲 规划中 | 详见 [roadmap.md](roadmap.md)                                                                                                                                |
+| 模块                 | 状态      | 说明                                                                                                                                                                 |
+| -------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 多标签文本编辑器     | ✅ 完成   | 行号、语法高亮、自动缩进、括号配对、括号匹配高亮、行操作、大小写转换、转到行、JSON/XML 格式化                                                                        |
+| 缩进/行尾配置        | ✅ 完成   | indent_size/use_tabs 配置；LF/CRLF 探测与规范化；状态栏切换行尾格式                                                                                                  |
+| 文本统计             | ✅ 完成   | CJK 按字计数 + 拉丁按词计数；状态栏信号驱动统计                                                                                                                      |
+| Markdown 分屏预览    | ✅ 完成   | 实时渲染 + 代码块高亮 + 一键复制 + 本地图片 + 源码行号同步 + 折叠同步 + 脚注/前辅文/后辅文；预览行宽可独立于编辑器选择「限制/不限制」                                |
+| Markdown 编辑辅助    | ✅ 完成   | 列表/引用回车续写（有序序号递增）、`Ctrl+Alt+T` 任务勾选、表格插入/删除行列 + Tab 单元格导航 + 列对齐、行内格式（加粗/斜体/行内代码/链接）、`Ctrl+Alt+1..6` 标题     |
+| 预览/导出渲染通道    | ✅ 完成   | 预览与 PDF 导出改由系统 WebView2 Runtime 承载（不再随包分发 Chromium）；KaTeX / Mermaid vendor 经文档级脚本通道按需注入，绕开 `NavigateToString` 2 MB 上限           |
+| Markdown 图片工作流  | ✅ 完成   | 插图落盘到笔记同级 `PanzerNote_assets/` 并写相对路径；程序内移动/另存为/复制时按独占→Move、共享→Copy 搬运；断链恢复（ledger + 引用扫描 + hash 校验）；未使用图片清理 |
+| 图片查看器           | ✅ 完成   | 文件树双击图片以标签页查看（适应窗口/原始大小、大图滚动、重复打开复用标签）；Qt 原生格式 + HEIF/HEIC + AVIF；只读不写回；非常规格式插入前转码 PNG/JPEG               |
+| 代码缩略图 (Minimap) | ✅ 完成   | 鸟瞰图、点击/拖拽导航、块级缓存增量失效、跳过折叠隐藏块                                                                                                              |
+| 大文件性能优化       | ✅ 完成   | Wave 4 E：运行时探针埋点（perf_probe）、lazy 高亮 Document 级多 View 协作（visibleRanges = ∪）、Large File Mode 达阈值自动降级（可配置可回退）、阈值自动启用         |
+| Markdown 标题折叠    | ✅ 完成   | 标题层级折叠 + 代码缩进折叠 + 工作区持久化 + 跳转自动展开                                                                                                            |
+| Markdown 大纲导航    | ✅ 完成   | 解析标题树、点击跳转、按文件类型显隐                                                                                                                                 |
+| 命令面板             | ✅ 完成   | Ctrl+Shift+P / F1 唤起、搜索执行命令、位置记忆                                                                                                                       |
+| 跨文件搜索           | ✅ 完成   | 后台线程遍历 + 正则/纯文本匹配 + 按文件分组 + 双击跳转                                                                                                               |
+| 文档缓冲区自动补全   | ✅ 完成   | 词频匹配 + Enter/Tab 接受 + IME 组字期间不弹出                                                                                                                       |
+| 增强型查找替换       | ✅ 完成   | 正则、大小写敏感、全词匹配、匹配计数、ExtraSelections 高亮                                                                                                           |
+| 侧栏面板宿主         | ✅ 完成   | 多面板注册/切换/宽度记忆                                                                                                                                             |
+| 文件树               | ✅ 完成   | 文件树 + 外部文件区 + 右键菜单 + 接受标签拖拽移动文件                                                                                                                |
+| 标签页拖拽           | ✅ 完成   | 标签内排序 + 拖拽到文件树移动文件                                                                                                                                    |
+| 分屏多视图           | ✅ 完成   | 分屏布局/状态持久化、方向切换、跨分屏标签拖拽、共享 Document 跨面板联动编辑（同一文档多视图）                                                                        |
+| 资源栏               | ✅ 完成   | 四资源显示 + 打字统计                                                                                                                                                |
+| 在线/离线挂机        | ✅ 完成   | 在线每分钟 +5/+5/+5、铝材每3分钟+5；离线 1/3 向大取整，上限 24h                                                                                                      |
+| 打字奖励             | ✅ 完成   | textChanged 接入 → 递减收益算法 → 资源奖励（1:1:1:0.2）                                                                                                              |
+| 每日签到             | ✅ 完成   | 每日首次启动发放奖励（各+100）                                                                                                                                       |
+| 小秘书               | ✅ 完成   | 立绘 + 台词气泡 + 事件台词 + 自定义角色/皮肤/状态                                                                                                                    |
+| 书签持久化           | ✅ 完成   | 书签保存到 workspace.json，关闭重开后恢复                                                                                                                            |
+| 设置系统             | ✅ 完成   | settings.json + workspace.json + savegame.json，首次运行对话框                                                                                                       |
+| 安全防护体系         | ✅ 完成   | 路径验证/文件操作安全/输入验证/拖放白名单                                                                                                                            |
+| 插件系统             | ✅ 完成   | 能力声明制（capabilities→权限映射）/命名空间式 PluginContext/主线程模型/数据与事件能力/热加载，2 个示例插件 + API 文档                                               |
+| 主题系统             | ✅ 完成   | Theme v2（default 主题包/recipe 组件库/双变体）/全局 QSS 生成/预览/ThemeAwareMixin 全局生效/原生标题栏深色                                                           |
+| 集中式版本管理       | ✅ 完成   | `src/__init__.py` 唯一真相源 + `verify_version.py` 一致性验证                                                                                                        |
+| 帮助中心             | ✅ 完成   | 帮助对话框（使用说明 + 新手攻略双页签）；内容存于 `data/help/*.md`，安全渲染；主题跟随 Theme v2 token（深浅色自适应）                                                |
+| 建造系统             | 🔲 规划中 | 详见 [roadmap.md](roadmap.md)                                                                                                                                        |
+| 图鉴系统             | 🔲 规划中 | 详见 [roadmap.md](roadmap.md)                                                                                                                                        |
+| 车库系统             | 🔲 规划中 | 详见 [roadmap.md](roadmap.md)                                                                                                                                        |
+| 游戏设置界面         | 🔲 规划中 | 详见 [roadmap.md](roadmap.md)                                                                                                                                        |
 
 ---
 
@@ -63,7 +67,6 @@ PanzerNote/
 ├── main.py                         # 程序入口（高DPI、字体、图标、首次运行引导、启动分析、版本一致性检查）
 ├── pyproject.toml                  # 项目配置（构建/依赖/pytest/mypy/动态版本引用）
 ├── .gitignore                      # Git 忽略规则
-├── .gitattributes                  # Git 属性（* text=auto eol=lf 行尾符统一）
 ├── user_data_path.txt              # 持久化用户数据路径
 ├── CHANGELOG.md                    # 版本变更记录
 ├── LICENSE                         # GPL-3.0 许可证
@@ -205,10 +208,13 @@ PanzerNote/
 ├── docs/                           # 文档
 │   ├── architecture.md             # 本文件
 │   ├── roadmap.md                  # 未完成规划
+│   ├── memorandum.md               # 中远期技术备忘录（暂不排期）
 │   └── theme-design/               # 主题设计
 │       ├── color_audit.md          # 硬编码颜色审计 + 性能审计（B9）
 │       ├── wave8_acceptance.md     # Wave 8 验收记录（Golden Paths + Coverage Matrix + review 结论）
 │       └── theme_authoring.md      # Theme v2 主题作者指南（主题包格式与校验规则）
+│
+├── 项目说明.md                     # 旧入口存根（内容已并入本文件）
 │
 ├── THIRD_PARTY_NOTICES.md          # 第三方依赖许可证清单（B9 license 合规）
 │
@@ -241,6 +247,11 @@ PanzerNote/
     │   └── savegame.json           # 游戏存档
     └── temp/autosave/              # 自动保存暂存区
 ```
+
+> 仓库根目录另有一批**阶段性工作文档**：`Wave6-数据与搜索远期备忘录.md`、`Wave8-*.md`（视觉语言
+> 设计稿 / B1、B3、B7 设计文档 / 补漏与清理规划书 / 深色模式修复规划书）、`优化规划大纲.md`、
+> `handoff-*.md`、`111.md`。它们是各阶段的历史设计与工作台账，**不是现行真相源**——架构事实以
+> 本文件为准，已完成变更见 [CHANGELOG.md](../CHANGELOG.md)，未完成规划见 [roadmap.md](roadmap.md)。
 
 ---
 
@@ -806,7 +817,7 @@ LOADED → on_unload() → UNLOADED
 #### 4.13.2 主题预览 (`themes/theme_preview.py`)
 
 - `ThemePreviewDialog` — 主题预览对话框，接入 ThemeAwareMixin，深色样式已补齐
-- 多包 + 变体浏览（B8）：扫描 `themes/*/theme.json` 列出包，按包加载变体
+- 多包 + 变体浏览：扫描 `themes/*/theme.json` 列出包，按包加载变体（B4 实现；当前仓库仍只有 default 单包，第二个真实视觉语言属 B8、已延后，见 [roadmap.md](roadmap.md)）
 - 按 v2 token 分组展示色块：通用颜色 / 编辑器颜色 / UI 区域 / 搜索高亮 / 书签与折叠 / 代码块 / Markdown 高亮 等
 - 应用切换经 `theme_applied(package_id, variant_id)` 走 Snapshot Overlay 过渡
 
@@ -1075,16 +1086,21 @@ DraggableTabBar.mouseMoveEvent (鼠标离开标签栏) / 树内拖动条目
 
 ## 8. 快捷键总览
 
-| 分类     | 快捷键                                              | 功能                                              |
-| -------- | --------------------------------------------------- | ------------------------------------------------- |
-| 文件     | `Ctrl+N/O/S/Shift+S/W`                              | 新建/打开/保存/另存为/关闭标签                    |
-| 编辑     | `Ctrl+Z/Y/X/C/V/A`                                  | 撤销/重做/剪切/复制/粘贴/全选                     |
-| 查找     | `Ctrl+F/H/G`, `F3/Shift+F3`                         | 查找/替换/转到行/下一个/上一个                    |
-| 行操作   | `Ctrl+Shift+K`, `Alt+↑↓`, `Ctrl+Shift+D`            | 删除行/移动行/复制行                              |
-| 大小写   | `Ctrl+Shift+U`                                      | 切换大小写                                        |
-| Markdown | ``Ctrl+Alt+B/I/`/K``, `Ctrl+Alt+T`, `Ctrl+Alt+0..6` | 加粗/斜体/行内代码/链接、任务勾选、标题级别与清除 |
-| 视图     | `Ctrl+B/M/Shift+P`, `F11`, `Ctrl+±0`                | 文件树/缩略图/命令面板/全屏/缩放                  |
-| 导航     | `Ctrl+1/2/3/4`                                      | 记事本/建造/车库/图鉴                             |
+| 分类     | 快捷键                                                              | 功能                                                        |
+| -------- | ------------------------------------------------------------------- | ----------------------------------------------------------- |
+| 文件     | `Ctrl+N/O/S/Shift+S/W`                                              | 新建/打开/保存/另存为/关闭标签                              |
+| 编辑     | `Ctrl+Z/Y/X/C/V/A`                                                  | 撤销/重做/剪切/复制/粘贴/全选                               |
+| 查找     | `Ctrl+F/H/G`                                                        | 查找/替换/转到行                                            |
+| 行操作   | `Ctrl+Shift+K/C/V`, `Alt+↑↓`                                        | 删除行/复制行/粘贴为新行/移动行                             |
+| 书签     | `Ctrl+F2`, `F2/Shift+F2`                                            | 添加（移除）书签、下一个/上一个书签                         |
+| 大小写   | `Ctrl+Shift+U`                                                      | 切换大小写                                                  |
+| Markdown | ``Ctrl+Alt+B/I/`/K``, `Ctrl+Alt+T`, `Ctrl+Alt+0..6`, `Ctrl+Shift+I` | 加粗/斜体/行内代码/链接、任务勾选、标题级别与清除、插入图片 |
+| 视图     | `Ctrl+B/M/Shift+M/Shift+O`, `Ctrl+K`, `F11`, `Ctrl+±0`              | 文件树/缩略图/Markdown 预览/侧栏、折叠全部标题、全屏/缩放   |
+| 导航     | `Ctrl+1/2/3/4`                                                      | 记事本/建造/车库/图鉴                                       |
+| 帮助     | `Ctrl+/`, `Ctrl+Shift+P`                                            | 快捷键提示面板/命令面板                                     |
+
+> 本表为速查摘要，**唯一真相源**是 `src/core/shortcut_manager.py`；未列出的动作（分屏、
+> 表格行列命令、图片恢复/清理等）默认无全局快捷键，可在快捷键面板中查看。
 
 ---
 
@@ -1093,28 +1109,33 @@ DraggableTabBar.mouseMoveEvent (鼠标离开标签栏) / 树内拖动条目
 ### 运行依赖
 
 ```bash
-pip install PyQt6>=6.11.0 shiboken6>=6.11.2 Pygments>=2.21.0 markdown>=3.10.3 Pillow>=12.3.0 send2trash>=2.1.0 markdown-it-py>=4.2.0 mdit-py-plugins>=0.6.1 pillow-heif>=1.7.0 qasync>=0.28.0 webview2-Microsoft.Web.WebView2.Core>=3.2.1 winrt-Windows.Foundation>=3.2.1
+pip install -e .   # 或 pip install -r requirements.txt
 python main.py
 ```
 
+> 依赖清单的**唯一真相源**是 `pyproject.toml`（`requirements.txt` 是开发机安装清单，两者需保持同步），
+> 本节只按用途归类，不重抄版本号：
+>
+> - **GUI / 编辑**：PyQt6、shiboken6、Pygments
+> - **Markdown**：markdown-it-py、mdit-py-plugins、markdown（导出 fallback）
+> - **图片**：Pillow、pillow-heif
+> - **桌面集成**：send2trash
+> - **预览 / 导出后端（Windows 专用）**：qasync、webview2-Microsoft.Web.WebView2.Core、winrt-Windows.Foundation
+
 > 图片查看器的格式覆盖只依赖 `pillow-heif`（HEIF/HEIC）；AVIF 由 Pillow 内置解码，无需额外依赖。**相机 RAW 未纳入支持**：需要 LibRaw（`rawpy`），其传递依赖 `numpy` + `numpy.libs` 会带来约 54 MB 包体，成本与收益不成比例。
-> 注意 `pillow-heif` 的**冻结版成本同样可观**：Python 包仅 0.2 MB，但随包原生库约 27 MB（`libx265` 21.6 MB、`libstdc++` 2.5 MB、`libheif` 2.1 MB、`libde265` 0.9 MB 等），冻结构建产物由 98.8 MB 增至 126.3 MB。`libx265` 虽是编码器（本应用只解码）却是 import 时硬依赖——移走即 `import _pillow_heif` 失败，不可裁剪。
+> 注意 `pillow-heif` 的**冻结版成本同样可观**：Python 包仅 0.2 MB，但随包原生库约 27 MB（`libx265` 21.6 MB、`libstdc++` 2.5 MB、`libheif` 2.1 MB、`libde265` 0.9 MB 等），冻结构建产物由 98.8 MB 增至 126.3 MB。`libx265` 虽是编码器（本应用只解码）却是 import 时硬依赖——移走即 `import _pillow_heif` 失败，不可裁剪。许可证与随包分发义务见 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)。
 
 > 预览与 PDF 导出依赖系统安装的 **Microsoft Edge WebView2 Runtime**（Windows 11 与多数 Windows 10 已预装，**不随包分发**）；缺失时启动会记录 error 日志并在窗口显示后弹一次安装指引，预览区同时显示可读提示。
-> `qasync` / `webview2-*` / `winrt-*` 均为 Windows 专用；完整依赖清单以 `pyproject.toml` / `requirements.txt` 为准。
 
 ### 开发依赖
 
-```bash
-pip install pytest>=9.1.1 pytest-cov pytest-qt pytest-timeout  # 单元测试
-pip install mypy>=2.3.1                                        # 类型检查
-```
+开发与测试依赖见 `pyproject.toml` 的 `[project.optional-dependencies]`（`dev` 组：pytest、pytest-cov、pytest-qt、pytest-timeout、mypy；`all` 为 `format` + `dev`），可用 `pip install -e ".[dev]"` 安装。
 
 > mypy 覆盖 `src/` 全量（`mypy src/`），目标 `python_version = "3.11"`，无 per-module 豁免（`PIL` / `rawpy` 的临时 `follow_imports = "skip"` 已随 rawpy 摘除一并删除）。
 
 ### 单元测试
 
-项目共 102 个测试文件（`tests/test_*.py`），覆盖核心模块、编辑器、图片资源工作流、游戏系统、安全模块及可扩展性架构。另有 `tests/benchmarks/` 存放性能基准测试。运行方式：`pytest tests/ -v`。测试文件命名约定为 `test_<module>.py`，每个测试文件覆盖对应模块的关键路径。
+测试集中在 `tests/`（`test_*.py`，命名约定 `test_<module>.py`，每个文件覆盖对应模块的关键路径），另有 `tests/benchmarks/` 存放性能基准测试。运行方式与超时分流策略见 skill `pytest-tiered-timeout-hunter`。
 
 ---
 
@@ -1133,7 +1154,7 @@ pip install mypy>=2.3.1                                        # 类型检查
 7. **异步渲染线程安全**：`AsyncHighlightRenderer` 使用 `QueuedConnection` 信号通信，禁止在非主线程操作 UI 元素
 8. **虚拟滚动**：大文件（≥50000行）自动启用延迟语法高亮
 9. **高 DPI 缩放**：`main.py` 已启用 `AA_EnableHighDpiScaling`，`dpi_helper.scale()` 系列函数在生产环境中为 no-op
-10. **行尾符**：所有源文件使用 LF 行尾符，配合 `.gitattributes` 的 `* text eol=lf` 规则
+10. **行尾符**：源文件统一使用 LF 行尾符，提交时请勿引入 CRLF（仓库现未用 `.gitattributes` 强制该规则，靠提交者自律；应用侧的行尾探测与规范化见「缩进/行尾配置」）
 
 ### 安全约束
 

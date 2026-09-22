@@ -1,11 +1,20 @@
 # Color Audit
 
-Baseline: fix20260703(3)-theme @ 78542d8875ba826cfdce256565aef55d003345a5
+Baseline（审计起点）: branch `fix20260703(3)-theme` @ `78542d8`（2026-07-04）。
+下文各批次记录写于其后的分支，日期各自标注。
 
 ## Goal
 
 This document records hardcoded colors and color-system inconsistencies.
-This commit does not change runtime behavior.
+
+It started as a read-only audit (the initial commit added no runtime change); the batch
+records further down (Batch A–E, Wave8 修复/补漏) are the follow-up implementation history
+and **did** change runtime behavior. The Summary table is a point-in-time snapshot — check
+its date and re-run the scan patterns below before treating the counts as current.
+
+> 主题设计文档共三份，分工如下：**本文件**＝配色治理规则与硬编码色审计（面向贡献者）；
+> [theme_authoring.md](theme_authoring.md)＝主题包格式与校验规则（面向主题作者）；
+> [wave8_acceptance.md](wave8_acceptance.md)＝Wave 8 重构的逐格验收证据（历史快照，非现行规则）。
 
 ## Reference Direction
 
@@ -49,37 +58,42 @@ Excluded paths:
 
 ## Summary
 
-口径说明：以下计数为 **2026-09-09 B9 B2 复核实测**（`#[0-9a-fA-F]{3,8}` 含色行数，非旧基线
-"处"数）。审计结论：**全库无绕过主题系统的裸硬编码色**——所有 hex 字面量均属下述
-allowed 类别之一（v2 解析回退默认值 / 设计常量 / 游戏域常量 / 注释与降级路径）。
+口径说明：表中计数为 `#[0-9a-fA-F]{3,8}` 的**含色行数**（非旧基线"处"数），
+初测于 **2026-09-09 B9 B2**、于 **2026-09-22 复核**。审计结论：**全库无绕过主题系统的
+裸硬编码色**——所有 hex 字面量均属下述 allowed 类别之一（v2 解析回退默认值 / 设计常量 /
+游戏域常量 / 注释与降级路径）。
 
-| File                                           | Count | Status             | Notes                                                                         |
-| ---------------------------------------------- | ----: | ------------------ | ----------------------------------------------------------------------------- |
-| `src/editor/markdown_preview.py`               |    28 | Allowed (fallback) | 全部为 v2_token/v2_color 回退默认值 + 模板失败降级 HTML 字面量（B8 注释标明） |
-| `src/themes/bootstrap.py`                      |    18 | Allowed (design)   | BootstrapAppearance 色板常量（Layer 0，刻意不解析 Theme v2，见 4.8）          |
-| `src/editor/syntax_highlighter.py`             |    17 | Allowed            | Markdown 语义色板（allowed 清单）；Pygments 语法色走共享 syntax palette       |
-| `src/themes/theme_v2/consumer.py`              |    11 | Allowed (fallback) | v2_token/v2_color/v2_export_colors 的回退默认值（v2 不可用时才生效）          |
-| `src/editor/editor.py`                         |    13 | Allowed (fallback) | gutter 书签/折叠等均为 v2 回退默认值（Batch B 已迁移 token 消费）             |
-| `src/ui/shortcut_panel.py`                     |    10 | Allowed (fallback) | v2 回退默认值                                                                 |
-| `src/editor/find_replace.py`                   |    10 | Allowed (fallback) | 搜索 match/current 已走 search 专用 token（Batch C），余下为回退默认值        |
-| `src/game/game_sidebar.py`                     |     9 | Allowed (game)     | D13/D24 游戏域独立配色，走 game*palette.json（game*\* token）                 |
-| `src/editor/editor_tabs.py`                    |     9 | Allowed (fallback) | v2 回退默认值                                                                 |
-| `src/themes/theme_preview.py`                  |     8 | Allowed            | 色板 swatch 展示被预览主题的色值（`.get(key, "#000000")` 缺省），border 走 v2 |
-| `src/ui/help_dialog.py`                        |     7 | Allowed (fallback) | v2 回退默认值                                                                 |
-| `src/ui/side_panel_host.py`                    |     7 | Allowed (fallback) | 硬编码已移除（Batch C），余下为 v2 回退默认值                                 |
-| `src/game/secretary_widget.py`                 |     5 | Allowed (game)     | D13/D24 游戏域独立配色，气泡/状态色走 game*palette.json（secretary*\* token） |
-| `src/ui/command_palette.py`                    |     5 | Allowed (fallback) | hint/dialog/input 均 v2 回退默认值；QListWidget 由全局 tree_item recipe 驱动  |
-| `src/editor/completion.py`                     |     5 | Allowed (fallback) | 容器/滚动条已迁 v2 recipe（补漏），选中色走 accent_soft token                 |
-| `src/editor/minimap.py`                        |     4 | Allowed (fallback) | 半透明 alpha 为绘制细节，颜色来源走 recipe `viewport` 键（2026-08-17 修正）   |
-| `src/game/resource_bar.py`                     |     4 | Allowed (game)     | D13/D24 游戏域独立配色                                                        |
-| `src/editor/status_bar.py`                     |     4 | Allowed (fallback) | statusbar recipe 已收敛（补漏 C），余下为 v2 回退默认值                       |
-| `src/main_window.py`                           |     3 | Allowed (fallback) | v2 回退默认值                                                                 |
-| `src/editor/find_in_files_panel.py`            |     1 | Allowed (fallback) | text_secondary v2 回退；输入/下拉/结果树由 B3 全局 recipe 驱动                |
-| `src/themes/theme_v2/transition_controller.py` |     1 | Allowed (fallback) | v2 回退默认值                                                                 |
-| `src/ui/main_window_ui.py`                     |     1 | Allowed (fallback) | v2 回退默认值                                                                 |
+| File                                           | Count | Status             | Notes                                                                                                                                             |
+| ---------------------------------------------- | ----: | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/editor/markdown_preview.py`               |    24 | Allowed (fallback) | 全部为 v2_token/v2_color 回退默认值 + 模板失败降级 HTML 字面量（B8 注释标明）                                                                     |
+| `src/themes/bootstrap.py`                      |    18 | Allowed (design)   | BootstrapAppearance 色板常量（Layer 0，刻意不解析 Theme v2，见 4.8）                                                                              |
+| `src/editor/syntax_highlighter.py`             |    17 | Allowed            | Markdown 语义色板（allowed 清单）；Pygments 语法色走共享 syntax palette                                                                           |
+| `src/themes/theme_v2/consumer.py`              |    11 | Allowed (fallback) | v2_token/v2_color/v2_export_colors 的回退默认值（v2 不可用时才生效）                                                                              |
+| `src/editor/editor.py`                         |    13 | Allowed (fallback) | gutter 书签/折叠等均为 v2 回退默认值（Batch B 已迁移 token 消费）                                                                                 |
+| `src/ui/shortcut_panel.py`                     |    10 | Allowed (fallback) | v2 回退默认值                                                                                                                                     |
+| `src/editor/find_replace.py`                   |    10 | Allowed (fallback) | 搜索 match/current 已走 search 专用 token（Batch C），余下为回退默认值                                                                            |
+| `src/game/game_sidebar.py`                     |     9 | Allowed (game)     | D13/D24 游戏域独立配色，走 game*palette.json（game*\* token）                                                                                     |
+| `src/editor/editor_tabs.py`                    |     9 | Allowed (fallback) | v2 回退默认值                                                                                                                                     |
+| `src/editor/file_tree.py`                      |     6 | Allowed (fallback) | 侧栏/标题栏为 v2 回退默认值；`_drop_highlight` 的构造期默认色在 `_apply_theme_colors` 中由 `tree_item.drop_indicator` 覆盖（2026-09-22 复核补入） |
+| `src/themes/theme_preview.py`                  |     8 | Allowed            | 色板 swatch 展示被预览主题的色值（`.get(key, "#000000")` 缺省），border 走 v2                                                                     |
+| `src/ui/help_dialog.py`                        |     7 | Allowed (fallback) | v2 回退默认值                                                                                                                                     |
+| `src/ui/side_panel_host.py`                    |     7 | Allowed (fallback) | 硬编码已移除（Batch C），余下为 v2 回退默认值                                                                                                     |
+| `src/game/secretary_widget.py`                 |     5 | Allowed (game)     | D13/D24 游戏域独立配色，气泡/状态色走 game*palette.json（secretary*\* token）                                                                     |
+| `src/ui/command_palette.py`                    |     5 | Allowed (fallback) | hint/dialog/input 均 v2 回退默认值；QListWidget 由全局 tree_item recipe 驱动                                                                      |
+| `src/editor/completion.py`                     |     5 | Allowed (fallback) | 容器/滚动条已迁 v2 recipe（补漏），选中色走 accent_soft token                                                                                     |
+| `src/editor/minimap.py`                        |     4 | Allowed (fallback) | 半透明 alpha 为绘制细节，颜色来源走 recipe `viewport` 键（2026-08-17 修正）                                                                       |
+| `src/game/resource_bar.py`                     |     4 | Allowed (game)     | D13/D24 游戏域独立配色                                                                                                                            |
+| `src/editor/status_bar.py`                     |     4 | Allowed (fallback) | statusbar recipe 已收敛（补漏 C），余下为 v2 回退默认值                                                                                           |
+| `src/main_window.py`                           |     3 | Allowed (fallback) | v2 回退默认值                                                                                                                                     |
+| `src/editor/find_in_files_panel.py`            |     1 | Allowed (fallback) | text_secondary v2 回退；输入/下拉/结果树由 B3 全局 recipe 驱动                                                                                    |
+| `src/themes/theme_v2/transition_controller.py` |     1 | Allowed (fallback) | v2 回退默认值                                                                                                                                     |
+| `src/ui/main_window_ui.py`                     |     1 | Allowed (fallback) | v2 回退默认值                                                                                                                                     |
 
-> 复核方法：全库 `src/` 正则扫描 `#[0-9a-fA-F]{3,8}` + 逐文件分类；仅命中 1 处
-> `QColor("#...")`/裸 QSS 色（`resource_bar.py` 分隔线，仍为 v2_token 回退）。
+> 复核方法：全库 `src/` 按上述 Scan Patterns 正则扫描 + 逐文件分类；2026-09-22 复核为
+> **182 含色行 / 23 文件**（初测 22 文件，缺 `file_tree.py`，已补入）。`QColor("#...")`
+> 字面量仅 1 处——`src/editor/file_tree.py:103` 的 `_drop_highlight` 构造期默认色，
+> 随后由 `_apply_theme_colors` 按 `tree_item.drop_indicator` 覆盖，属 v2 回退默认值。
+> `resource_bar.py` 的 4 处则全部是 `v2_token` 回退默认值，不含裸 QSS 色。
 
 > 补充（2026-09-10，`refactor20260910-webengine_single_path`）：**导出/打印配色固定解析亮色变体**
 > （`consumer.v2_export_variant_id` → `variant_for_dark(False)`），不再随当前激活主题取色；语法高亮同理由

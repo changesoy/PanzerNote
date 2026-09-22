@@ -16,9 +16,9 @@ from PyQt6.QtWidgets import (
     QInputDialog, QMessageBox,
     QFrame, QAbstractItemView, QStyleOptionViewItem
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QModelIndex, QMimeData, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal, QModelIndex, QMimeData, QRect, QTimer
 from PyQt6.QtGui import (
-    QColor, QFont, QAction, QFileSystemModel, QDragLeaveEvent, QPainter,
+    QColor, QFont, QAction, QFileSystemModel, QDragLeaveEvent, QPaintEvent, QPainter,
 )
 
 from ..core.config import Config
@@ -132,6 +132,51 @@ class DroppableTreeView(QTreeView):
                 and index == self._drop_target:
             painter.fillRect(self.visualRect(index), self._drop_highlight)
 
+    def _last_rendered_index(self) -> QModelIndex:
+        """树里最后一行（沿已展开的最后一条链走到叶子）。
+
+        从视图根出发：QFileSystemModel 的模型根是整个磁盘（根索引的 children
+        是驱动器），与视图用 setRootIndex 设的那个目录不是一回事。
+        """
+        model = self.model()
+        if model is None:
+            return QModelIndex()
+        index = self.rootIndex()
+        count = model.rowCount(index)
+        if count == 0:
+            return QModelIndex()
+        while True:
+            index = model.index(count - 1, 0, index)
+            count = model.rowCount(index)
+            if count == 0 or not self.isExpanded(index):
+                return index
+
+    def _drop_area_top(self) -> Optional[int]:
+        """落点落在「空白处」（树根）时的可绘制区域顶部；不适用或无可见空区时 None。
+
+        树根不占一行（视图用 setRootIndex 把它设成了根），行高亮画不出来，只能
+        在最后一行下方的空白区铺色 —— 否则「拖到空白处会落进笔记库根目录」这件
+        事完全没有视觉反馈，而那里确实会落盘。
+        """
+        viewport = self.viewport()
+        if viewport is None or not self._drop_target.isValid() \
+                or self._drop_target != self.rootIndex():
+            return None
+        last = self._last_rendered_index()
+        top = 0 if not last.isValid() else self.visualRect(last).bottom() + 1
+        return top if top < viewport.height() else None
+
+    def paintEvent(self, event: Optional[QPaintEvent]) -> None:
+        super().paintEvent(event)
+        # 空白区提示补在视图自身绘制之后（行高亮走 drawRow，见上）。
+        top = self._drop_area_top()
+        viewport = self.viewport()
+        if top is None or viewport is None:
+            return
+        painter = QPainter(viewport)
+        painter.fillRect(QRect(0, top, viewport.width(), viewport.height() - top),
+                         self._drop_highlight)
+
     def _ask_move_or_copy(self, filename: str, dest_folder: str) -> Optional[str]:
         """询问用户移动还是复制文件。返回 "move" / "copy" / None（取消）。"""
         box = QMessageBox(self)
@@ -177,6 +222,34 @@ class DroppableTreeView(QTreeView):
             return False
         return not dest.startswith(src + os.sep)
 
+    def _drop_paths(self, mime: QMimeData) -> list:
+        """本次拖拽携带的本地路径（标签拖拽取标签自身的文件路径）。
+
+        标签拖拽刻意不带 text/uri-list，故需单独从 MIME_TAB_FILEPATH 取；未命名
+        标签没有路径，返回空列表。
+        """
+        if mime.hasFormat(MIME_TAB_FILEPATH):
+            data = mime.data(MIME_TAB_FILEPATH)
+            if data is None or data.isEmpty():
+                return []
+            path = data.data().decode("utf-8")
+            return [path] if path else []
+        return [url.toLocalFile() for url in mime.urls() if url.toLocalFile()]
+
+    def _is_droppable(self, mime: QMimeData, dest_folder: Optional[str]) -> bool:
+        """当前落点是否真的会落盘 —— 落点提示只在这个前提下显示。
+
+        否则就是「提示过度承诺」：把文件拖回它自己的文件夹（或把文件夹拖进自己
+        的子孙目录）时高亮照旧亮起，松手却什么都不发生。
+        """
+        if not dest_folder:
+            return False
+        paths = self._drop_paths(mime)
+        if not paths:
+            # 未命名标签没有路径，拖进文件夹 = 落盘保存，任何文件夹都可放置
+            return self._is_tab_drag(mime)
+        return any(self._can_drop_into(path, dest_folder) for path in paths)
+
     def _dest_folder_index_at(self, pos) -> QModelIndex:
         """落点对应的目标文件夹行：命中文件夹用它本身，命中文件用其父目录，
         空白处用树根。
@@ -200,13 +273,16 @@ class DroppableTreeView(QTreeView):
         root_path = model.rootPath()
         return model.index(root_path) if root_path else QModelIndex()
 
-    def _dest_folder_at(self, pos) -> Optional[str]:
-        """落点对应的目标文件夹路径（判定规则见 _dest_folder_index_at）。"""
+    def _dest_folder_path(self, index: QModelIndex) -> Optional[str]:
+        """落点行对应的目标文件夹路径（判定规则见 _dest_folder_index_at）。"""
         model = self.model()
-        index = self._dest_folder_index_at(pos)
         if isinstance(model, QFileSystemModel) and index.isValid():
             return model.filePath(index)
         return None
+
+    def _dest_folder_at(self, pos) -> Optional[str]:
+        """落点对应的目标文件夹路径（判定规则见 _dest_folder_index_at）。"""
+        return self._dest_folder_path(self._dest_folder_index_at(pos))
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -234,7 +310,14 @@ class DroppableTreeView(QTreeView):
         # 统一」的落点。先前完全交给基类的原生指示器，于是同一张表上会出现
         # 「整行框」与「一条线」两种结果，拖标签还曾因模型拒绝自定义 MIME
         # 而完全画不出来。
-        self._set_drop_target(self._dest_folder_index_at(event.position().toPoint()))
+        # 只在该落点真的会落盘时才亮（见 _is_droppable）：把文件拖回它自己的
+        # 文件夹、或把文件夹拖进自己的子孙目录，松手都不会有任何动作。
+        dest_index = self._dest_folder_index_at(event.position().toPoint())
+        if self._is_droppable(event.mimeData(),
+                             self._dest_folder_path(dest_index)):
+            self._set_drop_target(dest_index)
+        else:
+            self._set_drop_target(QModelIndex())
         if self._is_tab_drag(event.mimeData()):
             super().dragMoveEvent(event)
             event.acceptProposedAction()

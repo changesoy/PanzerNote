@@ -22,7 +22,7 @@
 
 **兼容性说明**
 
-- 新增运行时依赖 `pillow-heif`（HEIF/HEIC 解码）：Python 包本身仅 0.2 MB，但它自带原生库，**冻结构建产物因此增加约 26 MB**（`libx265` 21.6 MB 为 HEVC 编码器、`libstdc++` 2.5 MB、`libheif` 2.1 MB、`libde265` 0.9 MB 等；实测移走 `libx265` 会使 `import _pillow_heif` 直接加载失败，属 import 时硬依赖，无法裁剪）
+- 新增运行时依赖 `pillow-heif`（HEIF/HEIC 解码）：Python 包本身仅 0.2 MB，但它自带原生库，**冻结构建产物因此增加约 27 MB**（`libx265` 21.6 MB 为 HEVC 编码器、`libstdc++` 2.5 MB、`libheif` 2.1 MB、`libde265` 0.9 MB 等；实测移走 `libx265` 会使 `import _pillow_heif` 直接加载失败，属 import 时硬依赖，无法裁剪）
 - **冻结版产物体积：98.8 MB → 126.3 MB（+27.5 MB）**，增量几乎全部来自 `pillow-heif` 随包原生库。这与「rawpy 因约 54 MB 包体而砍掉」是同一把尺子下的取舍——HEIF 支持的代价同样不可忽略，据实登记于此备查
 - `pillow-heif` 官方 wheel 因打包 libheif / libde265（LGPLv3）与 libx265（GPLv2）而整体按 GPLv2 分发，**冻结版会随包分发这些原生库**；许可证义务与风险见 `THIRD_PARTY_NOTICES.md`
 - **打包产物补齐许可证文件**：冻结版此前不含 `LICENSE` 与 `THIRD_PARTY_NOTICES.md`（`PanzerNote.spec` 的 `datas` 只收 `data` / `themes` / `plugins`），源码包此前也不含第三方许可证清单（`build_package.py` 的 `META_FILES` 遗漏）；现两者都已补入。分发 GPLv3 程序的二进制须一并提供许可证正文，且本版已引入 LGPLv3 / GPLv2 原生库，此项属合规必需；产物体积不变，仍为 126.3 MB

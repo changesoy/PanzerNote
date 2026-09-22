@@ -35,11 +35,15 @@ TODO
 ### 安装依赖
 
 ```bash
-pip install -e ".[format]"  # 完整安装（含格式化依赖）
-pip install -e "."           # 核心依赖（已包含预览功能）
+pip install -e ".[all]"     # 完整安装（格式化 + 开发/测试依赖）
+pip install -e ".[format]"  # 仅加装格式化依赖
+pip install -e "."          # 核心依赖（已包含预览与图片查看功能）
 ```
 
-> 可选依赖分组：`format`（PyYAML/tomli/cssbeautifier）、`dev`（pytest/mypy）
+> 可选依赖分组见 `pyproject.toml`：`format`（PyYAML / tomli / tomli-w / cssbeautifier / html5lib）、
+> `dev`（pytest / pytest-cov / pytest-qt / pytest-timeout / mypy）、`all`（前两组之和）。
+> 核心依赖中的 `pillow-heif`（HEIF / HEIC 解码）自带原生库，会使 PyInstaller 冻结产物
+> 增大约 27 MB（98.8 MB → 126.3 MB）；许可证与随包分发义务见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ### 运行
 
@@ -53,13 +57,19 @@ python main.py
 
 - [架构与设计](docs/architecture.md) — 模块结构、核心模块详解、数据流、架构约束
 - [更新日志](CHANGELOG.md) — 各版本变更记录
-- [路线图](docs/roadmap.md) — 未完成规划（建造/图鉴/车库/游戏设置）
+- [路线图](docs/roadmap.md) — 未完成规划（建造/图鉴/车库/游戏设置、Wave 8 B8 延后项）
+- [中远期备忘录](docs/memorandum.md) — 暂不排期但需留档的技术判断
 - [插件开发](plugins/plugin_api.md) — 插件生命周期、权限系统、API 参考
-- [颜色审计](docs/theme-design/color_audit.md) — 硬编码颜色审计与主题迁移计划
+- [项目说明](项目说明.md) — 旧入口存根，内容已并入架构文档
+- 主题与配色：
+  - [主题作者指南](docs/theme-design/theme_authoring.md) — Theme v2 主题包格式与校验规则
+  - [颜色审计](docs/theme-design/color_audit.md) — 硬编码颜色审计与主题系统治理记录
+  - [Wave 8 验收](docs/theme-design/wave8_acceptance.md) — 主题体系重构的逐格验收证据与覆盖范围
+  - [主题 token 映射（v1 遗留）](themes/token_mapping.md) — 已过时的 v1 字段 → 使用位置映射，仅作收敛参考
 
 ## 当前状态
 
-**已完成**：多标签编辑、分屏多视图（共享 Document 跨面板联动编辑）、Markdown 分屏预览、Markdown 编辑辅助（列表续写 / 任务勾选 / 表格编辑 / 行内格式 / 标题级别）、脚注与前辅文 / 后辅文渲染、Markdown 图片工作流（插图落盘 / 移动迁移 / 断链恢复 / 未使用图片清理）、图片查看器（含 HEIF / AVIF）、数学公式与图表、代码缩略图、查找替换、文件树、主题系统、插件系统、打字奖励、每日签到、小秘书、命令面板、跨文件搜索、Markdown 大纲与折叠。
+**已完成**：多标签编辑、分屏多视图（共享 Document 跨面板联动编辑）、Markdown 分屏预览、Markdown 编辑辅助（列表续写 / 任务勾选 / 表格编辑 / 行内格式 / 标题级别）、脚注与前辅文 / 后辅文渲染、Markdown 图片工作流（插图落盘 / 移动迁移 / 断链恢复 / 未使用图片清理）、图片查看器（含 HEIF / AVIF）、数学公式与图表、代码缩略图、查找替换、文件树、主题系统、插件系统、在线/离线挂机、打字奖励、每日签到、小秘书、命令面板、跨文件搜索、Markdown 大纲与折叠。
 
 **规划中**（详见 [路线图](docs/roadmap.md)）：建造系统、图鉴系统、车库系统、游戏设置界面。
 

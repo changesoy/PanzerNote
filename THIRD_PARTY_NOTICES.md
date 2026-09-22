@@ -103,9 +103,13 @@ PanzerNote 自身许可证：GPL-3.0-or-later（见 `LICENSE`）。
 ## 合规要点
 
 - 运行与发布均**零运行时网络依赖**（D4）：无 CDN / 远程字体 / 远程图标加载。
-- 分发形态为源码包（`dist/PanzerNote-<ver>-src.zip`），GPL-3.0 依赖（PyQt6）在
-  源码分发下无链接例外问题；若未来做二进制冻结分发（PyInstaller），需复核 PyQt6
-  GPL 合规与 Qt 组件许可边界。
+- 现有两种分发形态：**源码包**（`dist/PanzerNote-<ver>-src.zip`）与**冻结版**
+  （`dist/PanzerNote/`，PyInstaller 产物）。两者均随包提供 `LICENSE` 与本文件。
+- 源码分发下 GPL-3.0 依赖（PyQt6）不涉及链接例外问题；冻结版随包分发 Qt6 / PyQt6
+  二进制，本项目自身为 GPL-3.0-or-later，按 GPL 义务随包提供许可证正文即可（已满足）。
+  若将来替换 PyQt6 或改用其商业授权，需重新复核 Qt 组件许可边界。
+- 已知未决项只有一处：`libx265`（GPLv2）与本项目 GPLv3 的组合不兼容问题，
+  见上文「运行时依赖」段的说明。
 - 摘除 Qt WebEngine / Chromium 后，冻结产物不再包含 PyQt6-WebEngine（GPL-3.0）；
   预览侧新增的 `webview2-*` / `winrt-*`（MIT）与 `qasync`（BSD-2-Clause）均为宽松
   许可，系统 WebView2 Runtime 不随包分发、无需在本仓库登记再分发条款。

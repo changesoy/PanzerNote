@@ -2,21 +2,12 @@
 # PanzerNote .gitignore
 # ============================================================
 
-# --- 项目文档报告 ---
+# --- 项目文档报告（本地维护，不入库；仅登记当前存在的稿子）---
 hotfix.txt
 优化规划大纲.md
-待修分支.md
 111.txt
 111.md
-Wave3剩余分支重构方案.md
-Wave3.5分屏修复方案.md
-3.5.8-共享文档多视图需求规格.md
-3.5.8-共享文档多视图实施方案.md
-3.5.8-批次4多视图生命周期实施方案.md
-Wave4编辑器内部质量优化实施方案.md
-Wave4-批次D淘汰TabState子规划.md
-Wave4-批次E性能优化子规划.md
-Wave5-插件能力接口设计.md
+222.md
 Wave6-数据与搜索远期备忘录.md
 Wave8-UI视觉语言与主题架构设计.md
 Wave8-B1-Foundation设计文档.md
@@ -24,9 +15,7 @@ Wave8-B3-CoreControls设计文档.md
 Wave8-B7-Switching设计文档.md
 Wave8-V1清理迁移方案.md
 Wave8-深色模式修复规划书.md
-Wave8-Pythonic审查修复计划.md
 Wave8-补漏规划.md
-项目警告与弱警告汇总_完整清单.md
 
 # 主题检测工具（本地维护，不入库）
 scripts/check_dark_theme_gaps.py

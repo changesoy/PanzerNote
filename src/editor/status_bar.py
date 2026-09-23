@@ -84,6 +84,23 @@ class StatusBarWidget(ThemeAwareMixin, QStatusBar):
         self.file_type_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.addPermanentWidget(self.file_type_label)
 
+        # 大文件模式指示（1.3 D6）：仅当前编辑器处于大文件模式时显示
+        sep4 = QFrame()
+        sep4.setFrameShape(QFrame.Shape.VLine)
+        self.addPermanentWidget(sep4)
+        self._sep4 = sep4
+
+        self.large_file_label = QLabel("大文件")
+        self.large_file_label.setToolTip(
+            "当前文档处于大文件模式（达 1 万行自动降级高成本功能）：\n"
+            "关闭自动补全、跳过折叠计算、隐藏缩略图、暂停预览自动刷新、"
+            "禁用切换动画\n"
+            "（可在设置 → 编辑器 → 大文件中关闭该模式）"
+        )
+        sep4.hide()
+        self.large_file_label.hide()
+        self.addPermanentWidget(self.large_file_label)
+
     def _apply_theme_colors(self):
         # B3：状态栏消费 statusbar recipe（补漏 C：收敛自建 v2_token QSS → recipe 单一来源）
         # 兜底字面量 = v1 light 值（recipe 缺失时保持旧观感，理论不触发）。
@@ -122,7 +139,7 @@ class StatusBarWidget(ThemeAwareMixin, QStatusBar):
             }}
         """
         self._separator_style = sep_style
-        for sep in (self._sep1, self._sep1b, self._sep2, self._sep3):
+        for sep in (self._sep1, self._sep1b, self._sep2, self._sep3, self._sep4):
             sep.setStyleSheet(sep_style)
 
     def eventFilter(self, obj, event):
@@ -150,3 +167,8 @@ class StatusBarWidget(ThemeAwareMixin, QStatusBar):
 
     def set_file_type(self, file_type: str):
         self.file_type_label.setText(file_type)
+
+    def set_large_file_mode(self, active: bool) -> None:
+        """切换「大文件」指示标签可见性（随当前编辑器状态更新）。"""
+        self._sep4.setVisible(active)
+        self.large_file_label.setVisible(active)

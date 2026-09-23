@@ -1613,6 +1613,13 @@ class MainWindow(QMainWindow):
                 char_count, line, col, encoding, file_type, word_count, eol
             )
 
+        # 1.3 D6：状态栏「大文件」指示随当前编辑器状态更新（无编辑器时隐藏）
+        large_file_active = bool(
+            editor is not None
+            and getattr(editor, "is_large_file_mode", lambda: False)()
+        )
+        self.status_bar_widget.set_large_file_mode(large_file_active)
+
         today_chars = self.config.get_today_chars_typed()
         total_docs = self.config.get_total_documents()
         self.resource_bar.update_typing_stats(today_chars, total_docs)

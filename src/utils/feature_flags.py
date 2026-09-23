@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Feature Flag 系统
-控制性能优化特性的开关，默认使用旧有实现路径
+控制性能优化特性的开关，默认值见 _FLAGS 内注释
 
 行为说明：
 - is_enabled(flag_name): 查询 flag 状态。若 flag_name 不在已注册列表中，
@@ -17,16 +17,15 @@ from typing import Dict
 from .logger import get_logger
 
 _FLAGS: Dict[str, bool] = {
-    "virtual_scroll": False,
     "lazy_highlight": False,
     "minimap_block_cache": True,
     "async_highlight": False,
     "markdown_incremental": True,
-    "lazy_loading": False,
     "signal_driven_stats": True,
     # Wave 4 E3：大文件模式（达 LARGE_FILE_THRESHOLD 行自动降级补全/折叠/
-    # Minimap/预览）。行为开关，默认关闭；可配置可回退（设置对话框「大文件」）。
-    "large_file_mode": False,
+    # Minimap/预览）。D6 已决（1.3 大文件实测：flag 关时大文件滚动不可用）
+    # 默认开启；可配置可回退（设置对话框「大文件」）。
+    "large_file_mode": True,
 }
 
 _FLAG_ALIASES: Dict[str, str] = {}

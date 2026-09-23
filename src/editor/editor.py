@@ -294,8 +294,11 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             self._completion_popup.apply_font(font_family, font_size)
 
         # 空白新文档也要先落一次行距：新块会继承前一块的块格式，否则未保存
-        # 标签页里的输入会一直用 Qt 默认行距
-        self._apply_line_spacing()
+        # 标签页里的输入会一直用 Qt 默认行距。仅空文档需要在此补——已有内容的
+        # 文档块格式已由 setPlainText / set_line_spacing / attach 落过，而主题
+        # 切换并不改变行距，整篇 mergeBlockFormat 属纯浪费（实测 15 万行约 2.9s）。
+        if self.blockCount() <= 1:
+            self._apply_line_spacing()
 
     def _show_context_menu(self, position):
         """显示中文右键菜单"""
@@ -386,6 +389,8 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
     def _init_line_numbers(self):
         """初始化行号显示"""
         self.line_number_area = LineNumberArea(self)
+        # 上次落定的 viewport margins（幂等判断用，见 _update_line_number_area_width）
+        self._last_viewport_margins: tuple[int, int, int, int] | None = None
 
         self.blockCountChanged.connect(self._update_line_number_area_width)
         self.updateRequest.connect(self._update_line_number_area)
@@ -413,9 +418,19 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         return int(space)
 
     def _update_line_number_area_width(self, _):
-        """更新行号区域宽度"""
+        """更新行号区域宽度
+
+        幂等：宽度未变化时不调用 ``setViewportMargins``。该调用会触发整窗
+        relayout，而 ``_update_line_number_area`` 在滚动/重排期间会被高频回调
+        （实测大文档打开或切换主题时约 8.5 万次），其中行号宽度其实恒定不变，
+        冗余重排占该场景总耗时的约 2/3。
+        """
         right_margin = self._minimap_width() if self._minimap_visible else 0
-        self.setViewportMargins(self.line_number_area_width(), 0, right_margin, 0)
+        margins = (self.line_number_area_width(), 0, right_margin, 0)
+        if margins == self._last_viewport_margins:
+            return
+        self._last_viewport_margins = margins
+        self.setViewportMargins(*margins)
 
     def _update_line_number_area(self, rect, dy):
         """更新行号区域"""

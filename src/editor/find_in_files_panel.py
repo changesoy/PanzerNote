@@ -310,19 +310,25 @@ class FindInFilesPanel(ThemeAwareMixin, QWidget):
             return
         self._cancel_btn.setVisible(False)
         timed_out = bool(sender is not None and sender.timed_out)
+        skipped = (
+            sender.skipped_large_files if isinstance(sender, FindInFilesWorker) else 0
+        )
+        skip_note = f"，已跳过 {skipped} 个大文件" if skipped else ""
         # 先交淘汰池、再清引用：完成信号处理时 run() 往往还没返回，直接清空引用
         # 会让 QThread 在运行中被析构（见 _retire_worker）
         if isinstance(sender, FindInFilesWorker):
             self._retire_worker(sender)
         self._worker = None
         if timed_out:
-            self._status_label.setText("搜索超时，已自动停止（显示部分结果）")
+            self._status_label.setText(
+                "搜索超时，已自动停止（显示部分结果）" + skip_note
+            )
             self._tree.expandAll()
             return
         if total == 0:
-            self._status_label.setText("未找到匹配项")
+            self._status_label.setText("未找到匹配项" + skip_note)
         else:
-            self._status_label.setText(f"找到 {total} 项匹配")
+            self._status_label.setText(f"找到 {total} 项匹配" + skip_note)
 
         # 自动展开所有文件节点
         self._tree.expandAll()

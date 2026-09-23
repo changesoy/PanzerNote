@@ -22,6 +22,16 @@ MatchRecord = Tuple[str, int, int, str]
 _UTF16_BOMS = (b"\xff\xfe", b"\xfe\xff")
 """UTF-16 LE / BE 字节序标记；带 BOM 的文件按文本处理（绕过二进制探测）。"""
 
+_SEARCH_MAX_BYTES = 1 * 1024 * 1024
+"""单文件扫描上限（文字重量）：对齐 image_reference_scanner.SCAN_MAX_BYTES。
+
+「文字重量」= 原始字节 - 内嵌 base64 data URI payload：撑大 MD 的几乎都是
+内嵌图片的字节，剔除后正常大图文笔记仍可搜，只拦真正的巨型文本。
+"""
+
+_BASE64_DATA_RE = re.compile(rb"(?<=;base64,)[A-Za-z0-9+/=]+")
+"""内嵌 base64 data URI 的 payload 段（仅 ASCII base64 字符，单行不跨空白）。"""
+
 _DEFAULT_IGNORE_DIRS = frozenset({
     ".git", ".venv", "venv", ".tox", "node_modules",
     "__pycache__", ".mypy_cache", ".pytest_cache",
@@ -200,12 +210,18 @@ class FindInFilesWorker(QThread):
         self._file_list = file_list
         self._cancelled = False
         self._timed_out = False
+        self._skipped_large_files = 0
         self._logger = get_logger(__name__)
 
     @property
     def timed_out(self) -> bool:
         """是否因超时自动停止（仅 run() 结束后可读）。"""
         return self._timed_out
+
+    @property
+    def skipped_large_files(self) -> int:
+        """因超过单文件文字重量上限被跳过的文件数（仅 run() 结束后可读）。"""
+        return self._skipped_large_files
 
     def cancel(self) -> None:
         """请求取消搜索。"""
@@ -216,6 +232,7 @@ class FindInFilesWorker(QThread):
         pattern = None
         start_time = time.monotonic()
         finished_emitted = False
+        self._skipped_large_files = 0
 
         try:
             if self._use_regex:
@@ -292,6 +309,18 @@ class FindInFilesWorker(QThread):
                 raw = fh.read()
         except OSError:
             return total
+
+        if len(raw) > _SEARCH_MAX_BYTES:
+            # 文字重量 = 原始字节 - 内嵌 base64 payload（先做存在性预判，
+            # 绝大多数文件不付正则代价）；仍超限则整文件跳过不搜索。
+            payload_bytes = 0
+            if b";base64," in raw:
+                payload_bytes = sum(
+                    m.end() - m.start() for m in _BASE64_DATA_RE.finditer(raw)
+                )
+            if len(raw) - payload_bytes > _SEARCH_MAX_BYTES:
+                self._skipped_large_files += 1
+                return total
 
         # UTF-16 文本含 \x00，_is_binary_file 必误杀；带 UTF-16 BOM 的文件
         # 绕过二进制探测直接按 BOM 解码（编辑器打开链同口径支持 UTF-16）。

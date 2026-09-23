@@ -40,6 +40,7 @@ from .find_replace import FindReplaceBar
 from .save_task_manager import SaveTaskManager, SaveState
 from .temp_session_manager import TempSessionManager
 from .eol_utils import detect_eol_from_bytes
+from .file_open_service import decode_document_bytes
 from .image_reference_scanner import find_missing_local_images, rewrite_local_refs
 from .asset_migration_service import (
     MODE_COPY,
@@ -2683,17 +2684,12 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     def _decode_document_bytes(
         raw: bytes, encoding: Optional[str]
     ) -> Optional[Tuple[str, str]]:
-        """解码文档字节：优先已知编码，未知时按打开文档的同一顺序兜底。"""
-        candidates: List[str] = []
-        for name in ([encoding] if encoding else []) + ["utf-8", "gbk", "utf-16"]:
-            if name and name.lower() not in [item.lower() for item in candidates]:
-                candidates.append(name)
-        for candidate in candidates:
-            try:
-                return raw.decode(candidate), candidate
-            except (UnicodeDecodeError, LookupError):
-                continue
-        return None
+        """解码文档字节：优先已知编码，未知时按打开文档的同一顺序兜底。
+
+        实现下沉到 file_open_service.decode_document_bytes（供跨文件搜索
+        等调用方共享同一口径）。
+        """
+        return decode_document_bytes(raw, encoding)
 
     def _rewrite_asset_refs(
         self,

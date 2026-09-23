@@ -14,10 +14,13 @@ from typing import Any, List, Optional, Pattern, Tuple
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from ..utils.logger import get_logger
-from .file_open_service import _is_binary_file
+from .file_open_service import _is_binary_file, decode_document_bytes
 
 MatchRecord = Tuple[str, int, int, str]
 """搜索结果元组: (filepath, line_number, column, line_text)"""
+
+_UTF16_BOMS = (b"\xff\xfe", b"\xfe\xff")
+"""UTF-16 LE / BE 字节序标记；带 BOM 的文件按文本处理（绕过二进制探测）。"""
 
 _DEFAULT_IGNORE_DIRS = frozenset({
     ".git", ".venv", "venv", ".tox", "node_modules",
@@ -285,23 +288,37 @@ class FindInFilesWorker(QThread):
 
     def _search_file(self, filepath: str, pattern, total: int) -> int:
         try:
+            with open(filepath, "rb") as fh:
+                raw = fh.read()
+        except OSError:
+            return total
+
+        # UTF-16 文本含 \x00，_is_binary_file 必误杀；带 UTF-16 BOM 的文件
+        # 绕过二进制探测直接按 BOM 解码（编辑器打开链同口径支持 UTF-16）。
+        if raw.startswith(_UTF16_BOMS):
+            try:
+                text = raw.decode("utf-16")
+            except UnicodeDecodeError:
+                return total
+        else:
             if _is_binary_file(filepath):
                 return total
-            with open(filepath, "r", encoding="utf-8", errors="ignore") as fh:
-                for line_num, line_text in enumerate(fh, 1):
-                    if self._cancelled:
-                        break
+            # 与编辑器打开文档共用同一条解码链（utf-8 → gbk → utf-16），
+            # 全部失败回退 utf-8 ignore = 旧硬编码 utf-8 的兜底行为。
+            decoded = decode_document_bytes(raw)
+            text = decoded[0] if decoded is not None else raw.decode("utf-8", "ignore")
 
-                    line_text = line_text.rstrip("\n\r")
-                    matches = self._search_line(line_text, pattern)
+        for line_num, line_text in enumerate(text.splitlines(), 1):
+            if self._cancelled:
+                break
 
-                    for col, end_col in matches:
-                        self.result_found.emit(filepath, line_num, col, line_text)
-                        total += 1
-                        if total >= self._max_results:
-                            return total
-        except OSError:
-            pass
+            matches = self._search_line(line_text, pattern)
+
+            for col, end_col in matches:
+                self.result_found.emit(filepath, line_num, col, line_text)
+                total += 1
+                if total >= self._max_results:
+                    return total
         return total
 
     def _search_line(self, line_text: str, pattern: Optional[re.Pattern]) -> List[Tuple[int, int]]:

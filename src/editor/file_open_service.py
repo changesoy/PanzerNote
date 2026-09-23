@@ -13,7 +13,7 @@
 
 import os
 from enum import Enum
-from typing import Set
+from typing import Optional, Set, Tuple
 
 from ..utils.logger import get_logger
 from ..security.path_validator import PathValidator, PathSecurityError
@@ -88,6 +88,26 @@ def _is_binary_file(filepath: str) -> bool:
         return False
     except OSError:
         return True
+
+
+def decode_document_bytes(
+    raw: bytes, encoding: Optional[str] = None
+) -> Optional[Tuple[str, str]]:
+    """解码文档字节：优先已知编码，未知时按打开文档的同一顺序兜底。
+
+    候选顺序：[encoding] + utf-8 + gbk + utf-16（大小写不敏感去重），
+    全部严格解码失败时返回 None，由调用方决定兜底行为。
+    """
+    candidates: list[str] = []
+    for name in ([encoding] if encoding else []) + ["utf-8", "gbk", "utf-16"]:
+        if name and name.lower() not in [item.lower() for item in candidates]:
+            candidates.append(name)
+    for candidate in candidates:
+        try:
+            return raw.decode(candidate), candidate
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return None
 
 
 class FileOpenService:

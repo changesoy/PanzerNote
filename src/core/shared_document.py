@@ -52,13 +52,13 @@ class EolChange:
     base_steps = 切换发生时 QTextDocument 的撤销步数，用于判定该变更是否仍是
     「最近一步」——文本编辑越过它时，应由文本撤销先处理，从而让编辑与行尾
     按发生顺序交错撤销。
+
+    不含脏位：行尾脏是派生量（当前 eol ≠ 已落盘行尾），撤销/重做后重算即可。
     """
 
     old_eol: str
     new_eol: str
     base_steps: int
-    # 切换前的行尾脏位：撤销时据此还原（不能无条件清脏，也不能无条件置脏）
-    prev_eol_dirty: bool
 
 
 @dataclass
@@ -149,9 +149,10 @@ class SharedDocument(QObject):
         self._save_status: SaveStatus = SaveStatus.IDLE
         self.pending_save: bool = False
 
-        # 行尾（EOL）变更的独立脏位与撤销历史（1.8）：行尾是文档外元数据，
-        # 变更不产生 Qt 撤销步，故脏状态与可撤销性都在此单独记账。
-        self._eol_dirty: bool = False
+        # 行尾（EOL）变更的记账（1.8）：行尾是文档外元数据，变更不产生 Qt 撤销步，
+        # 故可撤销性单独记账。行尾脏是**派生量**——当前 eol ≠ 已落盘行尾
+        # （_saved_eol），因此来回切换不会累积脏，切回原行尾即自动回干净。
+        self._saved_eol: str = eol
         self._eol_undo: list[EolChange] = []
         self._eol_redo: list[EolChange] = []
 
@@ -204,8 +205,9 @@ class SharedDocument(QObject):
         finally:
             self.qdocument.blockSignals(False)
         self._dirty = False
-        # 内容重载后，行尾也是「刚读进来的那份」，旧的行尾变更历史与脏位一并作废
-        self._eol_dirty = False
+        # 内容重载后行尾即「刚读进来的那份」：以当前 eol 重建已落盘基线，
+        # 旧的行尾变更历史一并作废
+        self._saved_eol = self.eol
         self.clear_eol_history()
         self.last_saved_chars = len(content)
         self.last_text_length = len(content)
@@ -225,12 +227,13 @@ class SharedDocument(QObject):
     # ═══════════════ 行尾变更的记账与撤销（1.8） ═══════════════
 
     def _refresh_dirty(self) -> None:
-        """dirty = Qt 文本脏 或 行尾脏。
+        """dirty = Qt 文本脏 或 行尾偏离已落盘值。
 
         Qt 的 isModified 由撤销栈干净点推导，覆盖不到文档外元数据（行尾），
-        故行尾变更单独记在 _eol_dirty；取或后才等于「还有内容未落盘」。
+        故行尾维度单独比较：当前 eol ≠ 已落盘行尾即意味着「还有变更未落盘」。
+        做成派生量而非粘滞标志位，来回切换才不会累积脏（切回原行尾即回干净）。
         """
-        dirty = self.qdocument.isModified() or self._eol_dirty
+        dirty = self.qdocument.isModified() or self.eol != self._saved_eol
         if self._dirty != dirty:
             self._dirty = dirty
             self.dirtyChanged.emit(dirty)
@@ -253,13 +256,11 @@ class SharedDocument(QObject):
                 old_eol=self.eol,
                 new_eol=new_eol,
                 base_steps=self.qdocument.availableUndoSteps(),
-                prev_eol_dirty=self._eol_dirty,
             )
         )
         # 新的变更作废重做历史（与线性撤销语义一致）
         self._eol_redo.clear()
         self.eol = new_eol
-        self._eol_dirty = True
         self._refresh_dirty()
         return True
 
@@ -269,7 +270,6 @@ class SharedDocument(QObject):
             return False
         entry = self._eol_undo.pop()
         self.eol = entry.old_eol
-        self._eol_dirty = entry.prev_eol_dirty
         self._eol_redo.append(entry)
         self._refresh_dirty()
         return True
@@ -287,7 +287,6 @@ class SharedDocument(QObject):
             return False
         self._eol_redo.pop()
         self.eol = entry.new_eol
-        self._eol_dirty = True
         self._eol_undo.append(entry)
         self._refresh_dirty()
         return True
@@ -339,23 +338,28 @@ class SharedDocument(QObject):
         # D3a：保存统计随成功保存更新（对应 mark_saved 语义）
         self.last_saved_chars = len(snapshot.content)
         self.last_text_length = len(snapshot.content)
+        # 本次快照的行尾就是磁盘现在的行尾：刷新已落盘基线（行尾脏由
+        # eol 与它的比较派生，见 _refresh_dirty）
+        self._saved_eol = snapshot.eol
         retry = False
         if self.to_plain_text() == snapshot.content and self.eol == snapshot.eol:
             # 先复位 _dirty 再 setModified(False)：槽内 `_dirty != modified` 为 False，
             # 不会与下方手动 emit 重复触发 dirtyChanged(False)。
-            self._eol_dirty = False
             self._dirty = False
             self.qdocument.setModified(False)
-            self.dirtyChanged.emit(False)
             # 已落盘的行尾不再可撤销（撤销已保存的变更需重写文件，超出撤销范畴，
             # 也与「保存是提交点」的既有语义一致）
             self.clear_eol_history()
+            # 既有契约：保存成功后无条件发一次「已变干净」（订阅方据此复位保存状态）
+            self.dirtyChanged.emit(False)
         else:
-            self._dirty = True
             if self.pending_save:
                 retry = True
         self.pending_save = False
         self._set_save_status(SaveStatus.IDLE)
+        # 幂等补充重算，覆盖不经过 Qt 信号的行尾维度变化 —— 例如「保存途中又切了
+        # 行尾」，此时 else 分支必须发出 dirtyChanged(True)，否则标题不会带 *。
+        self._refresh_dirty()
         return retry
 
     def on_save_failed(self) -> None:

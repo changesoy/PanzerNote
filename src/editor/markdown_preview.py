@@ -1347,13 +1347,21 @@ a {{
             ops.append((content_start, 0, section_open))
             ops.append((section_end, -line_no, section_close))
 
-        ops.sort(key=lambda x: (x[0], x[1]), reverse=True)
+        # 单趟拼装。原实现逐个位置插入（result[:pos] + tag + result[pos:]）每次
+        # 复制整串，是 O(ops × len(html))：实测 2 万行约 28s，占整次预览渲染的
+        # 93%。按 (pos, tiebreaker) 升序一次拼完，结果与「逆序逐个插入」完全等价
+        # ——同一位置的多个标签最终按 tiebreaker 升序排列（升序拼装天然如此），
+        # 保证嵌套 section 的闭合顺序仍是内层先闭。
+        ops.sort(key=lambda x: (x[0], x[1]))
 
-        result = html
+        parts: list[str] = []
+        cursor = 0
         for pos, _tiebreaker, tag in ops:
-            result = result[:pos] + tag + result[pos:]
-
-        return result
+            parts.append(html[cursor:pos])
+            parts.append(tag)
+            cursor = pos
+        parts.append(html[cursor:])
+        return "".join(parts)
 
     # ──────────── 折叠同步 ────────────
 

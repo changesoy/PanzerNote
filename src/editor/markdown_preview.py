@@ -558,8 +558,8 @@ LARGE_FILE_PLACEHOLDER_HTML = (
     '<div class="large-file-paused">'
     "<h2>大文件模式已暂停预览渲染</h2>"
     "<p>当前文档行数较多，为保持编辑流畅，已暂停预览的自动渲染。</p>"
-    '<p class="hint">需要查看渲染效果时，可用「视图 → 切换Markdown预览」'
-    "关闭后重新打开预览，手动触发一次渲染。</p>"
+    '<p class="hint">需要查看渲染效果时，可用「视图 → 刷新预览」'
+    "手动触发一次渲染。</p>"
     "</div>"
 )
 
@@ -907,6 +907,10 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         已加载则就地更新变量，未加载则由首屏整页灌入，故无需清 Document 渲染缓存。
         """
         self._apply_preview_css_vars()
+        if self._is_large_file_mode():
+            # E3 大文件模式：排版设置全部落在 CSS 变量上（渲染产物不含排版信息），
+            # 上面就地更新变量已足够；整篇重渲染仍是高成本操作，跳过。
+            return
         self._update_preview()
 
     def _connect_signals(self) -> None:

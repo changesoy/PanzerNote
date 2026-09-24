@@ -127,6 +127,7 @@ _DEFAULT_SHORTCUTS = {
     "view.garage": ("切换到车库", "Ctrl+3", "视图"),
     "view.collection": ("切换到图鉴", "Ctrl+4", "视图"),
     "view.md_preview": ("切换Markdown预览", "Ctrl+Shift+M", "视图"),
+    "view.md_preview_refresh": ("刷新预览", "Ctrl+Shift+R", "视图"),
     "view.minimap": ("显示/隐藏代码缩略图", "Ctrl+M", "视图"),
     "view.split_horizontal": ("水平分屏（独立编辑）", "", "视图"),
     "view.split_vertical": ("垂直分屏（独立编辑）", "", "视图"),

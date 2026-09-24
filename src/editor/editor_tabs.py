@@ -793,8 +793,8 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             self._connect_doc_binding(widget)
             widget.editor.set_file_type(filepath)
             widget.set_base_path(os.path.dirname(os.path.abspath(filepath)))
-            # E3 大文件模式：打开时不自动渲染预览（大文件 md 全量渲染高成本），
-            # 保留手动刷新入口（refresh_preview_now / 预览面板刷新）。
+            # E3 大文件模式：打开时不自动渲染预览（大文件 md 全量渲染高成本）；
+            # 需要渲染时用「视图 → 刷新预览」（EditorTabWidget.refresh_md_preview）。
             if render_preview and not widget.editor.is_large_file_mode():
                 widget.refresh_preview_now()
         else:
@@ -908,7 +908,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             md_widget.set_base_path(
                 os.path.dirname(os.path.abspath(shared_doc.filepath or "."))
             )
-            if render_preview:
+            if render_preview and not editor.is_large_file_mode():
                 md_widget.refresh_preview_now()
 
         filename = shared_doc.display_name
@@ -2546,6 +2546,17 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         widget = self.currentWidget()
         if isinstance(widget, MarkdownPreviewWidget):
             widget.toggle_preview()
+
+    def refresh_md_preview(self):
+        """强制刷新当前标签的 Markdown 预览（「视图 → 刷新预览」）。
+
+        大文件模式下这是用户可见的手动渲染入口：refresh_preview_now 照常渲染
+        真实内容并复位占位标志。当前标签不是 Markdown 预览（普通编辑器 /
+        图片查看器 / 无标签）时安全 no-op，不影响其它标签。
+        """
+        widget = self.currentWidget()
+        if isinstance(widget, MarkdownPreviewWidget):
+            widget.refresh_preview_now()
 
     def toggle_minimap(self):
         """切换当前编辑器的缩略图显示"""

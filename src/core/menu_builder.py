@@ -187,6 +187,7 @@ class MenuBuilder:
             mw._wrap_limit_action.setChecked(current_mode == "limit_width")
 
         self._add_action(menu, "切换Markdown预览", QKeySequence("Ctrl+Shift+P"), mw._toggle_md_preview, "view.md_preview", "视图")
+        self._add_action(menu, "刷新预览", QKeySequence("Ctrl+Shift+R"), mw._refresh_md_preview, "view.md_preview_refresh", "视图")
         self._add_action(menu, "显示/隐藏代码缩略图", QKeySequence("Ctrl+M"), mw._toggle_minimap, "view.minimap", "视图")
         menu.addSeparator()
         self._add_action(menu, "水平分屏（独立编辑）", None, mw._split_editor_horizontal, "view.split_horizontal", "视图")

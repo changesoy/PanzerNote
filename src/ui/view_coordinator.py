@@ -304,6 +304,10 @@ class ViewCoordinator:
         """切换 Markdown 预览。"""
         self._editor_tabs.toggle_md_preview()
 
+    def refresh_md_preview(self) -> None:
+        """强制刷新当前标签的 Markdown 预览（大文件模式下的手动渲染入口）。"""
+        self._editor_tabs.refresh_md_preview()
+
     def toggle_minimap(self) -> None:
         """切换代码缩略图。"""
         self._editor_tabs.toggle_minimap()

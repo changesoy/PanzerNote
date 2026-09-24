@@ -130,6 +130,34 @@ body {{
 /* ========== Markdown 内容排版（共享单一来源，Wave 1.5） ========== */
 {layout_css}
 
+/* ========== 大文件模式占位页（见 LARGE_FILE_PLACEHOLDER_HTML） ========== */
+/* 纯主题变量驱动：内容不含代码块，故没有内联 token 色；切主题只需就地
+   更新 :root 变量即可变色（硬约束：切换主题后不得残留旧配色内容）。 */
+.large-file-paused {{
+    max-width: 34em;
+    margin: 12% auto 0 auto;
+    padding: 18px 22px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text-secondary);
+}}
+.large-file-paused h2 {{
+    margin: 0 0 10px 0;
+    padding-bottom: 0;
+    border-bottom: none;
+    font-size: 1.05em;
+    font-weight: 600;
+    color: var(--text-primary);
+}}
+.large-file-paused p {{
+    margin: 6px 0 0 0;
+    font-size: 0.94em;
+}}
+.large-file-paused .hint {{
+    color: var(--text-muted);
+}}
+
 /* ========== TOC 目录 ========== */
 .toc {{
     background: var(--toc-bg);
@@ -520,6 +548,21 @@ window.updateFoldVisibility = function(collapsedLinesJson) {{
 </body>
 </html>"""
 
+# 大文件模式下预览的占位内容（见 MarkdownPreviewWidget._show_large_file_placeholder）。
+#
+# 为什么必须是「占位页」而不是「保留上次渲染结果」：渲染产物里的代码块配色是
+# Pygments 内联样式（highlight_code_html），不随 CSS 变量走。切主题时只就地更新
+# 变量，已渲染内容会残留旧主题的代码块配色 —— 深色主题下会出现一块浅色，刺眼。
+# 故大文件模式下把页面换成不含代码块、纯 CSS 变量驱动的本内容。
+LARGE_FILE_PLACEHOLDER_HTML = (
+    '<div class="large-file-paused">'
+    "<h2>大文件模式已暂停预览渲染</h2>"
+    "<p>当前文档行数较多，为保持编辑流畅，已暂停预览的自动渲染。</p>"
+    '<p class="hint">需要查看渲染效果时，可用「视图 → 切换Markdown预览」'
+    "关闭后重新打开预览，手动触发一次渲染。</p>"
+    "</div>"
+)
+
 
 # ════════════════════════════════════════════════════════
 #  预览模板 CSS 变量注入（替代旧的正则颜色替换）
@@ -672,6 +715,9 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self._md_parser = self._create_md_parser()
         self._reset_template_state()
         self._preview_dirty = True
+        # 页面当前显示的是否为「大文件模式占位页」。由 _push_to_preview 统一维护
+        # （所有内容变更都经它），供两个大文件门禁判断是否需要再推占位内容。
+        self._placeholder_shown: bool = False
         self._last_sync_frac: float = 1.0
         self._last_at_top: bool = True
         self._last_at_bottom: bool = False
@@ -728,6 +774,9 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self._mermaid_loaded = False
         # 待补推内容同样属于上一轮上下文，一并作废（新的空壳导航会重新登记）
         self._pending_shell_content = ""
+        # 占位状态同理：上下文已作废，下一次大文件门禁必须重新推占位页 ——
+        # 否则（改路径等作废场景下）切主题时占位页拿不到新的 CSS 变量，会残留旧配色。
+        self._placeholder_shown = False
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
@@ -787,8 +836,34 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         # 已加载的页面就地更新 CSS 变量（含代码字体/滚动条尺寸）；未加载则首屏整页灌入。
         # 不再强制整页重载：重载会拆掉旧文档，新文档首帧前出现空档 → 切深色时明显闪烁。
         self._apply_preview_css_vars()
-        if getattr(self, 'editor', None) is not None:
-            self._update_preview()
+        if getattr(self, 'editor', None) is None:
+            return
+        if self._is_large_file_mode():
+            # E3 大文件模式：不整篇重渲染（15 万行实测 ~14s）。但也不能把已渲染的
+            # 旧配色内容留在页面上：代码块 token 色是内联样式，不随上面刚更新的
+            # CSS 变量走，深色主题下会残留一块浅色。故换成占位页 —— 它纯变量驱动，
+            # 上面的 _apply_preview_css_vars() 已使它就地变色。
+            self._show_large_file_placeholder()
+            return
+        self._update_preview()
+
+    def _is_large_file_mode(self) -> bool:
+        """当前编辑器是否处于大文件模式（达阈值 + 开关开启，见 Editor）。"""
+        editor = getattr(self, "editor", None)
+        if editor is None:
+            return False
+        return bool(editor.is_large_file_mode())
+
+    def _show_large_file_placeholder(self) -> None:
+        """大文件模式：把预览切到占位提示页（避免全量渲染，且不残留旧配色内容）。
+
+        已是占位状态则不重复推送（避免无谓的 DOM 重建）。占位标志的复位不在这里，
+        而由 _push_to_preview 统一维护：任何真实内容（手动刷新 / 显式重渲染 /
+        异步高亮结果）推进页面后，标志自动回到「非占位」。
+        """
+        if self._placeholder_shown:
+            return
+        self._push_to_preview(LARGE_FILE_PLACEHOLDER_HTML)
 
     def _apply_preview_css_vars(self) -> None:
         """把当前主题的 CSS 变量就地写入已加载页面（不重新导航）。
@@ -855,7 +930,11 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         self.preview.run_javascript(_wrap_mode_js(mode))
 
     def refresh_preview_now(self) -> None:
-        """文件装载/主题重建后强制刷新预览，不依赖 textChanged 防抖。"""
+        """文件装载/主题重建后强制刷新预览，不依赖 textChanged 防抖。
+
+        大文件模式下这也是**手动刷新入口**：它照常渲染真实内容（经 _update_preview
+        → _push_to_preview，占位标志随之复位）。
+        """
         if hasattr(self, "_preview_timer"):
             self._preview_timer.stop()
         self._update_preview()
@@ -881,6 +960,13 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
 
     def ensure_preview_rendered(self) -> None:
         if not self._preview_dirty:
+            return
+
+        if self._is_large_file_mode():
+            # E3 大文件模式：切标签时不做全量渲染（15 万行实测 23.7s），改显示
+            # 占位提示。_preview_dirty 保持为真 —— 离开大文件模式或之后手动刷新
+            # （refresh_preview_now）时仍需要这次渲染，清掉就丢了。
+            self._show_large_file_placeholder()
             return
 
         self._preview_dirty = False
@@ -951,7 +1037,12 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
         - 模板已加载：仅更新 #content 的 innerHTML 并重同步(不重建整页 DOM，
           因此保留滚动位置)；
         - 否则：整页 setHtml(首次加载)。
+
+        占位标志（_placeholder_shown）在此统一维护：本方法是页面内容的唯一出口，
+        故「页面显示的是不是占位页」= 「最近一次推送的是不是占位内容」。手动刷新、
+        显式重渲染、异步高亮结果等真实内容都会自动把标志复位。
         """
+        self._placeholder_shown = html_content == LARGE_FILE_PLACEHOLDER_HTML
         if self._html_template_loaded:
             self._ensure_mermaid_capability(html_content)
             escaped = json.dumps(html_content, ensure_ascii=False)

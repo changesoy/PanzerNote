@@ -25,7 +25,7 @@ from __future__ import annotations
 from abc import ABC, ABCMeta, abstractmethod
 from typing import Callable
 
-from PyQt6.QtCore import QObject, Qt, pyqtSignal
+from PyQt6.QtCore import QObject, Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 
@@ -49,6 +49,11 @@ class WebPreviewAdapter(QObject, ABC, metaclass=_AdapterMeta):
     # 导出降级提示（M4）：导出成功但图表未在就绪门超时前渲染完成等
     # 「非致命降级」发生时发出；失败路径（回调 b""）不发。
     export_notice = pyqtSignal(str)
+
+    # 后端不可用（1.4）：运行时缺失 / 绑定导入失败 / 初始化失败等致命故障
+    # 发出一次，参数为用户可读原因。上层经它把故障送上状态栏常驻指示，
+    # 避免「预览区提示随标签切换丢失、故障对不可见预览完全静默」。
+    preview_failed = pyqtSignal(str)
 
     @abstractmethod
     def widget(self) -> QWidget:
@@ -132,6 +137,10 @@ class _FallbackPreviewAdapter(WebPreviewAdapter):
         layout = QVBoxLayout(self._container)
         layout.setContentsMargins(24, 24, 24, 24)
         layout.addWidget(label)
+        # 1.4：构造期上层尚未连接 preview_failed，经零延时单发把失败原因
+        # 补送到事件循环（连接建立后到达），状态栏才能收到导入失败通知
+        message = f"WebView2 组件加载失败：{reason}"
+        QTimer.singleShot(0, lambda: self.preview_failed.emit(message))
 
     def widget(self) -> QWidget:
         return self._container

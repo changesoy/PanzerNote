@@ -282,6 +282,8 @@ class WebView2PreviewAdapter(WebPreviewAdapter):
             self._controller = None
             self._webview = None
         self._show_hint(message)
+        # 1.4：把致命故障送上层（状态栏常驻指示），不只落日志与预览区提示
+        self.preview_failed.emit(message)
         pending, self._pending_export = self._pending_export, None
         if pending is not None:
             pending[2](b"")

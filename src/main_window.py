@@ -306,6 +306,8 @@ class MainWindow(QMainWindow):
         tabs.missing_images_detected.connect(self._on_missing_images_detected)
         # E6c2：断链恢复执行结果 → 非打断提示
         tabs.asset_recovery_finished.connect(self._on_asset_recovery_finished)
+        # 1.4：预览后端不可用 → 状态栏常驻指示（点击弹诊断对话框）
+        tabs.preview_backend_failed.connect(self._on_preview_backend_failed)
 
     def _init_menubar(self):
         """初始化菜单栏"""
@@ -1473,6 +1475,14 @@ class MainWindow(QMainWindow):
         else:
             message = f"{prefix}仍有 {remaining} 个图片资源缺失"
         self.secretary.show_message(message)
+
+    def _on_preview_backend_failed(self, message: str) -> None:
+        """1.4：预览后端不可用 → 状态栏常驻指示（点击弹诊断对话框）。"""
+        self.set_preview_unavailable(message)
+
+    def set_preview_unavailable(self, reason: str | None) -> None:
+        """设置预览健康状态指示；供信号链与启动路径（main.py）共用。"""
+        self.status_bar_widget.set_preview_unavailable(reason)
 
     def _on_tab_count_changed(self, tabs: EditorTabWidget, count: int):
         """标签页数量变化

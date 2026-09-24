@@ -286,6 +286,8 @@ def main():
     if not webview2_ready:
         # 可见提示：否则用户只会看到「预览空白」而无从判断原因
         # （预览区本身也会显示同一份指引，见 web_preview_webview2._show_hint）
+        # 1.4：除启动弹窗外，状态栏留常驻「预览不可用」指示，随时可点开重看
+        window.set_preview_unavailable(INSTALL_HINT)
         _show_runtime_missing_dialog(window)
 
     logger.info(profiler.get_report())

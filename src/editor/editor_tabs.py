@@ -336,6 +336,9 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     missing_images_detected = pyqtSignal(str, list)
     # E6c2：断链恢复执行完成（filepath, 已恢复并删源数, 已复制恢复数, 仍未恢复数）
     asset_recovery_finished = pyqtSignal(str, int, int, int)
+    # 1.4：预览后端不可用（用户可读原因）——任意一个 md 标签的预览后端故障
+    # 都会发出，供主窗口送上状态栏常驻指示
+    preview_backend_failed = pyqtSignal(str)
 
     def __init__(
         self,
@@ -787,6 +790,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 self.config,
                 theme_engine=self._theme_engine,
             )
+            widget.backend_failed.connect(self.preview_backend_failed)
             widget.editor.attach_shared_document(shared_doc)
             widget.editor.load_content(content)  # 幂等重建补全词集/折叠（内容相同）
             self._connect_editor_signals(widget.editor)
@@ -893,6 +897,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 self.config,
                 theme_engine=self._theme_engine,
             )
+            widget.backend_failed.connect(self.preview_backend_failed)
             editor = widget.editor
         else:
             widget = Editor(self.config, theme_engine=self._theme_engine)

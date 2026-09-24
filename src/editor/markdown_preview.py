@@ -28,7 +28,7 @@ from typing import Optional
 from PyQt6.QtWidgets import (
     QWidget, QSplitter, QVBoxLayout, QApplication
 )
-from PyQt6.QtCore import Qt, QTimer, QUrl, QPoint
+from PyQt6.QtCore import Qt, QTimer, QUrl, QPoint, pyqtSignal
 from PyQt6.QtGui import QDesktopServices, QTextCursor
 
 from .web_preview import create_preview_adapter
@@ -688,6 +688,10 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
     包含左侧编辑器和右侧预览，提供与Editor相同的接口
     """
 
+    # 1.4：预览后端不可用（WebView2 缺失 / 初始化失败 / 绑定损坏）时转发
+    # 适配器的失败原因，供上层送上状态栏常驻指示
+    backend_failed = pyqtSignal(str)
+
     def __init__(
         self,
         config: Config,
@@ -791,6 +795,7 @@ class MarkdownPreviewWidget(ThemeAwareMixin, QWidget):
 
         # 右侧预览（经 Web Preview Adapter，后端由 create_preview_adapter 选择）
         self.preview = create_preview_adapter()
+        self.preview.preview_failed.connect(self.backend_failed)
 
         self.splitter.addWidget(self.preview.widget())
         # 恢复编辑区/预览分栏占比（与侧栏分栏的 view_setting 模式一致）

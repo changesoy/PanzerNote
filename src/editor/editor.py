@@ -312,6 +312,27 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         if self.blockCount() <= 1:
             self._apply_line_spacing()
 
+    # ── 撤销路由（1.8：文档级元数据变更不在 Qt 撤销栈内） ──────────────────
+
+    def undo(self) -> None:
+        """撤销：优先回退「最近一步」的行尾切换，否则走文本撤销。
+
+        行尾只在保存时施加（QTextDocument 恒存 \\n），其变更不产生 Qt 撤销步。
+        不在此路由的话，切换行尾后按 Ctrl+Z 会撤掉切换之前的一段文本、而行尾
+        保持不变 —— 撤销打偏目标（用户表现为「行尾切换无法撤销」）。
+        """
+        shared_doc = self.shared_doc
+        if shared_doc is not None and shared_doc.undo_eol_if_pending():
+            return
+        super().undo()
+
+    def redo(self) -> None:
+        """重做：与 undo 对称，保证编辑与行尾变更按发生顺序回放。"""
+        shared_doc = self.shared_doc
+        if shared_doc is not None and shared_doc.redo_eol_if_pending():
+            return
+        super().redo()
+
     def _show_context_menu(self, position):
         """显示中文右键菜单"""
         menu = QMenu(self)

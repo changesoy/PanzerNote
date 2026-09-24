@@ -2341,30 +2341,19 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         return "LF"
 
     def set_current_eol(self, eol: str) -> None:
-        """切换当前文档的行尾类型，并标记为已修改"""
+        """切换当前文档的行尾类型（可撤销，1.8）。
+
+        D3b：eol 写 Document（Document 级语义，多 View 一致）。行尾变更不产生
+        Qt 撤销步，故由 Document 记账（可撤销 + 置脏）；标签 ` *` 标记经
+        dirtyChanged → _on_view_dirty 自动跟随，无需在此手动改标题。
+        """
         widget = self.currentWidget()
-        if widget and hasattr(widget, 'tab_id'):
-            shared_doc = getattr(widget, "shared_doc", None)
-            # D3b：eol 写 Document（Document 级语义，多 View 一致）
-            if shared_doc is None:
-                return
-            if shared_doc.eol == eol:
-                return  # 行尾未变化：不触发修改标记
-            shared_doc.eol = eol
-            # D3a：dirty 由 doc.setModified(True) 驱动（Document 单一源）
-            editor = self._get_editor_from_widget(widget)
-            if editor:
-                doc = editor.document()
-                if doc is not None:
-                    doc.setModified(True)
-            # 更新标签页标题（加 * 标记）
-            for i in range(self.count()):
-                w = self.widget(i)
-                if getattr(w, 'tab_id', None) == widget.tab_id:
-                    base = self._strip_tab_suffix(self.tabText(i))
-                    if not base.endswith(" *"):
-                        self.setTabText(i, base + " *")
-                    break
+        if not widget or not hasattr(widget, 'tab_id'):
+            return
+        shared_doc = getattr(widget, "shared_doc", None)
+        if shared_doc is None:
+            return
+        shared_doc.record_eol_change(eol)
 
     def get_unsaved_tab_infos(self) -> List[Dict]:
         """返回本面板未保存标签的结构化信息（3.5.7 关闭确认用）。
@@ -3094,12 +3083,16 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
     # === 编辑操作代理 ===
 
     def undo(self) -> bool:
+        """撤销。行尾切换属文档级元数据（不在 Qt 撤销栈内），可撤销判定须一并看它。"""
         editor = self.current_editor()
-        if editor:
-            doc = editor.document()
-            if doc is not None and doc.isUndoAvailable():
-                editor.undo()
-                return True
+        if editor is None:
+            return False
+        shared_doc = editor.shared_doc
+        eol_pending = shared_doc is not None and shared_doc.has_pending_eol_undo()
+        doc = editor.document()
+        if eol_pending or (doc is not None and doc.isUndoAvailable()):
+            editor.undo()
+            return True
         return False
 
     def redo(self):

@@ -37,6 +37,28 @@ class SaveSnapshot:
     content: str
     filepath: Optional[str]
     encoding: str
+    # 行尾也是本次写盘内容的一部分（_save_file 按它做 normalize_eol），
+    # 故必须入快照：否则「切 CRLF → 保存」后无法判定行尾是否已落盘（1.8）。
+    eol: str
+
+
+@dataclass
+class EolChange:
+    """一次行尾切换的可撤销记录（1.8）。
+
+    行尾是**文档外**元数据（QTextDocument 恒存 \\n，行尾只在保存时施加），
+    其变更不产生 Qt 撤销步，故在 Document 上单独记账。
+
+    base_steps = 切换发生时 QTextDocument 的撤销步数，用于判定该变更是否仍是
+    「最近一步」——文本编辑越过它时，应由文本撤销先处理，从而让编辑与行尾
+    按发生顺序交错撤销。
+    """
+
+    old_eol: str
+    new_eol: str
+    base_steps: int
+    # 切换前的行尾脏位：撤销时据此还原（不能无条件清脏，也不能无条件置脏）
+    prev_eol_dirty: bool
 
 
 @dataclass
@@ -127,6 +149,12 @@ class SharedDocument(QObject):
         self._save_status: SaveStatus = SaveStatus.IDLE
         self.pending_save: bool = False
 
+        # 行尾（EOL）变更的独立脏位与撤销历史（1.8）：行尾是文档外元数据，
+        # 变更不产生 Qt 撤销步，故脏状态与可撤销性都在此单独记账。
+        self._eol_dirty: bool = False
+        self._eol_undo: list[EolChange] = []
+        self._eol_redo: list[EolChange] = []
+
         # 保存统计（D3a：迁移至 Document 级——内容共享，字数增量 / 新字数
         # 按 Document 粒度统计，避免跨 View 漏计/重计）。
         # 初始值 = 创建时内容长度（对应构造时的 last_saved_chars）。
@@ -176,6 +204,9 @@ class SharedDocument(QObject):
         finally:
             self.qdocument.blockSignals(False)
         self._dirty = False
+        # 内容重载后，行尾也是「刚读进来的那份」，旧的行尾变更历史与脏位一并作废
+        self._eol_dirty = False
+        self.clear_eol_history()
         self.last_saved_chars = len(content)
         self.last_text_length = len(content)
         self._invalidate_word_count()
@@ -189,9 +220,82 @@ class SharedDocument(QObject):
         self.contentChanged.emit()
 
     def _on_modification_changed(self, modified: bool) -> None:
-        if self._dirty != modified:
-            self._dirty = modified
-            self.dirtyChanged.emit(modified)
+        self._refresh_dirty()
+
+    # ═══════════════ 行尾变更的记账与撤销（1.8） ═══════════════
+
+    def _refresh_dirty(self) -> None:
+        """dirty = Qt 文本脏 或 行尾脏。
+
+        Qt 的 isModified 由撤销栈干净点推导，覆盖不到文档外元数据（行尾），
+        故行尾变更单独记在 _eol_dirty；取或后才等于「还有内容未落盘」。
+        """
+        dirty = self.qdocument.isModified() or self._eol_dirty
+        if self._dirty != dirty:
+            self._dirty = dirty
+            self.dirtyChanged.emit(dirty)
+
+    def has_pending_eol_undo(self) -> bool:
+        """最近一次行尾切换是否仍可撤销（其间没有新的文本编辑越过它）。"""
+        if not self._eol_undo:
+            return False
+        return self.qdocument.availableUndoSteps() == self._eol_undo[-1].base_steps
+
+    def record_eol_change(self, new_eol: str) -> bool:
+        """切换行尾并登记为可撤销的一步。
+
+        行尾未变化时返回 False（不入栈、不置脏、不产生任何撤销步）。
+        """
+        if new_eol == self.eol:
+            return False
+        self._eol_undo.append(
+            EolChange(
+                old_eol=self.eol,
+                new_eol=new_eol,
+                base_steps=self.qdocument.availableUndoSteps(),
+                prev_eol_dirty=self._eol_dirty,
+            )
+        )
+        # 新的变更作废重做历史（与线性撤销语义一致）
+        self._eol_redo.clear()
+        self.eol = new_eol
+        self._eol_dirty = True
+        self._refresh_dirty()
+        return True
+
+    def undo_eol_if_pending(self) -> bool:
+        """回退最近一步行尾变更；无可回退或它不是「最近一步」时返回 False。"""
+        if not self.has_pending_eol_undo():
+            return False
+        entry = self._eol_undo.pop()
+        self.eol = entry.old_eol
+        self._eol_dirty = entry.prev_eol_dirty
+        self._eol_redo.append(entry)
+        self._refresh_dirty()
+        return True
+
+    def redo_eol_if_pending(self) -> bool:
+        """重做行尾变更。
+
+        redo 与 undo 用同一判据（撤销步数 == 该变更所在位置）：只有当文本的
+        撤销/重做都回到该位置时才回放行尾，编辑与行尾才能按发生顺序交错回放。
+        """
+        if not self._eol_redo:
+            return False
+        entry = self._eol_redo[-1]
+        if self.qdocument.availableUndoSteps() != entry.base_steps:
+            return False
+        self._eol_redo.pop()
+        self.eol = entry.new_eol
+        self._eol_dirty = True
+        self._eol_undo.append(entry)
+        self._refresh_dirty()
+        return True
+
+    def clear_eol_history(self) -> None:
+        """清空行尾变更历史（内容重载 / 行尾已落盘后调用）。"""
+        self._eol_undo.clear()
+        self._eol_redo.clear()
 
     # ═══════════════ 保存状态 ═══════════════
 
@@ -222,24 +326,30 @@ class SharedDocument(QObject):
             content=self.to_plain_text(),
             filepath=self.filepath,
             encoding=self.encoding,
+            eol=self.eol,
         )
 
     def on_save_succeeded(self, snapshot: SaveSnapshot) -> bool:
         """保存成功回调。返回 True 表示需要立即补保存（pending 且仍 dirty）。
 
         dirty 最终 authority = saved snapshot：
-        current == snapshot → clean；否则保持 dirty（保存成功 ≠ 当前 clean）。
+        current 内容与行尾均 == snapshot → clean；否则保持 dirty
+        （保存成功 ≠ 当前 clean）。
         """
         # D3a：保存统计随成功保存更新（对应 mark_saved 语义）
         self.last_saved_chars = len(snapshot.content)
         self.last_text_length = len(snapshot.content)
         retry = False
-        if self.to_plain_text() == snapshot.content:
+        if self.to_plain_text() == snapshot.content and self.eol == snapshot.eol:
             # 先复位 _dirty 再 setModified(False)：槽内 `_dirty != modified` 为 False，
             # 不会与下方手动 emit 重复触发 dirtyChanged(False)。
+            self._eol_dirty = False
             self._dirty = False
             self.qdocument.setModified(False)
             self.dirtyChanged.emit(False)
+            # 已落盘的行尾不再可撤销（撤销已保存的变更需重写文件，超出撤销范畴，
+            # 也与「保存是提交点」的既有语义一致）
+            self.clear_eol_history()
         else:
             self._dirty = True
             if self.pending_save:

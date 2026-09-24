@@ -227,6 +227,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         font_size = self.config.get_editor_setting("font_size", 12)
         font = QFont(font_family, font_size)
         self.setFont(font)
+        self._invalidate_line_number_width_cache()
 
         # 设置Tab宽度（按缩进配置）
         self.setTabStopDistance(self.fontMetrics().horizontalAdvance(' ') * get_indent_width(self.config))
@@ -280,7 +281,18 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         if self._highlighter and self._filepath_or_ext:
             is_dark = v2_active_variant(self._theme_engine) == "dark"
             if hasattr(self._highlighter, 'set_dark_mode'):
-                self._highlighter.set_dark_mode(is_dark)
+                # 大文件模式下 lazy 高亮生效：只重建配色，重着色交给 lazy 机制
+                # 按可视区进行（代价 O(可视区) 而非 O(文档)）。整篇 rehighlight()
+                # 在 15 万行实测约 2.4–3.6s，是主题切换卡顿的主因；中小文件仍走
+                # 同步整篇重着色（本来就快）。
+                lazy_visible_only = (
+                    self._large_file_mode_active and self._lazy_highlight.is_active()
+                )
+                rebuilt = self._highlighter.set_dark_mode(
+                    is_dark, rehighlight=not lazy_visible_only
+                )
+                if lazy_visible_only and rebuilt:
+                    self._lazy_highlight.on_content_changed()
             else:
                 # 旧式高亮器回退：重新设置文件类型以切换主题
                 self.set_file_type(self._filepath_or_ext)
@@ -391,6 +403,9 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self.line_number_area = LineNumberArea(self)
         # 上次落定的 viewport margins（幂等判断用，见 _update_line_number_area_width）
         self._last_viewport_margins: tuple[int, int, int, int] | None = None
+        # 行号宽度记忆化：(行数位数, 折叠标记宽) -> 宽度；字体变化时由
+        # _invalidate_line_number_width_cache 失效
+        self._line_number_width_cache: tuple[tuple[int, int], int] | None = None
 
         self.blockCountChanged.connect(self._update_line_number_area_width)
         self.updateRequest.connect(self._update_line_number_area)
@@ -401,7 +416,13 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         self.line_number_area.setVisible(show_line_numbers)
 
     def line_number_area_width(self) -> int:
-        """计算行号区域宽度（含折叠标记列）"""
+        """计算行号区域宽度（含折叠标记列）
+
+        结果按 (行数位数, 折叠标记宽) 记忆化：本方法在整篇重排期间会被高频调用
+        （实测大文档约 8.5 万次），其中 ``fontMetrics().horizontalAdvance`` 是最贵
+        的一步，而宽度只在行数跨位数、文件类型/折叠标记宽变化、以及字体变化
+        （字体侧见 ``_invalidate_line_number_width_cache``）时才改变。
+        """
         if not self.line_number_area.isVisible():
             return 0
 
@@ -411,11 +432,26 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             max_num //= 10
             digits += 1
 
-        space = 10 + self.fontMetrics().horizontalAdvance('9') * digits
         # 为折叠标记预留空间（支持折叠的文件类型）
-        if self._file_type in self._FOLD_SUPPORTED_TYPES:
-            space += self._folding.fold_marker_width
-        return int(space)
+        fold_width = (
+            self._folding.fold_marker_width
+            if self._file_type in self._FOLD_SUPPORTED_TYPES
+            else 0
+        )
+        key = (digits, fold_width)
+        cached = self._line_number_width_cache
+        if cached is not None and cached[0] == key:
+            return cached[1]
+
+        width = int(
+            10 + self.fontMetrics().horizontalAdvance('9') * digits + fold_width
+        )
+        self._line_number_width_cache = (key, width)
+        return width
+
+    def _invalidate_line_number_width_cache(self) -> None:
+        """字体变化后失效行号宽度缓存（宽度随字号/字族改变）。"""
+        self._line_number_width_cache = None
 
     def _update_line_number_area_width(self, _):
         """更新行号区域宽度
@@ -1088,6 +1124,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
         """动态设置编辑器字体和大小"""
         font = QFont(family, size)
         self.setFont(font)
+        self._invalidate_line_number_width_cache()
         # 更新 Tab 宽度
         self.setTabStopDistance(self.fontMetrics().horizontalAdvance(' ') * get_indent_width(self.config))
         # 更新行号区域宽度（字体变化后数字宽度可能不同）

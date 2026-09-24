@@ -89,15 +89,21 @@ class PygmentsHighlighter(QSyntaxHighlighter):
             tt = tt.parent if hasattr(tt, 'parent') else None
         return None
 
-    def set_dark_mode(self, is_dark: bool) -> None:
+    def set_dark_mode(self, is_dark: bool, rehighlight: bool = True) -> bool:
         """3.5.8（批次 5 修复）：主题切换时重建 formats 并重绘。
 
         Pygments 配色取自 theme_engine 当前主题（get_editor_formats），
         调用时引擎已切到新主题，无需 is_dark 分支；重绘避免走
         set_file_type 重建路径误摘共享高亮（R1 收敛）。
+
+        ``rehighlight=False`` 时只重建配色、不整篇重着色，由调用方自行决定
+        重着色范围（大文件模式下交给 lazy 高亮按可视区进行，避免整篇同步
+        重着色阻塞主线程）。返回是否重建了配色。
         """
         self._formats = get_editor_formats(self._theme_engine)
-        self.rehighlight()
+        if rehighlight:
+            self.rehighlight()
+        return True
 
     def highlightBlock(self, text: Optional[str]):
         """高亮单行文本"""
@@ -241,16 +247,21 @@ class MarkdownHighlighter(QSyntaxHighlighter):
         self.code_block_format.setFontFamily(self._code_font_family)
         self.code_block_format.setBackground(QColor(get_color("code_block_bg")))
 
-    def set_dark_mode(self, is_dark: bool):
-        """切换明/暗主题，重新高亮文档"""
+    def set_dark_mode(self, is_dark: bool, rehighlight: bool = True) -> bool:
+        """切换明/暗主题，重新高亮文档。
+
+        ``rehighlight=False`` 时只重建配色、不整篇重着色（调用方自行决定范围，
+        大文件模式下交给 lazy 高亮按可视区进行）。返回是否重建了配色。
+        """
         if is_dark == self._is_dark:
-            return
+            return False
         self._is_dark = is_dark
         self._init_formats(is_dark)
-        # 触发重新高亮
-        doc = self.document()
-        if doc:
-            self.rehighlight()
+        if rehighlight:
+            doc = self.document()
+            if doc:
+                self.rehighlight()
+        return True
 
     def highlightBlock(self, text: Optional[str]):
         if text is None:

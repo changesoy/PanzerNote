@@ -79,6 +79,12 @@ Config/flags 代码路径本身无慢点；如需精确归因（Defender vs 冷�
 `large_file_mode`）。D6 决策需要另行做大文件实测（打开 10MB+ 文档的耗时与内存），
 111.md 中「D6 依赖 1.6」应理解为依赖本次建立的**测量方法**，而非本报告数据。
 
+> **D6 已决（2026-09-23，随编辑器健壮性批实测后拍板）**：`large_file_mode` 默认开启
+> （阈值 `LARGE_FILE_THRESHOLD` = 1 万行），状态栏新增「大文件」指示标签；
+> `virtual_scroll` / `lazy_loading` 两个死 flag 删除；`lazy_highlight` /
+> `async_highlight` 维持按需激活。大文件感知性能治理（打开 / 切主题卡顿、预览占位）
+> 同批完成，实测数据见 CHANGELOG v2.6.0「性能：感知性能批」。
+
 ## 4. 测量方法（可复现）
 
 ```powershell

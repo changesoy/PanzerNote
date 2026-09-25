@@ -22,7 +22,7 @@ PanzerNote 是一款以已停服二次元游戏《战车少女》（PanzerMaiden
 | 模块                 | 状态      | 说明                                                                                                                                                                 |
 | -------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 多标签文本编辑器     | ✅ 完成   | 行号、语法高亮、自动缩进、括号配对、括号匹配高亮、行操作、大小写转换、转到行、JSON/XML 格式化                                                                        |
-| 缩进/行尾配置        | ✅ 完成   | indent_size/use_tabs 配置；LF/CRLF 探测与规范化；状态栏切换行尾格式                                                                                                  |
+| 缩进/行尾配置        | ✅ 完成   | indent_size/use_tabs 配置；LF/CRLF 探测与规范化；状态栏切换行尾格式（切换可撤销，Document 级记账，脏状态按落盘基线派生）                                             |
 | 文本统计             | ✅ 完成   | CJK 按字计数 + 拉丁按词计数；状态栏信号驱动统计                                                                                                                      |
 | Markdown 分屏预览    | ✅ 完成   | 实时渲染 + 代码块高亮 + 一键复制 + 本地图片 + 源码行号同步 + 折叠同步 + 脚注/前辅文/后辅文；预览行宽可独立于编辑器选择「限制/不限制」                                |
 | Markdown 编辑辅助    | ✅ 完成   | 列表/引用回车续写（有序序号递增）、`Ctrl+Alt+T` 任务勾选、表格插入/删除行列 + Tab 单元格导航 + 列对齐、行内格式（加粗/斜体/行内代码/链接）、`Ctrl+Alt+1..6` 标题     |
@@ -380,23 +380,25 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 
 基于 `QPlainTextEdit`，使用 Mixin 模式组合功能。类继承：`Editor(AutoPairHandlerMixin, EditorActionsMixin, QPlainTextEdit)`
 
-| 模块                              | 职责                                                                                            |
-| --------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `editor/editor.py`                | 核心编辑器（行号、缩略图、语法高亮、自动缩进、虚拟滚动、粘贴检测）                              |
-| `editor/editor_actions.py`        | 行操作、大小写转换、JSON/XML 格式化、Markdown 编辑辅助（Mixin）                                 |
-| `editor/auto_pair_handler.py`     | 括号/引号自动配对（Mixin，frozenset O(1) 过滤）                                                 |
-| `editor/bracket_matcher.py`       | 括号匹配高亮（纯函数，扫描配对位置，支持中英文括号）                                            |
-| `editor/indentation.py`           | 缩进统一入口（缩进宽度/缩进文本，禁止硬编码）                                                   |
-| `editor/eol_utils.py`             | 行尾探测与规范化纯函数（LF/CRLF/CR）                                                            |
-| `editor/text_stats.py`            | 文本统计纯函数（CJK 按字计数 + 拉丁按词计数）                                                   |
-| `editor/folding.py`               | 折叠管理器（Markdown 标题折叠 + 代码缩进折叠）                                                  |
-| `editor/outline_parser.py`        | Markdown 标题解析器（纯函数，提取标题层级与行号）                                               |
-| `editor/outline_panel.py`         | Markdown 大纲导航面板（QTreeWidget 展示标题树）                                                 |
-| `editor/completion.py`            | 文档缓冲区自动补全（词频匹配 + IME 组字期间不弹出）                                             |
-| `editor/find_in_files_service.py` | 跨文件搜索后台服务（QThread 遍历 + 正则/纯文本匹配）                                            |
-| `editor/find_in_files_panel.py`   | 跨文件搜索结果面板（按文件分组 + 双击跳转）                                                     |
-| `editor/save_task.py`             | 后台文件保存任务（SaveTask + QThreadPool 异步写入）                                             |
-| `editor/virtual_scroll.py`        | 延迟高亮管理器（大文件延迟语法高亮；Wave 4 E2 起为 Document 级多 View 协作，visibleRanges = ∪） |
+| 模块                                        | 职责                                                                                                              |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `editor/editor.py`                          | 核心编辑器（行号、缩略图、语法高亮、自动缩进、虚拟滚动、粘贴检测）                                                |
+| `editor/editor_actions.py`                  | 行操作、大小写转换、JSON/XML 格式化、Markdown 编辑辅助（Mixin）                                                   |
+| `editor/auto_pair_handler.py`               | 括号/引号自动配对（Mixin，frozenset O(1) 过滤）                                                                   |
+| `editor/bracket_matcher.py`                 | 括号匹配高亮（纯函数，扫描配对位置，支持中英文括号）                                                              |
+| `editor/indentation.py`                     | 缩进统一入口（缩进宽度/缩进文本，禁止硬编码）                                                                     |
+| `editor/eol_utils.py`                       | 行尾探测与规范化纯函数（LF/CRLF/CR）                                                                              |
+| `editor/text_stats.py`                      | 文本统计纯函数（CJK 按字计数 + 拉丁按词计数）                                                                     |
+| `editor/folding.py`                         | 折叠管理器（Markdown 标题折叠 + 代码缩进折叠）                                                                    |
+| `editor/outline_parser.py`                  | Markdown 标题解析器（纯函数，提取标题层级与行号）                                                                 |
+| `editor/outline_panel.py`                   | Markdown 大纲导航面板（QTreeWidget 展示标题树）                                                                   |
+| `editor/completion.py`                      | 文档缓冲区自动补全（词频匹配 + IME 组字期间不弹出）                                                               |
+| `editor/find_in_files_service.py`           | 跨文件搜索后台服务（QThread 遍历 + 正则/纯文本匹配；解码链复用 `decode_document_bytes`，单文件 1MB 文字重量上限） |
+| `editor/find_in_files_panel.py`             | 跨文件搜索结果面板（按文件分组 + 双击跳转）                                                                       |
+| `editor/legacy_assets_migration_service.py` | 旧 `assets/` 目录一次性迁移（预演 → 确认 → 执行；copy→sha256→删源保底 + 引用重写 + 原编码写回）                   |
+| `editor/legacy_assets_migration_dialog.py`  | 旧 assets 迁移预演确认对话框（变更清单 + 被跳过图片页）                                                           |
+| `editor/save_task.py`                       | 后台文件保存任务（SaveTask + QThreadPool 异步写入）                                                               |
+| `editor/virtual_scroll.py`                  | 延迟高亮管理器（大文件延迟语法高亮；Wave 4 E2 起为 Document 级多 View 协作，visibleRanges = ∪）                   |
 
 主要功能块：
 
@@ -1152,7 +1154,7 @@ python main.py
 5. **Feature Flag**：所有性能优化特性通过 `utils/feature_flags.py` 控制，配置持久化到 `feature_flags.json`
 6. **Mixin 模式**：`Editor` 类通过 Mixin 继承组合功能，mypy 对 Mixin 文件禁用 `attr-defined`/`arg-type` 检查
 7. **异步渲染线程安全**：`AsyncHighlightRenderer` 使用 `QueuedConnection` 信号通信，禁止在非主线程操作 UI 元素
-8. **虚拟滚动**：大文件（≥50000行）自动启用延迟语法高亮
+8. **虚拟滚动**：大文件（≥1 万行，`LARGE_FILE_THRESHOLD`）自动启用延迟语法高亮
 9. **高 DPI 缩放**：`main.py` 已启用 `AA_EnableHighDpiScaling`，`dpi_helper.scale()` 系列函数在生产环境中为 no-op
 10. **行尾符**：源文件统一使用 LF 行尾符，提交时请勿引入 CRLF（仓库现未用 `.gitattributes` 强制该规则，靠提交者自律；应用侧的行尾探测与规范化见「缩进/行尾配置」）
 
@@ -1196,7 +1198,7 @@ python main.py
 35. **搜索高亮集中管理**：`SearchService` 封装查找/替换，`QTextDocument.find()` 权威光标位置，`ExtraSelectionManager` 统一高亮层，`replace_all` 从后向前逐匹配替换
 36. **运行时性能探针（Wave 4 E1）**：大文件加载/首屏/滚动热路径经 `utils/perf_probe.py` 的 `measure(name, fn, threshold_ms)` 埋点，debug 级日志过滤高频滚动噪音；新增热路径计时默认经探针，不裸写 `time.time()`
 37. **lazy 高亮多 View 协作（Wave 4 E2）**：`DocumentLazyHighlightCoordinator` 以 Document 为粒度聚合各 View 可视区（并集），禁止回到 per-View 独立高亮（会破坏 Document 级共享 highlighter 的一致性）；滚动上报按 View、调度归 coordinator
-38. **Large File Mode（Wave 4 E3/E4）**：达阈值（≥1 万行）自动降级补全/折叠/Minimap/预览等高成本功能，`large_file_mode` / `lazy_highlight` flag 默认 False（运行时按需激活），禁用全局残留；降级功能须可配置可回退
+38. **Large File Mode（Wave 4 E3/E4；D6 已决 2026-09-23）**：达阈值（≥1 万行）自动降级补全/折叠/Minimap/预览等高成本功能，`large_file_mode` 默认 True（设置 → 编辑器 → 大文件可回退），状态栏「大文件」指示标签（statusbar recipe 配色）；`virtual_scroll` / `lazy_loading` 死 flag 已删除，`lazy_highlight` / `async_highlight` 维持按需激活；禁用全局残留；降级功能须可配置可回退
 39. **Markdown HTML render cache（Wave 4 C）**：`document_render_cache.py` 以 Document revision 为键缓存最终 HTML，Document 改动只渲染一次、多 View 共用；新增 Markdown 渲染路径应优先走缓存
 
 ### 工程约束
@@ -1212,7 +1214,10 @@ python main.py
 48. **数据防泄漏**：对外暴露配置/存档数据一律走只读视图或拷贝——`savegame_manager.get_savegame()` 返回 MappingProxyType、`get_resources()` 返回拷贝、`settings_store.as_dict()`/`workspace_store.as_dict()` 返回深拷贝。禁止直接返回内部可变 dict 引用
 49. **状态单一源**：标签状态一律走 `SharedDocument`（内容/编码/eol/dirty/折叠/书签）与 `ViewState`（cursor/scroll），禁止回退到影子状态模型（Wave 4 D 已删除 TabState/document_model.py）；workspace 序列化唯一出口为 `workspace_entries.py` 适配层
 50. **白名单单一来源**：workspace 字段白名单由 `WorkspaceStore._KNOWN_WORKSPACE_KEYS`（由 `DEFAULT_WORKSPACE` 派生）提供，`ConfigImportService` 直接复用，禁止另行复制定义
+51. **行尾切换可撤销（v2.6.0）**：EOL 变更在 `SharedDocument` 单独记账（`EolChange` 历史），与文本撤销栈按发生顺序融合路由（`Editor.undo/redo` 判定回放）；行尾脏为**派生量**（当前 eol ⇄ 已落盘基线 `_saved_eol`），保存成功清空行尾历史。**禁止**用 `doc.setModified(True)` 表达行尾变更——它会在干净撤销栈上插入空撤销项，导致撤销打空或误撤文本
+52. **大文件感知性能门禁（v2.6.0）**：大文件模式激活时预览不自动渲染（CSS 变量驱动占位页，「视图 → 刷新预览」`Ctrl+Shift+R` 手动渲染），切主题只更新 CSS 变量、高亮重着色限定可视区（经 lazy 高亮管理器）、行号区宽度记忆化且 `setViewportMargins` 幂等。**禁止**恢复整篇 `rehighlight()` / 大文件全量预览重渲染路径
+53. **旧 assets 迁移与批量引用重写安全（v2.6.0）**：批量迁移/重写必须预演确认制（完整变更清单先呈现）；MOVE 走 copy → sha256 校验 → 删源保底，失败源文件不动；引用扫描不可信（`trustworthy=False`）整体放弃；文档按 `decode_document_bytes` 检测的**原编码**原子写回（`FileGuard.safe_write`）；仅被「打开且未保存」文档引用的图片整体跳过（防内存旧引用保存后断链）
 
 ---
 
-_本文档基于 PanzerNote v2.5.0 源码整理。版本变更见 [../CHANGELOG.md](../CHANGELOG.md)，未完成规划见 [roadmap.md](roadmap.md)。_
+_本文档基于 PanzerNote v2.6.0 源码整理。版本变更见 [../CHANGELOG.md](../CHANGELOG.md)，未完成规划见 [roadmap.md](roadmap.md)。_

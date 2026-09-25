@@ -929,7 +929,7 @@ src/__init__.py (__version__ = "2.5.0")
 - **写入侧接线在插图链路**：`image_asset_service` 落盘成功后登记（`ImageAssetService._register_in_ledger`），迁移与恢复回写共用同一份 ledger 对象。写失败只记日志、**不阻断插图**——索引是增强，不是前置条件（此前该写入路径没有生产调用者，「插图后留下线索」实际从未生效，恢复只能靠兜底扫描）。
 - 外部移动恢复：文档解析出的期望绝对路径缺失时，按文件名取 ledger 候选 → 逐条复核存在性与**实际重算** sha256 → 同名多候选按内容身份判断（内容一致 = 多物理副本、不构成歧义；指纹不同才是真歧义）→ 在可证明范围内扫描该候选是否仍被别的 Markdown 引用 → 独占则 MOVE、仍被引用则 COPY、证据不足 / 内容已变 / 目标被占用**一律不猜**。
 - **ledger 无线索时的兜底扫描**（`_scan_candidates`）：旧图片、程序外放进来的图片从未入过索引，直接判「需人工处理」会让最常见的场景走死路。故 ledger 无同名记录（或 ledger 不可用）时，退一步在「workspace 根 + 文档所在目录」范围内按文件名扫 `PanzerNote_assets/`：唯一命中即按候选人处理，多个命中仍比内容指纹决定可用性，指纹不一致仍交用户。**反之，ledger 有同名记录但复核不过（文件已删 / 内容已改）时不启用兜底扫描**——那说明这条线索本身失效，扫回来等于把用户改过的文件误认成同一张图。
-- 恢复落位即文档期望路径，**不需要改写 Markdown**；执行复用 `AssetMigrationService.apply`，执行前再复核目标位置。入口为「编辑 → 恢复缺失的图片...」，结果经 `asset_recovery_finished` 信号由 `MainWindow` 以小秘书气泡非打断汇报。
+- 恢复落位即文档期望路径，**不需要改写 Markdown**；执行复用 `AssetMigrationService.apply`，执行前再复核目标位置。入口为「工具 → 恢复缺失的图片...」，结果经 `asset_recovery_finished` 信号由 `MainWindow` 以小秘书气泡非打断汇报。
 - 缺失检测（E6b）在文档打开 / 资源根变化时触发只读扫描，经 `missing_images_detected` 由 `MainWindow` 汇总为非打断提示；小秘书正忙时暂存、气泡消失（`message_hidden`）后补发，不与渲染循环绑定。
 
 **查看与清理**（`editor/image_decoder.py` / `image_viewer.py` / `orphan_image_service.py` / `orphan_image_dialog.py`）：

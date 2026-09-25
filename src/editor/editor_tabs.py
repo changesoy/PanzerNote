@@ -2322,6 +2322,22 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
                 paths.append(shared_doc.filepath)
         return paths
 
+    def get_open_dirty_filepaths(self) -> list:
+        """返回「打开且未保存」的文件路径列表（不含未保存的新文件）。
+
+        供批量磁盘操作（如旧 assets 迁移）排除：这类文档磁盘内容不是真相，
+        重写磁盘后编辑器内存里的旧引用一旦保存就会断链。
+        """
+        paths = []
+        for i in range(self.count()):
+            widget = self.widget(i)
+            if widget is None:
+                continue
+            shared_doc = getattr(widget, "shared_doc", None)
+            if shared_doc is not None and shared_doc.filepath and shared_doc.dirty:
+                paths.append(shared_doc.filepath)
+        return paths
+
     def get_current_encoding(self) -> str:
         """获取当前文件的编码"""
         widget = self.currentWidget()

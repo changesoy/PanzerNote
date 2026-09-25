@@ -1124,6 +1124,55 @@ class MainWindow(QMainWindow):
             f"已移入回收站 {len(removed)} 张，失败 {len(selected) - len(removed)} 张。",
         )
 
+    def _migrate_legacy_assets(self):
+        """旧 assets/ 目录一次性迁移（1.5，D8 已决：显式 + 预演确认，不做撤销）。"""
+        from .editor.legacy_assets_migration_dialog import LegacyAssetsMigrationDialog
+        from .editor.legacy_assets_migration_service import (
+            LegacyAssetsMigrationService,
+        )
+
+        service = LegacyAssetsMigrationService(self.config)
+        plan = service.plan(exclude_docs=set(self.editor_tabs.get_open_dirty_filepaths()))
+        if not plan.legacy_dirs and not plan.blocked_images:
+            QMessageBox.information(
+                self, "迁移旧图片目录", "没有找到需要迁移的旧 assets 目录。"
+            )
+            return
+        if not plan.ok:
+            QMessageBox.warning(
+                self,
+                "迁移旧图片目录",
+                "引用扫描结果不完整（文档过多或个别文档过大/读取失败），\n"
+                "无法保证「未被引用」等判定可靠，本次已放弃。\n"
+                "请减少扫描范围后重试。",
+            )
+            return
+
+        dialog = LegacyAssetsMigrationDialog(plan, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        result = service.apply(plan)
+        lines = [f"已迁移 {len(result.moved)} 张图片。"]
+        if result.rewritten:
+            lines.append(f"重写引用 {len(result.rewritten)} 篇文档。")
+        if result.renamed:
+            lines.append(f"改名避开同名 {len(result.renamed)} 张。")
+        if result.removed_dirs:
+            lines.append(f"清理空目录 {len(result.removed_dirs)} 个。")
+        if result.failed:
+            lines.append(f"迁移失败 {len(result.failed)} 张（源文件保留）：")
+            lines.extend(f"  {path}" for path in result.failed)
+        if result.failed_docs:
+            lines.append(f"引用重写失败 {len(result.failed_docs)} 篇：")
+            lines.extend(f"  {doc}（{reason}）" for doc, reason in result.failed_docs)
+        if result.failed or result.failed_docs:
+            QMessageBox.warning(self, "迁移旧图片目录", "\n".join(lines))
+        else:
+            QMessageBox.information(self, "迁移旧图片目录", "\n".join(lines))
+        if result.moved or result.removed_dirs:
+            self.file_tree.tree_changed.emit()
+
     # === 行操作 ===
 
     def _delete_current_line(self):

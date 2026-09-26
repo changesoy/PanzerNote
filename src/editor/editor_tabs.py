@@ -14,13 +14,10 @@ import shutil
 from typing import Optional, List, Dict, Tuple, Set, cast
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QTabWidget, QTabBar, QMessageBox,
-    QFileDialog, QMenu,
-    QInputDialog, QLabel, QDialog, QHBoxLayout, QComboBox,
-    QPushButton, QLineEdit, QApplication, QToolButton
+    QTabWidget, QTabBar, QMessageBox, QMenu, QInputDialog, QDialog
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QMimeData, QPoint, QEventLoop, QTimer
-from PyQt6.QtGui import QColor, QDrag, QAction, QImage, QPainter, QPixmap
+from PyQt6.QtCore import Qt, pyqtSignal, QEventLoop, QTimer
+from PyQt6.QtGui import QAction
 
 from ..core.config import Config
 from ..core import workspace_entries
@@ -33,7 +30,7 @@ from ..utils.feature_flags import is_enabled
 from ..security.file_guard import FileSizeExceededError, FileOperationTimeoutError
 from ..security.file_access_context import FileAccessContext
 from ..themes.theme_aware_mixin import ThemeAwareMixin
-from ..themes.theme_v2.consumer import v2_color, v2_export_colors
+from ..themes.theme_v2.consumer import v2_export_colors
 from .editor import Editor
 from .markdown_preview import MarkdownPreviewWidget
 from .find_replace import FindReplaceBar
@@ -50,270 +47,13 @@ from .asset_migration_service import (
 )
 from .asset_recovery_dialog import AssetRecoveryDialog
 from .asset_recovery_service import AssetRecoveryService
-
-# ════════════════════════════════════════════════════════
-#  另存为对话框
-# ════════════════════════════════════════════════════════
-
-class SaveAsDialog(QDialog):
-    """另存为对话框 - 支持选择编码"""
-
-    def __init__(self, suggested_path: str, current_encoding: str = "UTF-8", parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("另存为")
-        self.setMinimumWidth(500)
-
-        self._filepath = ""
-        self._encoding = current_encoding
-
-        layout = QVBoxLayout(self)
-
-        # 文件路径
-        path_layout = QHBoxLayout()
-        path_layout.addWidget(QLabel("文件名:"))
-        self.path_edit = QLineEdit(suggested_path)
-        path_layout.addWidget(self.path_edit, 1)
-        browse_btn = QPushButton("浏览...")
-        browse_btn.clicked.connect(self._browse)
-        path_layout.addWidget(browse_btn)
-        layout.addLayout(path_layout)
-
-        # 编码选择
-        encoding_layout = QHBoxLayout()
-        encoding_layout.addWidget(QLabel("编码:"))
-        self.encoding_combo = QComboBox()
-        self.encoding_combo.addItems(["UTF-8", "GBK", "UTF-16"])
-        index = self.encoding_combo.findText(current_encoding.upper())
-        if index >= 0:
-            self.encoding_combo.setCurrentIndex(index)
-        encoding_layout.addWidget(self.encoding_combo)
-        encoding_layout.addStretch()
-        layout.addLayout(encoding_layout)
-
-        # 按钮
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
-        save_btn = QPushButton("保存")
-        save_btn.clicked.connect(self._save)
-        cancel_btn = QPushButton("取消")
-        cancel_btn.clicked.connect(self.reject)
-        btn_layout.addWidget(save_btn)
-        btn_layout.addWidget(cancel_btn)
-        layout.addLayout(btn_layout)
-
-    def _browse(self):
-        filepath, _ = QFileDialog.getSaveFileName(
-            self, "另存为", self.path_edit.text(),
-            "文本文件 (*.txt);;Markdown (*.md);;Python (*.py);;网页文件 (*.html);;PDF 文档 (*.pdf);;所有文件 (*.*)"
-        )
-        if filepath:
-            self.path_edit.setText(filepath)
-
-    def _save(self):
-        path = self.path_edit.text().strip()
-        if not path:
-            QMessageBox.warning(self, "提示", "请输入文件名")
-            return
-        self._filepath = path
-        self._encoding = self.encoding_combo.currentText()
-        self.accept()
-
-    def get_filepath(self) -> str:
-        return self._filepath
-
-    def get_encoding(self) -> str:
-        return self._encoding
-
-
-# ════════════════════════════════════════════════════════
-#  DraggableTabBar —— 支持拖拽标签到文件树
-# ════════════════════════════════════════════════════════
-
-# 自定义 MIME 类型
-MIME_TAB_FILEPATH = "application/x-panzernote-tab-filepath"
-# 3.5.11：未命名标签（无 filepath）拖拽时携带 tab_id，供迁移/落盘定位源标签
-MIME_TAB_ID = "application/x-panzernote-tab-id"
-
-
-class DraggableTabBar(QTabBar):
-    """可拖拽标签栏
-
-    在 QTabBar 内部拖拽 → 正常的标签重新排序
-    向外拖拽（如文件树） → 发起 QDrag，携带文件路径信息，可移动文件
-    """
-
-    file_drop_requested = pyqtSignal(str, str)  # (src_filepath, dest_folder)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._drag_start_pos = QPoint()
-        self._drag_tab_index = -1
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self._drag_start_pos = event.pos()
-            self._drag_tab_index = self.tabAt(event.pos())
-        elif event.button() == Qt.MouseButton.MiddleButton:
-            tab_index = self.tabAt(event.pos())
-            if tab_index >= 0:
-                self.tabCloseRequested.emit(tab_index)
-                event.accept()
-                return
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event):
-        if not (event.buttons() & Qt.MouseButton.LeftButton):
-            super().mouseMoveEvent(event)
-            return
-
-        if self._drag_tab_index < 0:
-            super().mouseMoveEvent(event)
-            return
-
-        # 只有鼠标离开标签栏区域才发起外部拖拽
-        if self.rect().contains(event.pos()):
-            # 3.5.8（R6）：不调用 super() 的原生 movable 逻辑——原生行为是
-            # 拖动中途扫过其它标签就实时 moveTab 换位，用户拖拽会被"替换"。
-            # 改为只在鼠标释放时按落点一次性落位（见 mouseReleaseEvent）。
-            event.accept()
-            return
-
-        # 距离阈值
-        distance = (event.pos() - self._drag_start_pos).manhattanLength()
-        if distance < QApplication.startDragDistance():
-            super().mouseMoveEvent(event)
-            return
-
-        # 获取该标签对应的 tab_id 与文件路径（3.5.11：未命名标签无路径也可拖拽）
-        tab_widget = cast(QTabWidget, self.parent())
-        if not tab_widget or not hasattr(tab_widget, '_get_filepath_for_index'):
-            super().mouseMoveEvent(event)
-            return
-
-        widget = tab_widget.widget(self._drag_tab_index)
-        if widget is None:
-            super().mouseMoveEvent(event)
-            return
-        # 图片标签按设计不带 tab_id（不参与保存状态机），但同样应可拖拽跨分屏迁移：
-        # 用 image_path 作身份标记塞进 MIME_TAB_ID（接收方只判「存在该格式」，不解析内容）。
-        tab_id = getattr(widget, 'tab_id', None)
-        identity = tab_id if tab_id is not None else getattr(widget, 'image_path', None)
-        if identity is None:
-            super().mouseMoveEvent(event)
-            return
-
-        # 图片标签不携带文件路径：否则拖到文件树会触发「移动图片文件」这类副作用
-        # （本版未定义该行为，保持与迁移一致的纯内部搬动）。
-        filepath = ""
-        if tab_id is not None:
-            filepath = tab_widget._get_filepath_for_index(self._drag_tab_index) or ""
-
-        # 发起 QDrag
-        # 注意：MIME_TAB_FILEPATH 仅对已保存文件设置——空数据格式在平台拖拽协议中
-        # 可能被丢弃，导致目标 hasFormat 判断失败；未命名标签靠 MIME_TAB_ID 识别。
-        drag = QDrag(self)
-        mime = QMimeData()
-        mime.setData(MIME_TAB_ID, str(identity).encode('utf-8'))
-        if filepath:
-            mime.setData(MIME_TAB_FILEPATH, filepath.encode('utf-8'))
-        drag.setMimeData(mime)
-
-        # B6（8.1 拖拽视觉）：拖拽体为半透明的标签缩略图，随鼠标跟手。
-        # 不携带 text/plain——避免编辑器把 tab 拖拽当文本拖放而写入文件名。
-        rect = self.tabRect(self._drag_tab_index)
-        pixmap = self.grab(rect)
-        if not pixmap.isNull():
-            img = pixmap.toImage().convertToFormat(QImage.Format.Format_ARGB32)
-            painter = QPainter(img)
-            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
-            painter.fillRect(img.rect(), QColor(0, 0, 0, 150))  # ~60% 不透明度
-            painter.end()
-            drag.setPixmap(QPixmap.fromImage(img))
-            # 热点 = 按下点在源 tab 内的相对偏移：缩略图初始与源 tab 垂直对齐，
-            # 拖拽过程中保持按下时的相对位置（VS Code 行为）。
-            hx = max(0, min(rect.width() - 1, self._drag_start_pos.x() - rect.left()))
-            hy = max(0, min(rect.height() - 1, self._drag_start_pos.y() - rect.top()))
-            drag.setHotSpot(QPoint(hx, hy))
-
-        drag.exec(Qt.DropAction.MoveAction | Qt.DropAction.CopyAction)
-        self._drag_tab_index = -1
-
-    def mouseReleaseEvent(self, event):
-        # 3.5.8（R6）：标签栏内拖动结束时按落点一次性落位（替代原生实时换位）。
-        # moveTab 会 emit tabMoved，QTabWidget 据此同步 widget 顺序。
-        # 注意：落位后必须直接 return，不能调用 super().mouseReleaseEvent()——
-        # QTabBar 原生释放逻辑会再做一次内部换位，与 moveTab 叠加导致落位偏差。
-        if (
-            event.button() == Qt.MouseButton.LeftButton
-            and self._drag_tab_index >= 0
-            and self.rect().contains(event.pos())
-        ):
-            target = self.tabAt(event.pos())
-            if target >= 0 and target != self._drag_tab_index:
-                self.moveTab(self._drag_tab_index, target)
-            self._drag_tab_index = -1
-            event.accept()
-            return
-        super().mouseReleaseEvent(event)
-
-
-# ════════════════════════════════════════════════════════
-#  _TabCloseButton —— 自定义关闭按钮容器
-# ════════════════════════════════════════════════════════
-
-class _TabCloseButton(QWidget):
-    """标签关闭按钮容器。
-
-    原生 QTabBar 关闭按钮是固定贴右边缘的 QToolButton widget，
-    QSS 的 subcontrol-position / right / margin 对它无效，
-    tab 的 padding-right 也不影响其位置。
-    本容器用固定宽度 + QHBoxLayout 的 contentsMargins 右侧留白，
-    让内部小按钮左移，使 × 图标落在文字与 tab 右边界之间。
-    """
-
-    def __init__(self, theme_engine, parent=None):
-        super().__init__(parent)
-        if theme_engine is None:
-            raise RuntimeError("_TabCloseButton 必须传入 theme_engine，不允许为 None")
-        self._theme_engine = theme_engine
-        self.setFixedSize(28, 22)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(4, 1, 10, 1)
-        layout.setSpacing(0)
-
-        self._btn = QToolButton()
-        self._btn.setObjectName("tabCloseInnerBtn")
-        self._btn.setFixedSize(15, 16)
-        self._btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._btn.setText("×")
-        self._apply_btn_style()
-        layout.addWidget(self._btn)
-        layout.addStretch()
-
-        self._btn.clicked.connect(self._on_clicked)
-
-    def _apply_btn_style(self) -> None:
-        close_hover = v2_color(self._theme_engine, "tab", "close_hover", "#BBDEFB")
-        self._btn.setStyleSheet(
-            f"#tabCloseInnerBtn {{ border: none; background: transparent; border-radius: 2px; padding: 0; }}"
-            f"#tabCloseInnerBtn:hover {{ background: {close_hover}; }}"
-        )
-
-    def _on_clicked(self):
-        tab_bar = self.parent()
-        while tab_bar is not None and not isinstance(tab_bar, QTabBar):
-            tab_bar = tab_bar.parent()
-        if tab_bar is None:
-            return
-        for i in range(tab_bar.count()):
-            if tab_bar.tabButton(i, QTabBar.ButtonPosition.RightSide) is self:
-                tab_widget = tab_bar.parent()
-                while tab_widget is not None and not isinstance(tab_widget, QTabWidget):
-                    tab_widget = tab_widget.parent()
-                if tab_widget is not None and hasattr(tab_widget, '_on_tab_close_requested'):
-                    tab_widget._on_tab_close_requested(i)
-                return
-
+from .draggable_tab_bar import (
+    MIME_TAB_FILEPATH,
+    MIME_TAB_ID,
+    DraggableTabBar,
+    TabCloseButton,
+)
+from .tab_dialogs import SaveAsDialog
 
 # ════════════════════════════════════════════════════════
 #  EditorTabWidget
@@ -407,7 +147,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
 
     def tabInserted(self, index):
         super().tabInserted(index)
-        btn = _TabCloseButton(self._theme_engine, self)
+        btn = TabCloseButton(self._theme_engine, self)
         self.tabBar().setTabButton(index, QTabBar.ButtonPosition.RightSide, btn)  # type: ignore[union-attr]
         # 3.5.12：迁移过来的标签 tab_id 已存在，先刷新 tooltip（未注册时显示「未保存」）
         self._update_tab_tooltip(index)
@@ -1657,7 +1397,7 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
         if tab_bar is not None:
             for i in range(tab_bar.count()):
                 btn = tab_bar.tabButton(i, QTabBar.ButtonPosition.RightSide)
-                if isinstance(btn, _TabCloseButton):
+                if isinstance(btn, TabCloseButton):
                     btn._apply_btn_style()
 
     def _on_tab_close_requested(self, index: int):

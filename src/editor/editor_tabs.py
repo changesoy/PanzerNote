@@ -2558,15 +2558,16 @@ class EditorTabWidget(ThemeAwareMixin, QTabWidget):
             widget.toggle_preview()
 
     def refresh_md_preview(self):
-        """强制刷新当前标签的 Markdown 预览（「视图 → 刷新预览」）。
+        """强制刷新本面板全部标签的 Markdown 预览（「视图 → 刷新预览」）。
 
-        大文件模式下这是用户可见的手动渲染入口：refresh_preview_now 照常渲染
-        真实内容并复位占位标志。当前标签不是 Markdown 预览（普通编辑器 /
-        图片查看器 / 无标签）时安全 no-op，不影响其它标签。
+        全局刷新语义：遍历本面板所有 Markdown 预览标签逐个渲染（大文件模式下
+        占位页随真实内容渲染复位）。本面板没有预览标签时安全 no-op；跨面板
+        （主面板 + 各分屏）的遍历由 ViewCoordinator 负责。
         """
-        widget = self.currentWidget()
-        if isinstance(widget, MarkdownPreviewWidget):
-            widget.refresh_preview_now()
+        for i in range(self.count()):
+            widget = self.widget(i)
+            if isinstance(widget, MarkdownPreviewWidget):
+                widget.refresh_preview_now()
 
     def toggle_minimap(self):
         """切换当前编辑器的缩略图显示"""

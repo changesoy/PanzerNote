@@ -305,8 +305,14 @@ class ViewCoordinator:
         self._editor_tabs.toggle_md_preview()
 
     def refresh_md_preview(self) -> None:
-        """强制刷新当前标签的 Markdown 预览（大文件模式下的手动渲染入口）。"""
+        """全局刷新 Markdown 预览（大文件模式下的手动渲染入口）。
+
+        遍历主面板与所有分屏的全部预览标签逐个渲染——标签在分屏第二屏时
+        同样会重新渲染，不依赖焦点所在面板。
+        """
         self._editor_tabs.refresh_md_preview()
+        for tabs in self._split_tabs:
+            tabs.refresh_md_preview()
 
     def toggle_minimap(self) -> None:
         """切换代码缩略图。"""

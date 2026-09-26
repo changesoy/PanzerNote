@@ -1297,7 +1297,7 @@ class MainWindow(QMainWindow):
         self.view_coordinator.toggle_md_preview()
 
     def _refresh_md_preview(self):
-        """刷新Markdown预览（委托 ViewCoordinator）"""
+        """刷新Markdown预览（全局：主面板+分屏全部渲染，委托 ViewCoordinator）"""
         self.view_coordinator.refresh_md_preview()
 
     def _toggle_minimap(self):

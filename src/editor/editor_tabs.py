@@ -34,6 +34,7 @@ from .markdown_preview import MarkdownPreviewWidget
 from .find_replace import FindReplaceBar
 from .save_task_manager import SaveTaskManager
 from .tab_save_flow import TabSaveFlowMixin
+from .tab_settings import TabSettingsMixin
 from .tab_edit_commands import TabEditCommandsMixin
 from .tab_file_ops import TabFileOpsMixin
 from .temp_session_manager import TempSessionManager
@@ -52,7 +53,7 @@ from .draggable_tab_bar import (
 #  EditorTabWidget
 # ════════════════════════════════════════════════════════
 
-class EditorTabWidget(TabEditCommandsMixin, TabFileOpsMixin, TabSaveFlowMixin, ThemeAwareMixin, QTabWidget):
+class EditorTabWidget(TabEditCommandsMixin, TabSettingsMixin, TabFileOpsMixin, TabSaveFlowMixin, ThemeAwareMixin, QTabWidget):
     """编辑器标签页管理"""
 
     current_changed = pyqtSignal(int)
@@ -197,12 +198,6 @@ class EditorTabWidget(TabEditCommandsMixin, TabFileOpsMixin, TabSaveFlowMixin, T
                 return title[:-len(suffix)]
         return title
 
-    def _iter_editors(self):
-        for i in range(self.count()):
-            widget = self.widget(i)
-            editor = self._get_editor_from_widget(widget)
-            if editor:
-                yield editor
 
     def _get_next_untitled_number(self) -> int:
         num = 1
@@ -1593,16 +1588,6 @@ class EditorTabWidget(TabEditCommandsMixin, TabFileOpsMixin, TabSaveFlowMixin, T
                 return self._get_editor_from_widget(widget)
         return None
 
-    def set_wrap_mode_all(self, mode: str):
-        for editor in self._iter_editors():
-            editor.set_wrap_mode(mode)
-
-    def set_preview_wrap_mode_all(self, mode: str):
-        """把「预览行宽」设置广播到所有 Markdown 预览（与编辑区行宽互不影响）。"""
-        for i in range(self.count()):
-            widget = self.widget(i)
-            if isinstance(widget, MarkdownPreviewWidget):
-                widget.set_preview_wrap_mode(mode)
 
     def toggle_md_preview(self):
         """切换当前MD标签的预览"""
@@ -1629,65 +1614,6 @@ class EditorTabWidget(TabEditCommandsMixin, TabFileOpsMixin, TabSaveFlowMixin, T
         if editor:
             editor.toggle_minimap()
 
-    def set_minimap_all(self, visible: bool):
-        for editor in self._iter_editors():
-            editor.set_minimap_visible(visible)
-
-    def apply_auto_minimap_all(self):
-        for editor in self._iter_editors():
-            editor.apply_auto_minimap()
-
-    def set_line_numbers_all(self, show: bool):
-        for editor in self._iter_editors():
-            editor.set_show_line_numbers(show)
-
-    def set_highlight_current_line_all(self, enabled: bool):
-        for editor in self._iter_editors():
-            editor.set_highlight_current_line(enabled)
-
-    def set_completion_enabled_all(self, enabled: bool) -> None:
-        """对所有已打开编辑器应用补全开关。"""
-        for editor in self._iter_editors():
-            editor.set_completion_enabled(enabled)
-
-    def set_font_all(self, family: str, size: int):
-        for editor in self._iter_editors():
-            editor.set_editor_font(family, size)
-
-    def set_code_font_all(self, family: str):
-        """对所有已打开编辑器应用「代码字体」（编辑器侧改 Markdown 高亮器的
-        代码 format；预览侧见 refresh_preview_typography_all）。
-        """
-        for editor in self._iter_editors():
-            editor.set_code_font(family)
-
-    def set_line_spacing_all(self, spacing: float):
-        """对所有已打开编辑器应用「正文行距」。
-
-        编辑器内正文与代码块不区分（同一文本流按块设行距，切分代码块代价高），
-        代码块行距只作用于预览与导出，见 refresh_preview_typography_all。
-        """
-        for editor in self._iter_editors():
-            editor.set_line_spacing(spacing)
-
-    def refresh_preview_typography_all(self):
-        """刷新所有 Markdown 预览的排版 CSS（代码字体 / 正文行距 / 代码块行距）。
-
-        这三项只存在于 CSS：已加载的预览就地更新变量，未加载的由首屏整页灌入。
-        三者共用一次刷新，避免设置应用时重复整页重建。
-        """
-        for i in range(self.count()):
-            widget = self.widget(i)
-            if isinstance(widget, MarkdownPreviewWidget):
-                widget.refresh_typography_settings()
-
-    def update_indent_settings_all(self):
-        """缩进配置变更后，更新所有已打开编辑器的 Tab 显示宽度"""
-        from .indentation import get_indent_width
-        for editor in self._iter_editors():
-            font_metrics = editor.fontMetrics()
-            tab_width = font_metrics.horizontalAdvance(' ') * get_indent_width(editor.config)
-            editor.setTabStopDistance(tab_width)
 
     # === 查找替换 ===
 

@@ -43,14 +43,14 @@ themes/<theme_id>/
 }
 ```
 
-| 字段 | 必填 | 规则 |
-| --- | --- | --- |
-| `schema_version` | 是 | 必须等于 `2`；`> supported` 被明确拒绝（可读错误），**不 silent fallback** |
-| `name` | 是 | 非空字符串 |
-| `family` | 是 | 字符串；**纯描述性元数据**（仅服务 Theme Manager 分组/展示），不影响 runtime 语义 |
-| `shell_schema` | 是 | 必须 ∈ `{"workbench-v1"}`；未知 schema **拒绝加载，不触发 L2**（宿主 ABI 契约） |
-| `renderer_profile` | 是 | 非空字符串（缺省 Renderer 集合 preset 名；组件级 recipe 可 override） |
-| `window_chrome` | 否 | `mode` ∈ `{"native", "extended-native", "custom"}`；v2 第一版仅 `native` 稳定实现 |
+| 字段               | 必填 | 规则                                                                              |
+| ------------------ | ---- | --------------------------------------------------------------------------------- |
+| `schema_version`   | 是   | 必须等于 `2`；`> supported` 被明确拒绝（可读错误），**不 silent fallback**        |
+| `name`             | 是   | 非空字符串                                                                        |
+| `family`           | 是   | 字符串；**纯描述性元数据**（仅服务 Theme Manager 分组/展示），不影响 runtime 语义 |
+| `shell_schema`     | 是   | 必须 ∈ `{"workbench-v1"}`；未知 schema **拒绝加载，不触发 L2**（宿主 ABI 契约）   |
+| `renderer_profile` | 是   | 非空字符串（缺省 Renderer 集合 preset 名；组件级 recipe 可 override）             |
+| `window_chrome`    | 否   | `mode` ∈ `{"native", "extended-native", "custom"}`；v2 第一版仅 `native` 稳定实现 |
 
 ## 3. variants/<id>.json（变体契约）
 
@@ -71,19 +71,20 @@ themes/<theme_id>/
 
 ### 3.1 color_identity（D27：归属 variant）
 
-| 字段 | 规则 |
-| --- | --- |
-| `strategy` | ∈ `{"chromatic", "neutral", "multi"}`。`neutral`：`primary` 必须为 null、`accents` 必须为空 |
-| `primary` | 合法颜色 `#RRGGBB[AA]`（chromatic/multi 必填） |
-| `accents` | 颜色数组 |
-| `hue_family` | 非空字符串（如 `blue` / `purple` / `neutral`） |
+| 字段         | 规则                                                                                        |
+| ------------ | ------------------------------------------------------------------------------------------- |
+| `strategy`   | ∈ `{"chromatic", "neutral", "multi"}`。`neutral`：`primary` 必须为 null、`accents` 必须为空 |
+| `primary`    | 合法颜色 `#RRGGBB[AA]`（chromatic/multi 必填）                                              |
+| `accents`    | 颜色数组                                                                                    |
+| `hue_family` | 非空字符串（如 `blue` / `purple` / `neutral`）                                              |
 
 **用途**：分类 / 推荐 / 主题预览 / 资产匹配——**不直接参与渲染**。
 渲染只依赖 semantic token。`mode`（明暗）由 variant id 表达，不重复声明。
 
-### 3.2 tokens（semantic token 白名单）
+### 3.2 tokens（semantic token 白名单，必须全覆盖）
 
 - 全部键必须在 `TOKEN_WHITELIST` 内（见附录 A），值为合法颜色 `#RRGGBB[AA]`。
+- **必须提供白名单内全部 45 个 token**（F-3 起强制）：缺任意一个即 `ThemeSemanticError`，主题在 activate 前被拒绝。不可只提供「本主题用到的那些」——QSS 生成期按 token 硬索引取色，缺失会在运行期崩且更难定位。
 - 值引用：recipe 的 `style` 可直接引用 token 名（如 `"background": "surface_primary"`）。
 
 ### 3.3 syntax（D18：共享 palette + 薄 override）
@@ -103,9 +104,22 @@ themes/<theme_id>/
 ```json
 {
   "spacing": { "space_1": 2, "space_2": 4, "space_3": 8 },
-  "radius": { "radius_sm": 3, "radius_md": 6, "radius_lg": 10, "radius_full": 100 },
-  "density": { "density_compact": 24, "density_default": 30, "density_comfortable": 36 },
-  "typography": { "font_ui": "Inter, Microsoft YaHei", "font_mono": "JetBrains Mono, Consolas", "font_scale": 1.0 }
+  "radius": {
+    "radius_sm": 3,
+    "radius_md": 6,
+    "radius_lg": 10,
+    "radius_full": 100
+  },
+  "density": {
+    "density_compact": 24,
+    "density_default": 30,
+    "density_comfortable": 36
+  },
+  "typography": {
+    "font_ui": "Inter, Microsoft YaHei",
+    "font_mono": "JetBrains Mono, Consolas",
+    "font_scale": 1.0
+  }
 }
 ```
 
@@ -131,7 +145,7 @@ Recipe 分两层：**通用 `style` 属性**（跨 renderer 通用）+ **`render
       "radius": "radius_md",
       "padding": "space_3"
     },
-    "renderer_params": { }
+    "renderer_params": {}
   }
 }
 ```
@@ -157,7 +171,10 @@ Recipe 分两层：**通用 `style` 属性**（跨 renderer 通用）+ **`render
 ## 7. icons.json（图标 override，D5/D24）
 
 ```json
-{ "set": "lucide", "overrides": { "app.logo": "themes/<theme_id>/assets/logo.svg" } }
+{
+  "set": "lucide",
+  "overrides": { "app.logo": "themes/<theme_id>/assets/logo.svg" }
+}
 ```
 
 - `set`：非空字符串（当前仅内置 Lucide Registry 概念）。
@@ -230,6 +247,8 @@ print("OK", sorted(snapshot.variants))
 
 ## 附录 A：UI semantic token 白名单（TOKEN_WHITELIST）
 
+> **必须全部提供**（F-3 起全覆盖强制，共 45 个）；缺任意一个主题将拒绝加载。
+
 ```
 surface_primary / surface_secondary / surface_raised
 text_primary / text_secondary / text_muted
@@ -269,3 +288,36 @@ button / input / combo_box / menu / context_menu
 checkbox / radio / slider / tooltip / tree_item
 group_box / dialog / statusbar
 ```
+
+### C.1 Core / Structural recipe 的 style 键契约（F-3 起强制）
+
+下列 13 个 recipe 的外观由内置 `default-v1` renderer 的 QSS builder **硬索引**消费，
+因此其 `style`：
+
+- 必须提供「必需 style 键」——缺失即 `ThemeSemanticError`（否则会在 QSS 生成期 `KeyError`）；
+- 不得出现「未知 style 键」——拼写错误会静默失效，故直接拒绝。
+
+括号内为可选键。
+
+| recipe         | 必需 style 键                                                                                                                                                                               |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `button`       | `background` / `text` / `border` / `padding` / `radius` / `hover_background` / `pressed_background` / `disabled_background` / `disabled_text` / `focus_border`                              |
+| `input`        | `background` / `border` / `radius` / `padding` / `text` / `selection_bg` / `placeholder` / `focus_border` / `arrow` / `disabled_background` / `disabled_text`                               |
+| `combo_box`    | `background` / `border` / `radius` / `padding` / `text` / `arrow` / `focus_border` / `popup_background` / `popup_border` / `item_selected_bg` / `item_selected_text`（可选 `arrow_hover`）  |
+| `menu`         | `background` / `text` / `border` / `radius` / `padding` / `selected_background` / `selected_text` / `disabled_text` / `separator`                                                           |
+| `context_menu` | 同 `menu`（QSS 无法区分普通菜单与右键菜单，共用模板）                                                                                                                                       |
+| `checkbox`     | `text` / `disabled_text` / `indicator_border` / `indicator_hover_border` / `indicator_checked_bg` / `indicator_radius`（可选 `indicator_checked_fg`）                                       |
+| `radio`        | 同 `checkbox`                                                                                                                                                                               |
+| `slider`       | `groove_bg` / `handle_bg` / `handle_radius` / `handle_hover`（可选 `handle_border`）                                                                                                        |
+| `scrollbar`    | `track` / `handle` / `handle_hover` / `handle_pressed` / `width` / `min_len` / `margin`                                                                                                     |
+| `tooltip`      | `background` / `text` / `border` / `radius` / `padding`                                                                                                                                     |
+| `tree_item`    | `background` / `text` / `selected_background` / `selected_text` / `hover_background` / `pressed_background`（可选 `padding` / `icon_size` / `drop_indicator` / `disabled_text` / `indent`） |
+| `group_box`    | `text` / `border` / `radius`（可选 `background`）                                                                                                                                           |
+| `dialog`       | `background` / `text`                                                                                                                                                                       |
+
+表外的 recipe（`editor` / `tab` / `minimap` / `search` / `markdown` / `statusbar`）由消费方
+代码以 `.get()` 读取并各自回退，**不做 style 键校验**；其键名与取值见 `themes/default/recipes.json`。
+
+校验契约的唯一真相源是 [`src/themes/theme_v2/constants.py::RECIPE_STYLE_CONTRACT`](../../src/themes/theme_v2/constants.py)：
+**改 `library.py` 中任一 QSS builder 的硬索引键，必须同步更新该表**（两侧不一致时 default 包会在
+启动加载期被拒，而非静默降级）。

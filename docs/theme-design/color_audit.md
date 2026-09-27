@@ -300,6 +300,15 @@ side_panel_host 的 spacing/radius 走 design 变量；input placeholder 接线 
 检查（B1 4.3：不存在的资源 activate 前报错）；minimap recipe `viewport` 接线
 `minimap_viewport` 变体 token（替换原 accent+alpha 硬编码派生）。
 
+**F-3 / F-4 契约加固（2026-09）**：`ThemeValidator` 强制 variant token 全覆盖
+（白名单 45 个；此前缺 token 会在 `theme_engine.generate_stylesheet` 硬索引 `KeyError`，
+或让 recipe 的 token 引用被静默放行成非法色值）+ 契约内 13 个 Core/Structural recipe 的
+style 键集合（按 `library.py` QSS builder 硬索引反推，见
+`constants.RECIPE_STYLE_CONTRACT`）。`ThemeManager.set_commit_hook()` 统一调用点收尾出口
+（config 持久化 / 全局 QSS 重涂 / DWM 标题栏），覆盖 `request()` / `commit()` /
+Safe Switch pending 唤醒——此前 pending 唤醒只发射 `theme_committed`（组件级重涂），
+调用点收尾缺失。**两项均不改任何 token 取值**，本台账的配色结论不受影响。
+
 **遗留专用 token 消费状态（P1-3 收敛说明）**：`editor_* / md_* / search_* /
 minimap_viewport` 等遗留专用 token 保留在变体与白名单中，消费方矩阵：
 

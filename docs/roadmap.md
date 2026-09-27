@@ -49,8 +49,9 @@ Wave 8 按 B1~B9 推进：B1~B7 已实现并提交（v1 主题系统已删除）
 
 - 第二主题包（真实第二视觉语言）与跨包切换 UI；具体 Renderer（`brutal-v1` / `soft-motion-v1` 等）见 [theme_authoring.md](theme-design/theme_authoring.md)
 - 图标集：`icons.json` 的 `overrides` 机制已可用，但非 Lucide 的完整图标集尚未提供
-- `ThemeValidator` 未强制 token 全覆盖 / recipe style 键集合（验收记录 F-3）：缺失时 QSS 生成期硬索引可能 KeyError，default 单包不触发
-- `_retry_pending` 恢复路径不执行调用点收尾（config 持久化 / 全局 QSS 重涂 / DWM 标题栏，验收记录 F-4）
+- ✅ **F-3 已解决**：`ThemeValidator` 现强制 variant token 全覆盖（白名单 45 个缺一即拒）+ 契约内 13 个 recipe 的 style 键集合（缺必需键 / 含未知键即拒），校验前置于 activate，消灭 QSS 生成期硬索引 `KeyError` 与缺失 token 引用的静默放行；作者契约见 [theme_authoring.md](theme-design/theme_authoring.md) 附录 A / C.1
+- ✅ **F-4 已解决**：`_retry_pending` 恢复路径经 `ThemeManager.set_commit_hook()` 统一收尾出口，与正常切换共用 config 持久化 / 全局 QSS 重涂 / DWM 标题栏
+- `toggle_md_preview` / `toggle_minimap` 仍只作用于主面板，与 `refresh_md_preview` 的全局刷新语义不一致（行为待定）
 - 跨包 L1 路径的切换性能实测：现有 0.04 ms 基准只覆盖 L0 同包变体，见 [color_audit.md](theme-design/color_audit.md) 性能审计段
 - 游戏侧视觉域与剩余 P2 加固项
 

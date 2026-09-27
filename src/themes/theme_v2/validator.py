@@ -17,6 +17,7 @@ from .constants import (
     CHROME_MODES,
     COLOR_IDENTITY_STRATEGIES,
     COLOR_VALUE_PATTERN,
+    RECIPE_STYLE_CONTRACT,
     SUPPORTED_SCHEMA_VERSION,
     SUPPORTED_SHELL_SCHEMAS,
     SYNTAX_TOKEN_WHITELIST,
@@ -232,6 +233,15 @@ class ThemeValidator:
                     f"variant '{variant_id}' token '{key}' 必须是合法颜色"
                 )
             tokens[key] = value
+
+        # F-3 全覆盖强制：缺 token 不再等到 QSS 生成期硬索引 KeyError /
+        # recipe style 引用静默放行，而在 activate 前拒绝。
+        missing = TOKEN_WHITELIST - tokens.keys()
+        if missing:
+            raise ThemeSemanticError(
+                f"variant '{variant_id}' 缺少必需 token: {sorted(missing)}"
+                f"（白名单共 {len(TOKEN_WHITELIST)} 个，必须全覆盖）"
+            )
         return tokens
 
     @staticmethod
@@ -289,6 +299,24 @@ class ThemeValidator:
             style = value.get("style", {})
             if not isinstance(style, dict):
                 raise ThemeSemanticError(f"recipe '{key}' style 必须是对象")
+
+            # F-3 style 键契约：契约表内 recipe（library QSS builder 硬索引的
+            # Core/Structural 组件）强制 required 键存在、拒绝未知键（拼错键
+            # 会静默失效）。表外 recipe 不校验。
+            style_contract = RECIPE_STYLE_CONTRACT.get(key)
+            if style_contract is not None:
+                required, optional = style_contract
+                missing_keys = required - style.keys()
+                if missing_keys:
+                    raise ThemeSemanticError(
+                        f"recipe '{key}' 缺少必需 style 键: {sorted(missing_keys)}"
+                    )
+                unknown_keys = style.keys() - required - optional
+                if unknown_keys:
+                    raise ThemeSemanticError(
+                        f"recipe '{key}' 含未知 style 键: {sorted(unknown_keys)}"
+                        f"（合法: {sorted(required | optional)}）"
+                    )
 
             renderer_params = value.get("renderer_params", {})
             if not isinstance(renderer_params, dict):

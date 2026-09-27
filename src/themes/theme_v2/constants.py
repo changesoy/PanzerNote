@@ -78,6 +78,96 @@ TOKEN_WHITELIST = frozenset({
     "minimap_viewport",
 })
 
+#: default-v1 renderer 的 Core/Structural recipe style 键契约（F-3 强制）。
+#: required：library QSS builder 硬索引键，缺失会在 QSS 生成期 KeyError → 校验期拦截；
+#: optional：builder ``s.get`` 消费、非 QSS 代码消费（file_tree 的 drop_indicator/indent）
+#: 或预留 pending 键（library._PENDING_KEYS）。不在表内的 recipe key（editor/tab/
+#: statusbar 等由消费方 ``.get`` 回退、无硬索引的 recipe）不做 style 键校验。
+RECIPE_STYLE_CONTRACT: dict[str, tuple[frozenset[str], frozenset[str]]] = {
+    "button": (
+        frozenset({
+            "background", "text", "border", "padding", "radius",
+            "hover_background", "pressed_background",
+            "disabled_background", "disabled_text", "focus_border",
+        }),
+        frozenset(),
+    ),
+    "input": (
+        frozenset({
+            "background", "border", "radius", "padding", "text",
+            "selection_bg", "placeholder", "focus_border", "arrow",
+            "disabled_background", "disabled_text",
+        }),
+        frozenset(),
+    ),
+    "combo_box": (
+        frozenset({
+            "background", "border", "radius", "padding", "text", "arrow",
+            "focus_border", "popup_background", "popup_border",
+            "item_selected_bg", "item_selected_text",
+        }),
+        frozenset({"arrow_hover"}),
+    ),
+    "menu": (
+        frozenset({
+            "background", "text", "border", "radius", "padding",
+            "selected_background", "selected_text", "disabled_text", "separator",
+        }),
+        frozenset(),
+    ),
+    "context_menu": (
+        frozenset({
+            "background", "text", "border", "radius", "padding",
+            "selected_background", "selected_text", "disabled_text", "separator",
+        }),
+        frozenset(),
+    ),
+    "checkbox": (
+        frozenset({
+            "text", "disabled_text", "indicator_border",
+            "indicator_hover_border", "indicator_checked_bg", "indicator_radius",
+        }),
+        frozenset({"indicator_checked_fg"}),
+    ),
+    "radio": (
+        frozenset({
+            "text", "disabled_text", "indicator_border",
+            "indicator_hover_border", "indicator_checked_bg", "indicator_radius",
+        }),
+        frozenset({"indicator_checked_fg"}),
+    ),
+    "slider": (
+        frozenset({"groove_bg", "handle_bg", "handle_radius", "handle_hover"}),
+        frozenset({"handle_border"}),
+    ),
+    "scrollbar": (
+        frozenset({
+            "track", "handle", "handle_hover", "handle_pressed",
+            "width", "min_len", "margin",
+        }),
+        frozenset(),
+    ),
+    "tooltip": (
+        frozenset({"background", "text", "border", "radius", "padding"}),
+        frozenset(),
+    ),
+    "tree_item": (
+        frozenset({
+            "background", "text", "selected_background", "selected_text",
+            "hover_background", "pressed_background",
+        }),
+        frozenset({"padding", "icon_size", "drop_indicator", "disabled_text", "indent"}),
+    ),
+    "group_box": (
+        frozenset({"text", "border", "radius"}),
+        frozenset({"background"}),
+    ),
+    "dialog": (
+        frozenset({"background", "text"}),
+        frozenset(),
+    ),
+}
+
 #: syntax palette override 白名单（与现有 Pygments → syntax_* 映射保持一致）。
 SYNTAX_TOKEN_WHITELIST = frozenset({
     "syntax_keyword",

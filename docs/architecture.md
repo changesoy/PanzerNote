@@ -98,7 +98,13 @@ PanzerNote/
 │   │
 │   ├── editor/                     # ── 编辑器模块 ──
 │   │   ├── editor.py               # 核心编辑器（行号、缩略图、语法高亮、自动缩进、虚拟滚动）
-│   │   ├── editor_tabs.py          # 多标签管理（打开/保存/关闭/编码检测/拖拽迁移/共享 Document View 生命周期）
+│   │   ├── editor_tabs.py          # 多标签管理主体（1632 行；打开/关闭/预览刷新/主题应用/拖拽与分屏协调）
+│   │   ├── tab_dialogs.py          # 另存为对话框（SaveAsDialog，编码选择 UTF-8/GBK/UTF-16）
+│   │   ├── draggable_tab_bar.py    # 标签栏拖拽（DraggableTabBar / TabCloseButton + 文件路径 MIME 常量）
+│   │   ├── tab_save_flow.py        # 保存流 Mixin（保存/另存为/PDF/HTML/批量保存/暂存 + 保存状态机回调）
+│   │   ├── tab_file_ops.py         # 文件操作 Mixin（文件树联动 + 移动/复制资产迁移 + 重命名/删除同步）
+│   │   ├── tab_edit_commands.py    # 编辑命令 Mixin（编辑命令代理 + 行操作 + 图片插入 + 书签/折叠持久化）
+│   │   ├── tab_settings.py         # 批量设置 Mixin（_iter_editors + set_*_all 全标签广播）
 │   │   ├── editor_actions.py       # 行操作/大小写转换/JSON/XML 格式化/Markdown 编辑辅助（Mixin）
 │   │   ├── auto_pair_handler.py    # 括号/引号自动配对（Mixin，frozenset 快速过滤）
 │   │   ├── bracket_matcher.py      # 括号匹配高亮（纯函数，扫描配对位置，支持中英文括号）
@@ -447,13 +453,24 @@ Config 类从配置中枢演进为**门面（Facade）**：对外保持自 v1.6.
 
 ### 4.4 标签页管理 (`editor/editor_tabs.py`)
 
-| 组件              | 说明                                                                                                                                                                                                           |
-| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DraggableTabBar` | 继承 `QTabBar`，标签内拖拽 = 重排序，拖出标签栏 = 发起 `QDrag`（携带文件路径 MIME）                                                                                                                            |
-| `EditorTabWidget` | 继承 `QTabWidget`，配合 `SharedDocument`/`ViewState`（`core/shared_document.py`）管理标签状态（3.5.8 起：内容/编码/eol/dirty/折叠/书签单一源在 Document；Wave 4 D：TabState 已淘汰，`document_model.py` 删除） |
-| `SaveAsDialog`    | 自定义另存为对话框，支持编码选择（UTF-8/GBK/UTF-16）                                                                                                                                                           |
+R1 拆分（2026-09）：3443 行单文件按「组件抽离 + 职责 Mixin」拆为 7 个模块，主文件降至 1632 行；外部 import 面不变（仍仅 `EditorTabWidget`）。
 
-**核心逻辑**：
+**类继承（MRO）**：`EditorTabWidget(TabEditCommandsMixin, TabSettingsMixin, TabFileOpsMixin, TabSaveFlowMixin, ThemeAwareMixin, QTabWidget)`
+
+- 每个 Mixin 自带同名私有契约基类 `_EditorTabWidgetContract(QTabWidget)`（各模块内各定义一份），以空体 `def` / 属性注解声明其依赖的宿主方法，把跨 Mixin 依赖从运行期 `AttributeError` 提前到静态检查。
+- **不变式**：契约中跨 Mixin 方法必须用裸 `Callable` 注解，不得写空体 `def`——同名空体 `def` 会被 MRO 中更靠后的实现遮蔽（E3 踩坑，见 `tab_file_ops.py` 契约处注释）。提供者位于主类体（MRO 最前）时，空体 `def` 才安全。
+
+| 组件                   | 说明                                                                                                                                                                                                           |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DraggableTabBar`      | 标签栏（`editor/draggable_tab_bar.py`）：继承 `QTabBar`，标签内拖拽 = 重排序，拖出标签栏 = 发起 `QDrag`（携带文件路径 MIME）                                                                                   |
+| `EditorTabWidget`      | 继承 `QTabWidget`，配合 `SharedDocument`/`ViewState`（`core/shared_document.py`）管理标签状态（3.5.8 起：内容/编码/eol/dirty/折叠/书签单一源在 Document；Wave 4 D：TabState 已淘汰，`document_model.py` 删除） |
+| `TabSaveFlowMixin`     | 保存流（`editor/tab_save_flow.py`）：保存 / 另存为 / PDF / HTML / 批量保存 / 暂存 + 保存状态机回调（`_on_save_state_changed` / `_on_save_failed`）                                                             |
+| `TabFileOpsMixin`      | 文件操作（`editor/tab_file_ops.py`）：文件树联动（移动/复制/重命名/删除）、文档资产迁移粘合、`_await_save_settled`                                                                                             |
+| `TabEditCommandsMixin` | 编辑命令（`editor/tab_edit_commands.py`）：编辑命令代理、行操作、图片插入、缺失图片恢复、书签/折叠持久化                                                                                                       |
+| `TabSettingsMixin`     | 批量设置（`editor/tab_settings.py`）：`_iter_editors` + `set_*_all` 全标签广播                                                                                                                                 |
+| `SaveAsDialog`         | 另存为对话框（`editor/tab_dialogs.py`）：支持编码选择（UTF-8/GBK/UTF-16）                                                                                                                                      |
+
+**核心逻辑**（R1 拆分后落点：标签生命周期 / 预览刷新 / 主题应用在主类 `editor_tabs.py`；保存与另存为在 `tab_save_flow.py`；移动 / 复制 / 重命名 / 删除同步在 `tab_file_ops.py`；编辑命令代理与书签折叠在 `tab_edit_commands.py`；批量设置广播在 `tab_settings.py`）：
 
 - `open_file()` — 编码级联检测（UTF-8 → GBK → UTF-16 → 容错UTF-8），Markdown 文件自动使用 `MarkdownPreviewWidget`；新增 `render_preview` 参数（默认 `True`），设为 `False` 时延迟预览渲染以加速启动恢复；3.5.8：另一面板已打开同一文件时经 `DocumentRegistry.get_by_path` 命中共享 Document，直接新建 View attach（不重新读盘）
 - `_on_text_changed()` — 比较当前内容与 `last_saved_content`，决定是否标记为已修改（标签名加 ` *`）；粘贴操作不计入打字奖励
@@ -807,11 +824,13 @@ LOADED → on_unload() → UNLOADED
   （`package/variant` 语义；旧值 `light`/`dark` 读取时迁移为 default 包）
 - **v2 加载失败 = 启动显式报错**：抛 `ThemeLoadError`，main.py 弹错误框后退出，永不静默回退
 - 主题切换即时生效，无需重启
+- **校验前置（F-3）**：`ThemeValidator` 强制 variant token 全覆盖（白名单 45 个 UI token 缺一即拒绝）+ 契约内 recipe 的 style 键集合（11 个 Core recipe + `group_box`/`dialog`，缺必需键或含未知键即拒绝）。此前要等到 QSS 生成期 `tokens[...]` / `s[...]` 硬索引才 `KeyError`，或缺失 token 引用被静默放行成非法色值；现统一在 activate 前拦截。
+- **提交成功回调（F-4）**：`ThemeManager.set_commit_hook()` 是调用点收尾的唯一出口（config 持久化 + 全局 QSS 重涂 + DWM 标题栏），覆盖 `request()` / `commit()` / Safe Switch pending 唤醒全部成功路径。manager 保持 headless，回调在 state 复位 IDLE 之后调用且异常隔离；`_retry_pending` 经 `_commit_now` 自动获得收尾，无需重复实现。
 
 **v2 主题包结构**（`themes/default/`）：
 
 - `theme.json` — 包清单（包名/渲染器/变体/recipe/design 契约）
-- `variants/light.json` / `variants/dark.json` — 变体语义 token（UI 通用 11 + `editor_*`/`md_*`/`search_*` 专用）
+- `variants/light.json` / `variants/dark.json` — 变体语义 token（**全覆盖强制**，共 45 个：UI 通用 11 + 选中/文字态 2 + `editor_*`/`md_*`/`search_*`/`minimap_viewport` 专用）
 - `recipes.json` — 组件视觉配方（button/tab/tree_item/group_box/dialog/scrollbar 等）
 - `design.json` / `icons.json` / `motion.json` — 设计 token / 图标 / 动效
 - `syntax/palettes/*.json` — 共享语法配色 palette（light-default-v1 / dark-default-v1）

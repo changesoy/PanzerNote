@@ -690,7 +690,7 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
 
     def _init_minimap_attrs(self):
         """预初始化缩略图属性（在行号初始化之前调用）"""
-        self._minimap_visible = self.config.get_editor_setting("show_minimap", True)
+        self._minimap_visible: bool = self.config.get_editor_setting("show_minimap", True)
         self.minimap = None
 
     def _init_minimap(self):
@@ -730,6 +730,10 @@ class Editor(ThemeAwareMixin, AutoPairHandlerMixin, EditorActionsMixin, QPlainTe
             self.minimap.setVisible(visible)
         self._update_line_number_area_width(0)
         self._update_child_geometries()
+
+    def is_minimap_visible(self) -> bool:
+        """缩略图当前是否可见（全局切换时的基准状态读取）。"""
+        return self._minimap_visible
 
     def apply_auto_minimap(self):
         """根据 auto_minimap 设置和当前文件类型自动决定缩略图是否显示

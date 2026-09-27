@@ -1765,11 +1765,19 @@ a {{
 
     # ──────────── 预览显隐 ────────────
 
-    def toggle_preview(self):
-        self._preview_visible = not self._preview_visible
-        self.preview.set_visible(self._preview_visible)
-        if self._preview_visible:
+    def is_preview_visible(self) -> bool:
+        """预览当前是否可见（全局切换时的基准状态读取）。"""
+        return self._preview_visible
+
+    def set_preview_visible(self, visible: bool) -> None:
+        """设置预览显隐（全局广播入口；与 toggle_preview 同源，行为等价）。"""
+        self._preview_visible = visible
+        self.preview.set_visible(visible)
+        if visible:
             self._update_preview()
+
+    def toggle_preview(self):
+        self.set_preview_visible(not self._preview_visible)
 
     # ══════════════════════════════════════════════════
     #  代理 Editor 接口（EditorTabWidget 统一调用）

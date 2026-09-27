@@ -59,6 +59,33 @@ class TabSettingsMixin(_EditorTabWidgetContract):
         for editor in self._iter_editors():
             editor.set_minimap_visible(visible)
 
+    def minimap_visible(self) -> Optional[bool]:
+        """本面板第一个编辑器的缩略图可见性；无编辑器返回 None。
+
+        作为全局切换（ViewCoordinator.toggle_minimap）的基准状态读取。
+        """
+        for editor in self._iter_editors():
+            return bool(editor.is_minimap_visible())
+        return None
+
+    def md_preview_visible(self) -> Optional[bool]:
+        """本面板第一个 Markdown 预览标签的预览可见性；无预览标签返回 None。
+
+        作为全局切换（ViewCoordinator.toggle_md_preview）的基准状态读取。
+        """
+        for i in range(self.count()):
+            widget = self.widget(i)
+            if isinstance(widget, MarkdownPreviewWidget):
+                return widget.is_preview_visible()
+        return None
+
+    def set_md_preview_visible_all(self, visible: bool):
+        """把预览显隐广播到本面板全部 Markdown 预览标签（全局切换语义）。"""
+        for i in range(self.count()):
+            widget = self.widget(i)
+            if isinstance(widget, MarkdownPreviewWidget):
+                widget.set_preview_visible(visible)
+
     def apply_auto_minimap_all(self):
         for editor in self._iter_editors():
             editor.apply_auto_minimap()

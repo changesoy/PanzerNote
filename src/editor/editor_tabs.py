@@ -1589,12 +1589,6 @@ class EditorTabWidget(TabEditCommandsMixin, TabSettingsMixin, TabFileOpsMixin, T
         return None
 
 
-    def toggle_md_preview(self):
-        """切换当前MD标签的预览"""
-        widget = self.currentWidget()
-        if isinstance(widget, MarkdownPreviewWidget):
-            widget.toggle_preview()
-
     def refresh_md_preview(self):
         """强制刷新本面板全部标签的 Markdown 预览（「视图 → 刷新预览」）。
 
@@ -1607,13 +1601,9 @@ class EditorTabWidget(TabEditCommandsMixin, TabSettingsMixin, TabFileOpsMixin, T
             if isinstance(widget, MarkdownPreviewWidget):
                 widget.refresh_preview_now()
 
-    def toggle_minimap(self):
-        """切换当前编辑器的缩略图显示"""
-        widget = self.currentWidget()
-        editor = self._get_editor_from_widget(widget)
-        if editor:
-            editor.toggle_minimap()
-
+    # 预览显隐 / 缩略图的全局切换入口在 TabSettingsMixin
+    # （md_preview_visible / set_md_preview_visible_all / minimap_visible），
+    # 由 ViewCoordinator 做「基准取反 + 全面板广播」，与刷新预览同语义。
 
     # === 查找替换 ===
 

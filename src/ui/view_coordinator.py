@@ -300,9 +300,23 @@ class ViewCoordinator:
 
     # === 面板显隐 ===
 
+    def _all_panels(self) -> List[EditorTabWidget]:
+        """全局视图操作的面板集合：主面板 + 所有分屏。"""
+        return [self._editor_tabs, *self._split_tabs]
+
     def toggle_md_preview(self) -> None:
-        """切换 Markdown 预览。"""
-        self._editor_tabs.toggle_md_preview()
+        """全局切换 Markdown 预览显隐（主面板 + 所有分屏统一）。
+
+        基准状态取首个有预览标签的面板，取反后广播到全部面板——不依赖焦点
+        面板；若逐标签各自取反，状态本就不一致时会得到相反结果。
+        """
+        panels = self._all_panels()
+        states = (panel.md_preview_visible() for panel in panels)
+        base = next((v for v in states if v is not None), None)
+        if base is None:
+            return
+        for panel in panels:
+            panel.set_md_preview_visible_all(not base)
 
     def refresh_md_preview(self) -> None:
         """全局刷新 Markdown 预览（大文件模式下的手动渲染入口）。
@@ -310,13 +324,21 @@ class ViewCoordinator:
         遍历主面板与所有分屏的全部预览标签逐个渲染——标签在分屏第二屏时
         同样会重新渲染，不依赖焦点所在面板。
         """
-        self._editor_tabs.refresh_md_preview()
-        for tabs in self._split_tabs:
+        for tabs in self._all_panels():
             tabs.refresh_md_preview()
 
     def toggle_minimap(self) -> None:
-        """切换代码缩略图。"""
-        self._editor_tabs.toggle_minimap()
+        """全局切换代码缩略图显示（主面板 + 所有分屏统一）。
+
+        与 toggle_md_preview 同语义：基准取反后广播，不依赖焦点面板。
+        """
+        panels = self._all_panels()
+        states = (panel.minimap_visible() for panel in panels)
+        base = next((v for v in states if v is not None), None)
+        if base is None:
+            return
+        for panel in panels:
+            panel.set_minimap_all(not base)
 
     def toggle_file_tree(self) -> None:
         """切换文件树显示/隐藏。"""

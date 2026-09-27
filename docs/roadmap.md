@@ -51,7 +51,7 @@ Wave 8 按 B1~B9 推进：B1~B7 已实现并提交（v1 主题系统已删除）
 - 图标集：`icons.json` 的 `overrides` 机制已可用，但非 Lucide 的完整图标集尚未提供
 - ✅ **F-3 已解决**：`ThemeValidator` 现强制 variant token 全覆盖（白名单 45 个缺一即拒）+ 契约内 13 个 recipe 的 style 键集合（缺必需键 / 含未知键即拒），校验前置于 activate，消灭 QSS 生成期硬索引 `KeyError` 与缺失 token 引用的静默放行；作者契约见 [theme_authoring.md](theme-design/theme_authoring.md) 附录 A / C.1
 - ✅ **F-4 已解决**：`_retry_pending` 恢复路径经 `ThemeManager.set_commit_hook()` 统一收尾出口，与正常切换共用 config 持久化 / 全局 QSS 重涂 / DWM 标题栏
-- `toggle_md_preview` / `toggle_minimap` 仍只作用于主面板，与 `refresh_md_preview` 的全局刷新语义不一致（行为待定）
+- ✅ **toggle 语义已统一**：`toggle_md_preview` / `toggle_minimap` 改为与 `refresh_md_preview` 同的全局语义——`ViewCoordinator` 取首个有内容的基准状态后取反，广播到主面板与所有分屏（避免逐标签各自取反导致状态相反）；分屏第二屏的标签此前不受这两个快捷键影响
 - 跨包 L1 路径的切换性能实测：现有 0.04 ms 基准只覆盖 L0 同包变体，见 [color_audit.md](theme-design/color_audit.md) 性能审计段
 - 游戏侧视觉域与剩余 P2 加固项
 

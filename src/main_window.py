@@ -50,7 +50,6 @@ from .plugins.plugin_event_bus import PluginEventBus
 from .themes.theme_engine import ThemeEngine
 from .themes.theme_preview import ThemePreviewDialog
 from .themes.theme_v2.consumer import v2_active_variant, v2_token
-from .themes.theme_v2.transition import CommitResult
 from .themes.theme_v2.transition_controller import ThemeTransitionController, easing_for
 from .themes.theme_v2.types import ThemeSwitchLevel
 from .ui.command_palette import CommandPalette
@@ -269,6 +268,8 @@ class MainWindow(QMainWindow):
         # Batch 4：主题切换 / 文件树变化 → 插件事件（B8：订阅 manager 信号）
         theme_manager = getattr(self.theme_engine, "theme_manager", None)
         if theme_manager is not None:
+            # F-4：提交成功收尾回调——正常切换与 pending 唤醒共用唯一出口
+            theme_manager.set_commit_hook(self._on_theme_commit_succeeded)
             theme_manager.theme_committed.connect(
                 lambda _pkg, variant: self._plugin_event_bus.emit("theme.changed", variant)
             )
@@ -1848,13 +1849,24 @@ class MainWindow(QMainWindow):
         )
 
     def _switch_theme_now(self, package_id: str, variant_id: str) -> None:
-        """过渡 callable：经 manager 完成 v2 事务（同包变体切换）
-        + 持久化 view.theme（package/variant）+ _apply_theme（全局 QSS
-        重涂 + DWM 标题栏）——全部同步完成。
+        """过渡 callable：经 manager 完成 v2 事务（同包变体切换）。
+
+        调用点收尾（config 持久化 + 全局 QSS 重涂 + DWM 标题栏 + 提示）已收敛到
+        ``_on_theme_commit_succeeded``——经 manager 提交回调触发，与 Safe Switch
+        pending 唤醒路径共用同一出口（F-4）。
         """
         manager = getattr(self.theme_engine, "theme_manager", None)
-        if manager is None or manager.request(package_id, variant_id) is not CommitResult.COMMITTED:
+        if manager is None:
             return
+        manager.request(package_id, variant_id)
+
+    def _on_theme_commit_succeeded(self, package_id: str, variant_id: str) -> None:
+        """主题提交成功收尾（manager 提交回调唯一出口，F-4）。
+
+        覆盖全部成功路径：主题对话框正常切换、Safe Switch pending 唤醒重试。
+        manager 保持 headless，全局 QSS 重涂 / 持久化 / 原生标题栏只能在此完成；
+        因此本方法不得省去——pending 路径曾因缺少它导致 UI 停在旧主题壳上。
+        """
         self.config.set_view_setting("theme", f"{package_id}/{variant_id}")
         self._apply_theme()
         self.secretary.show_message("已切换主题")

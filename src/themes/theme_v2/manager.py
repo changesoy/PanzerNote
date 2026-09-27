@@ -8,14 +8,15 @@
 - 七节：Safe Switch pending（latest-wins、interaction_finished 一次性唤醒）
 
 headless：不持有任何 QWidget 引用；全局 QSS 重涂与视觉包装留在调用点
-（main_window），经信号/回调衔接。
+（main_window），经提交回调（set_commit_hook）与信号衔接——正常切换与
+Safe Switch pending 唤醒共用同一收尾出口（F-4）。
 """
 from __future__ import annotations
 
 import json
 from enum import Enum
 from pathlib import Path
-from typing import Mapping
+from typing import Callable, Mapping
 
 from PyQt6.QtCore import QMetaObject, QObject, pyqtSignal
 
@@ -85,6 +86,8 @@ class ThemeManager(QObject):
         self._active_package_id: str | None = None
         #: 本次 prepare 缓存的新 palette 集合（commit 步骤 2 传给 activate）。
         self._prepared_palettes: Mapping[str, Mapping[SyntaxTokenKey, ColorValue]] | None = None
+        #: 提交成功回调（调用点收尾唯一出口，F-4）：签名 (package_id, variant_id) -> None。
+        self._commit_hook: Callable[[str, str], None] | None = None
 
     # ──────────────────────────────────────────────── 只读属性
     @property
@@ -105,6 +108,34 @@ class ThemeManager(QObject):
     def active_package_id(self) -> str | None:
         """当前激活包 id（commit 成功后才更新）。"""
         return self._active_package_id
+
+    # ──────────────────────────────────────────────── 调用点收尾回调
+    def set_commit_hook(self, hook: Callable[[str, str], None] | None) -> None:
+        """注册提交成功回调（调用点收尾唯一出口，F-4）。
+
+        manager 不持有 QWidget，全局 QSS 重涂 / config 持久化 / DWM 标题栏
+        只能由调用点（main_window）完成。本回调覆盖**全部**成功路径：
+        ``request()`` / ``commit()`` / Safe Switch pending 唤醒重试，
+        避免 pending 路径漏收尾导致 UI 停在旧主题壳上。
+
+        hook 在 state 复位 IDLE 之后调用（内部可安全回调 manager 只读方法）；
+        hook 抛出的异常被隔离（记录日志，不改变已提交的事务结果）。
+        """
+        self._commit_hook = hook
+
+    def _invoke_commit_hook(self, package_id: str, variant_id: VariantId) -> None:
+        """调用收尾回调；异常隔离，不污染已提交结果。"""
+        hook = self._commit_hook
+        if hook is None:
+            return
+        try:
+            hook(package_id, variant_id)
+        except Exception:
+            _logger.exception(
+                "主题提交回调失败（%s/%s），主题已生效但调用点收尾未完成",
+                package_id,
+                variant_id,
+            )
 
     # ──────────────────────────────────────────────── 入口
     def request(self, package_id: str, variant_id: VariantId) -> CommitResult:
@@ -290,6 +321,8 @@ class ThemeManager(QObject):
         self._service.notify_changed()
         self.theme_committed.emit(prepared.package_id, prepared.variant_id)
         self._state = ThemeManagerState.IDLE
+        # 步骤 5：调用点收尾（F-4）。置于 state 复位之后，hook 内可安全回调 manager。
+        self._invoke_commit_hook(prepared.package_id, prepared.variant_id)
         return CommitResult.COMMITTED
 
     @staticmethod
@@ -350,6 +383,8 @@ class ThemeManager(QObject):
         """interaction_finished 唤醒：重新 prepare + 全量安全性复查。
 
         仍 unsafe → 重新挂起并重连；latest-wins 已覆盖的旧唤醒直接忽略。
+        提交成功时经 ``_commit_now`` 自动触发提交回调，调用点收尾与正常切换
+        一致（F-4），无需在此重复收尾。
         """
         if self._pending != (package_id, variant_id):
             return

@@ -1,3 +1,6 @@
+> **[已归档 2026-09-27]** 本文档为阶段性历史设计稿，仅作背景留档，已非现行真相源。
+> 现行架构见 [architecture.md](../architecture.md)，现行规划见 [roadmap.md](../roadmap.md)。
+
 # C 路线 Handoff
 
 ## 定位

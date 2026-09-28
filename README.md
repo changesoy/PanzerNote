@@ -22,7 +22,19 @@
 
 ## 截图
 
-TODO
+**浅色主题：编辑与分屏实时预览**
+
+![浅色主题主界面](docs/images/main_light.png)
+
+**深色主题**
+
+![深色主题](docs/images/main_dark.png)
+
+**命令面板**（默认 `Ctrl+Shift+P`，可在「帮助 → 快捷键列表」自定义）
+
+![命令面板](docs/images/command_palette.png)
+
+> 截图由 `scripts/make_screenshots.py` 在临时数据目录中自动生成，可随时重新生成。
 
 ## 安装与运行
 
@@ -55,7 +67,10 @@ python main.py
 
 ## 文档
 
+- [用户指南](docs/user_guide.md) — 从安装到日常使用的完整终端用户指南
+- [开发者指南](docs/developer_guide.md) — 环境搭建、开发循环、测试与提交规范
 - [架构与设计](docs/architecture.md) — 模块结构、核心模块详解、数据流、架构约束
+- [分支与数据恢复](docs/branch_recovery.md) — Git 误操作恢复与应用数据恢复
 - [更新日志](CHANGELOG.md) — 各版本变更记录
 - [路线图](docs/roadmap.md) — 未完成规划（建造/图鉴/车库/游戏设置、Wave 8 B8 延后项）
 - [中远期备忘录](docs/memorandum.md) — 暂不排期但需留档的技术判断
@@ -66,6 +81,7 @@ python main.py
   - [颜色审计](docs/theme-design/color_audit.md) — 硬编码颜色审计与主题系统治理记录
   - [Wave 8 验收](docs/theme-design/wave8_acceptance.md) — 主题体系重构的逐格验收证据与覆盖范围
   - [主题 token 映射（v1 遗留）](themes/token_mapping.md) — 已过时的 v1 字段 → 使用位置映射，仅作收敛参考
+- [归档文档](docs/archive/) — 已完成的阶段性设计稿（非现行真相源）
 
 ## 当前状态
 

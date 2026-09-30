@@ -218,6 +218,18 @@ class SessionRestoreService:
                 file_names.append("未命名文件")
         return file_names
 
+    @staticmethod
+    def restore_eol(editor_tabs, tab_id: int, file_info: dict) -> None:
+        """还原标签行尾（崩溃恢复专用，经 editor_tabs 公开接口）。
+
+        autosave 未记录 eol（旧会话）时为空串，直接跳过 → 回落磁盘行尾。
+        调用方必须保证顺序为 内容 → 行尾 → mark_tab_dirty：set_tab_content
+        会重置 _saved_eol 基线，故 set_tab_eol 之后派生脏位才为真。
+        """
+        eol = file_info.get("eol", "")
+        if eol:
+            editor_tabs.set_tab_eol(tab_id, eol)
+
     def restore_after_crash(
         self,
         editor_tabs,
@@ -228,7 +240,7 @@ class SessionRestoreService:
         """恢复崩溃会话的文件内容，返回成功恢复的文件数
 
         内部只使用 editor_tabs 的公开接口（open_file / new_file /
-        set_tab_content / mark_tab_dirty），不穿透私有成员。
+        set_tab_content / set_tab_eol / mark_tab_dirty），不穿透私有成员。
 
         split_tabs（3.5.8 R6）：分屏面板列表。autosave 记录的 panel 归属
         （main / split_N）决定恢复到哪个面板——强制关闭（任务管理器）时
@@ -273,6 +285,7 @@ class SessionRestoreService:
                     tab_id = getattr(widget, 'tab_id', None) if widget is not None else None
                     if tab_id is not None:
                         target_tabs.set_tab_content(tab_id, content)
+                        self.restore_eol(target_tabs, tab_id, f)
                         target_tabs.mark_tab_dirty(tab_id)
                         restored += 1
             else:
@@ -282,6 +295,7 @@ class SessionRestoreService:
                     tab_id = getattr(widget, 'tab_id', None) if widget is not None else None
                     if tab_id is not None:
                         target_tabs.set_tab_content(tab_id, content)
+                        self.restore_eol(target_tabs, tab_id, f)
                         target_tabs.mark_tab_dirty(tab_id)
                         restored += 1
 

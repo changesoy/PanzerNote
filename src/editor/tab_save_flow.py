@@ -598,6 +598,8 @@ class TabSaveFlowMixin(_EditorTabWidgetContract):
                 "filepath": shared_doc.filepath,
                 "content": content,
                 "encoding": shared_doc.encoding,
+                # 行尾随内容一并存 autosave：崩溃恢复时还原，否则回落到磁盘行尾
+                "eol": shared_doc.eol,
                 "is_new": shared_doc.filepath is None,
                 "is_modified": True,
                 "doc_key": doc_key,

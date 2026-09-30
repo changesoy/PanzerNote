@@ -296,6 +296,20 @@ class SharedDocument(QObject):
         self._eol_undo.clear()
         self._eol_redo.clear()
 
+    def set_eol(self, eol: str) -> bool:
+        """直接设置行尾，不登记撤销步（崩溃/会话恢复专用）。
+
+        与 record_eol_change 的区别：恢复场景还原的是「文件当前应有的行尾」，
+        不是一次用户操作，故不产生可撤销记录；脏位仍由 _refresh_dirty 按
+        「当前 eol ≠ 已落盘行尾(_saved_eol)」派生——内容与磁盘相同、仅行尾
+        不同时同样置脏。
+        """
+        if eol == self.eol:
+            return False
+        self.eol = eol
+        self._refresh_dirty()
+        return True
+
     # ═══════════════ 保存状态 ═══════════════
 
     @property

@@ -1543,6 +1543,13 @@ class EditorTabWidget(TabEditCommandsMixin, TabSettingsMixin, TabFileOpsMixin, T
         shared_doc.set_content(content)
         return True
 
+    def set_tab_eol(self, tab_id: int, eol: str) -> bool:
+        """设置指定标签的行尾（供崩溃恢复还原，不经撤销记账）。"""
+        editor = self._editor_for_tab_id(tab_id)
+        if editor is None or editor.shared_doc is None:
+            return False
+        return editor.shared_doc.set_eol(eol)
+
     def mark_tab_dirty(self, tab_id: int) -> None:
         """将指定标签标记为已修改（供崩溃恢复后的脏标记）。
 

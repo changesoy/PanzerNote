@@ -88,6 +88,7 @@ class TempSessionManager:
           - filepath: Optional[str]  原始文件路径，None 表示未命名
           - content: str  编辑器内容
           - encoding: str
+          - eol: str  行尾类型（LF/CRLF/CR/Mixed），恢复时随内容一并还原
           - is_new: bool
           - is_modified: bool
         """
@@ -143,6 +144,8 @@ class TempSessionManager:
                 "autosave_path": autosave_name,
                 "display_name": display_name,
                 "encoding": encoding,
+                # 行尾随内容一并存：旧会话无此键 → 空串，恢复时回落磁盘行尾
+                "eol": info.get("eol", ""),
                 "dirty": True,
                 "is_new": is_new,
                 # 3.5.8（R6）：面板归属——崩溃恢复按此路由回原面板（main / split_N）

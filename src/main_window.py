@@ -1868,6 +1868,9 @@ class MainWindow(QMainWindow):
         因此本方法不得省去——pending 路径曾因缺少它导致 UI 停在旧主题壳上。
         """
         self.config.set_view_setting("theme", f"{package_id}/{variant_id}")
+        # 用户显式动作（切主题）必须立即落盘：settings 默认走合并写穿（见
+        # SettingsStore._schedule_save），进程被强杀时可能还没轮到刷盘。
+        self.config.save_settings()
         self._apply_theme()
         self.secretary.show_message("已切换主题")
 

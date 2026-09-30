@@ -11,7 +11,9 @@ v1.7.0 改动：
 
 import copy
 import os
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+
+from PyQt6.QtCore import QCoreApplication, QTimer
 
 from ..security.file_guard import FileGuard
 from .path_resolver import PathResolver, load_json, save_json, merge_dicts
@@ -94,6 +96,11 @@ class SettingsStore:
         "shortcuts": {}
     }
 
+    # 变更即落盘的合并窗口（毫秒）：分割条拖动每像素都会写设置
+    # （split_ratio / preview_width 等），窗口太短起不到合并效果，
+    # 太长则「改完设置立刻强杀」易丢——300ms 与预览刷新定时器同量级。
+    _PERSIST_DEBOUNCE_MS = 300
+
     def __init__(
         self,
         path_resolver: PathResolver,
@@ -102,6 +109,7 @@ class SettingsStore:
         self._path_resolver = path_resolver
         self._file_guard = file_guard
         self._settings: Dict[str, Any] = {}
+        self._save_timer: Optional[QTimer] = None
 
     # === 读写 ===
 
@@ -115,7 +123,9 @@ class SettingsStore:
         )
 
     def save(self) -> None:
-        """保存 settings.json"""
+        """保存 settings.json（同步落盘，取消待刷的合并定时器）"""
+        if self._save_timer is not None and self._save_timer.isActive():
+            self._save_timer.stop()
         config_dir = self._path_resolver.get_config_dir()
         os.makedirs(config_dir, exist_ok=True)
         save_json(
@@ -123,6 +133,24 @@ class SettingsStore:
             os.path.join(config_dir, "settings.json"),
             self._settings,
         )
+
+    def _schedule_save(self) -> None:
+        """变更即落盘：短时间内的连续变更合并为一次写盘。
+
+        分割条拖动每像素都会写设置（split_ratio / preview_width 等），
+        逐次落盘会造成写盘风暴，故用单次触发的定时器合并；
+        无事件循环时（单元测试 / 启动早期）退化为同步落盘，保证语义可预期。
+        """
+        if QCoreApplication.instance() is None:
+            self.save()
+            return
+        if self._save_timer is None:
+            # 无 parent：SettingsStore 非 QObject；靠 Python 引用维持存活
+            self._save_timer = QTimer()
+            self._save_timer.setSingleShot(True)
+            self._save_timer.setInterval(self._PERSIST_DEBOUNCE_MS)
+            self._save_timer.timeout.connect(self.save)
+        self._save_timer.start()
 
     def as_dict(self) -> Dict[str, Any]:
         """返回深拷贝，避免调用方拿到内部引用后绕过封装修改状态"""
@@ -138,6 +166,7 @@ class SettingsStore:
 
     def set_initialized(self, value: bool) -> None:
         self._settings["initialized"] = value
+        self._schedule_save()
 
     # === 设置访问 ===
 
@@ -148,6 +177,7 @@ class SettingsStore:
         if namespace not in self._settings:
             self._settings[namespace] = {}
         self._settings[namespace][key] = value
+        self._schedule_save()
 
     def get_editor_setting(self, key: str, default: Any = None) -> Any:
         return self._get_ns_setting("editor", key, default)
@@ -208,6 +238,7 @@ class SettingsStore:
 
     def set_setting(self, key: str, value: Any) -> None:
         self._settings[key] = value
+        self._schedule_save()
 
     def reset_to_defaults(self) -> None:
         self._settings = copy.deepcopy(self.DEFAULT_SETTINGS)

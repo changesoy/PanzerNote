@@ -94,11 +94,12 @@ class SessionRestoreService:
 
             for entry in pre_show_entries:
                 if entry.get("is_new"):
-                    # 3.5.10：未命名文件恢复（沿用编号，dirty 内容一并还原）
+                    # 3.5.10：未命名文件恢复（沿用编号，dirty 内容与行尾一并还原）
                     editor_tabs.restore_untitled_file(
                         entry.get("untitled_number") or 1,
                         entry.get("display_name", "未命名"),
                         entry.get("content"),
+                        entry.get("eol", ""),
                     )
                     continue
                 filepath = entry.get("path")
@@ -240,7 +241,8 @@ class SessionRestoreService:
         """恢复崩溃会话的文件内容，返回成功恢复的文件数
 
         内部只使用 editor_tabs 的公开接口（open_file / new_file /
-        set_tab_content / set_tab_eol / mark_tab_dirty），不穿透私有成员。
+        find_reusable_untitled_tab_id / set_tab_content / set_tab_eol /
+        mark_tab_dirty），不穿透私有成员。
 
         split_tabs（3.5.8 R6）：分屏面板列表。autosave 记录的 panel 归属
         （main / split_N）决定恢复到哪个面板——强制关闭（任务管理器）时
@@ -251,6 +253,9 @@ class SessionRestoreService:
         restored = 0
         panel_index = {f"split_{i}": t for i, t in enumerate(split_tabs or [])}
         panel_index["main"] = editor_tabs
+        # 未命名条目复用空标签的去重集合：按面板（tabs 对象）分开维护，
+        # 因为 tab_id 是各面板内部的局部编号（跨面板可能重号）。
+        consumed_by_panel: dict = {}
 
         for f in files:
             original_path = f.get("original_path", "")
@@ -289,15 +294,34 @@ class SessionRestoreService:
                         target_tabs.mark_tab_dirty(tab_id)
                         restored += 1
             else:
-                index = target_tabs.new_file()
-                if index >= 0:
-                    widget = target_tabs.widget(index)
-                    tab_id = getattr(widget, 'tab_id', None) if widget is not None else None
-                    if tab_id is not None:
-                        target_tabs.set_tab_content(tab_id, content)
-                        self.restore_eol(target_tabs, tab_id, f)
-                        target_tabs.mark_tab_dirty(tab_id)
-                        restored += 1
+                # 未命名条目：优先复用启动默认空标签（同一轮内已复用的不再二次复用），
+                # 取不到才新建，避免恢复后多出重复的「未命名N」标签。
+                consumed = consumed_by_panel.setdefault(target_tabs, set())
+                tab_id = self._acquire_untitled_tab_id(target_tabs, consumed)
+                if tab_id is not None:
+                    target_tabs.set_tab_content(tab_id, content)
+                    self.restore_eol(target_tabs, tab_id, f)
+                    target_tabs.mark_tab_dirty(tab_id)
+                    restored += 1
 
         session_manager.remove_recovered_session(session_dir)
         return restored
+
+    @staticmethod
+    def _acquire_untitled_tab_id(target_tabs, consumed: set) -> Optional[int]:
+        """为一条未命名恢复条目取得目标 tab_id：优先复用空未命名标签。
+
+        `find_reusable_untitled_tab_id` 返回的面板内 tab_id 一旦被本轮恢复消费
+        即记入 consumed，避免多个未命名条目挤进同一标签（tab_id 为面板内局部量，
+        故 consumed 按面板分开维护）。无可复用标签时回退 new_file() 新建。
+        """
+        reusable: Optional[int] = target_tabs.find_reusable_untitled_tab_id()
+        if reusable is not None and reusable not in consumed:
+            consumed.add(reusable)
+            return reusable
+        index = target_tabs.new_file()
+        if index is None or index < 0:
+            return None
+        widget = target_tabs.widget(index)
+        tab_id = getattr(widget, 'tab_id', None) if widget is not None else None
+        return int(tab_id) if tab_id is not None else None

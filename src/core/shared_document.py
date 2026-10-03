@@ -227,13 +227,20 @@ class SharedDocument(QObject):
     # ═══════════════ 行尾变更的记账与撤销（1.8） ═══════════════
 
     def _refresh_dirty(self) -> None:
-        """dirty = Qt 文本脏 或 行尾偏离已落盘值。
+        """dirty = Qt 文本脏 或 行尾偏离已落盘值（仅当文档存在换行时）。
 
         Qt 的 isModified 由撤销栈干净点推导，覆盖不到文档外元数据（行尾），
         故行尾维度单独比较：当前 eol ≠ 已落盘行尾即意味着「还有变更未落盘」。
         做成派生量而非粘滞标志位，来回切换才不会累积脏（切回原行尾即回干净）。
+
+        行尾只在「存在换行符的位置」生效：无换行文档的 LF / CRLF 序列化字节
+        完全相同（写盘结果一字不差），此时切行尾置脏等于提示用户保存一个不可能
+        变化的文件。故以 blockCount() > 1 判定是否存在换行——O(1) 且有缓存；
+        **禁止**改用 to_plain_text() 扫描（O(文档长度)，本函数每次按键都会走）。
         """
-        dirty = self.qdocument.isModified() or self.eol != self._saved_eol
+        dirty = self.qdocument.isModified() or (
+            self.eol != self._saved_eol and self.qdocument.blockCount() > 1
+        )
         if self._dirty != dirty:
             self._dirty = dirty
             self.dirtyChanged.emit(dirty)

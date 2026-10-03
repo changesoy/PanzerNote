@@ -366,18 +366,55 @@ class EditorTabWidget(TabEditCommandsMixin, TabSettingsMixin, TabFileOpsMixin, T
         untitled_number: int,
         display_name: str,
         content: Optional[str] = None,
+        eol: str = "",
     ) -> int:
         """3.5.10：按持久化配置恢复未命名标签（沿用原编号并标记已用）。
 
-        content 非 None 时写入内容并标记 dirty（编辑过的未命名现场还原）。
+        content 非空时写入内容并标记 dirty（编辑过的未命名现场还原）；content
+        为空（None / ""）时保持新建空白语义——用户从未输入内容，不该显示未保存，
+        也不该触发关闭保存提示。
+
+        eol（可选）：workspace 记录的行尾。非空时在写入内容之后应用
+        （set_eol 直接还原行尾、不登记撤销步）；空串跳过、回落默认 LF，
+        兼容没有该字段的旧 workspace。
         """
-        index = self._create_untitled_tab(untitled_number, display_name or f"未命名{untitled_number}.txt")
-        if content is not None:
-            tab_id = getattr(self.widget(index), 'tab_id', None)
-            if tab_id is not None:
-                self.set_tab_content(tab_id, content)
-                self.mark_tab_dirty(tab_id)
+        index = self._create_untitled_tab(
+            untitled_number, display_name or f"未命名{untitled_number}.txt"
+        )
+        tab_id = getattr(self.widget(index), 'tab_id', None)
+        if tab_id is None:
+            return int(index)
+        if content:
+            # 未落盘的草稿：set_tab_content 会把保存基线重置为刚写入的内容，
+            # 故须显式标记 modified——这是「有一份未写盘的草稿」的正确表达
+            # （空内容不进入此分支，自然保持干净）。
+            self.set_tab_content(tab_id, content)
+            self.mark_tab_dirty(tab_id)
+        if eol:
+            editor = self._editor_for_tab_id(tab_id)
+            if editor is not None and editor.shared_doc is not None:
+                editor.shared_doc.set_eol(eol)
         return int(index)
+
+    def find_reusable_untitled_tab_id(self) -> Optional[int]:
+        """返回第一个可复用的空未命名标签的 tab_id，无则 None。
+
+        可复用 = 未命名（filepath 为 None）+ 内容为空 + 未脏。崩溃恢复用它
+        复用启动默认空标签，避免恢复后再多出重复的「未命名N」标签。空内容判定
+        走 qdocument.isEmpty()（O(1)）。
+        """
+        for i in range(self.count()):
+            widget = self.widget(i)
+            tab_id = getattr(widget, 'tab_id', None)
+            if tab_id is None:
+                continue
+            shared_doc = getattr(widget, "shared_doc", None)
+            if shared_doc is None or shared_doc.filepath is not None:
+                continue
+            if shared_doc.dirty or not shared_doc.qdocument.isEmpty():
+                continue
+            return int(tab_id)
+        return None
 
     def _create_untitled_tab(self, num: int, title: str) -> int:
         """创建未命名标签页（new_file / restore_untitled_file 共用）
@@ -1511,10 +1548,11 @@ class EditorTabWidget(TabEditCommandsMixin, TabSettingsMixin, TabFileOpsMixin, T
                     view_state.cursor_position = cursor
                     view_state.scroll_position = scroll
             if shared_doc.filepath is None:
-                # 未命名条目：dirty 时携带即时内容（恢复编辑现场）
+                # 未命名条目：dirty 时携带即时内容（恢复编辑现场）；eol 一并持久化
                 content = shared_doc.to_plain_text() if shared_doc.dirty else None
                 entries.append(workspace_entries.untitled_entry(
-                    shared_doc.display_name, shared_doc.untitled_number, content))
+                    shared_doc.display_name, shared_doc.untitled_number, content,
+                    shared_doc.eol))
             else:
                 if editor is None:
                     continue
